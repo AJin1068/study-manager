@@ -1,0 +1,4 @@
+[
+  { "outcome": "applied", "key": "autostart" },
+  { "outcome": "rejectedLocked", "key": "forceQuitAllowed" }
+]

@@ -1,0 +1,96 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+
+body {
+  margin: 0;
+}
+
+.app {
+  min-height: 100vh;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.tabs button[aria-pressed="true"],
+.mode-options button[aria-pressed="true"] {
+  font-weight: 700;
+  outline: 2px solid currentColor;
+}
+
+.page {
+  display: grid;
+  gap: 12px;
+  max-width: 720px;
+}
+
+.card {
+  border: 1px solid rgba(127, 127, 127, 0.4);
+  border-radius: 10px;
+  padding: 12px 16px;
+}
+
+.card h2 {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+}
+
+.mode-options {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.mode-options button {
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  padding: 10px;
+}
+
+.mode-options button:disabled {
+  opacity: 0.5;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.hint {
+  color: rgba(127, 127, 127, 1);
+  font-size: 0.85rem;
+  margin: 4px 0;
+}
+
+.locked,
+.warn {
+  color: #b45309;
+  font-weight: 600;
+}
+
+.error {
+  color: #b91c1c;
+}
+
+.message {
+  font-weight: 600;
+}
+
+.list {
+  margin: 0;
+  padding-left: 18px;
+  max-height: 220px;
+  overflow: auto;
+  font-size: 0.85rem;
+}

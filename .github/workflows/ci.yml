@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck, lint, and frontend tests
+        run: |
+          pnpm tsc
+          pnpm lint
+          pnpm test
+
+      - name: Rust check, clippy, and tests
+        working-directory: src-tauri
+        run: |
+          cargo check --all-targets
+          cargo clippy --all-targets -- -D warnings
+          cargo test
+
+      - name: Build desktop bundle
+        run: pnpm tauri build
