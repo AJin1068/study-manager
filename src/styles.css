@@ -94,3 +94,122 @@ body {
   overflow: auto;
   font-size: 0.85rem;
 }
+
+.page.wide {
+  max-width: 1100px;
+}
+
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.cal-head {
+  text-align: center;
+  font-weight: 600;
+}
+
+.cal-cell {
+  border: 1px solid rgba(127, 127, 127, 0.3);
+  border-radius: 6px;
+  min-height: 80px;
+  padding: 4px;
+  display: grid;
+  align-content: start;
+  gap: 4px;
+}
+
+.cal-cell.today {
+  outline: 2px solid currentColor;
+}
+
+.cal-cell.outside {
+  opacity: 0.5;
+}
+
+.cal-item {
+  display: grid;
+  gap: 2px;
+  font-size: 0.8rem;
+}
+
+.dialog fieldset {
+  margin: 8px 0;
+}
+
+.row button[aria-pressed="true"] {
+  font-weight: 700;
+}
+
+.countdown {
+  font-variant-numeric: tabular-nums;
+}
+
+.release-box blockquote {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-left: 3px solid currentColor;
+  user-select: none;
+}
+
+.release-box textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.undo {
+  margin-left: 12px;
+}
+
+.bar {
+  height: 10px;
+  border-radius: 5px;
+  background: rgba(127, 127, 127, 0.25);
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  background: #16a34a;
+}
+
+.week-days {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.week-days li {
+  display: grid;
+  grid-template-columns: 2em 1fr minmax(0, 14em);
+  align-items: center;
+  gap: 8px;
+}
+
+.heatmap {
+  display: grid;
+  gap: 2px;
+  overflow-x: auto;
+}
+
+.heat-row {
+  display: grid;
+  grid-template-columns: 2em repeat(24, minmax(10px, 1fr));
+  gap: 2px;
+  align-items: center;
+}
+
+.heat-cell {
+  height: 14px;
+  border-radius: 2px;
+  background: rgba(127, 127, 127, 0.15);
+}
+
+.heat-cell[data-level="1"] { background: rgba(22, 163, 74, 0.3); }
+.heat-cell[data-level="2"] { background: rgba(22, 163, 74, 0.5); }
+.heat-cell[data-level="3"] { background: rgba(22, 163, 74, 0.75); }
+.heat-cell[data-level="4"] { background: rgba(22, 163, 74, 1); }

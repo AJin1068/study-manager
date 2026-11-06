@@ -1,11 +1,14 @@
-//! Study state (manual test toggle for now), daily study mode, and mode configuration.
+//! Lock state (written only by `timer`), daily study mode, and mode configuration.
 //! Study time locks every setting, including the mode. Changes during study are rejected
 //! and recorded, never silently dropped.
 
+use chrono::TimeZone;
 use rusqlite::{Connection, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
+use crate::plan::ModeLookup;
+use crate::plan_shift::{shift_after_mode_change, ModeChange, ModeTrigger};
 use crate::settings::{Outcome, Reason, UpdateOutcome};
 use crate::store;
 
@@ -39,7 +42,7 @@ impl StudyLevel {
     }
 }
 
-#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModeConfig {
     pub level: StudyLevel,
@@ -68,38 +71,20 @@ pub struct ModeSnapshot {
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct StudyState {
-    pub studying: bool,
+pub struct LockState {
+    /// True while a planned study run holds the settings/exit/plan lock (study and the breaks
+    /// between its sets). Stored in the `study_state.studying` column.
+    pub lock_held: bool,
     pub changed_at_ms: i64,
 }
 
-pub fn is_studying(conn: &Connection) -> AppResult<bool> {
+pub fn lock_held(conn: &Connection) -> AppResult<bool> {
     Ok(store::read_study_state(conn)?.0)
 }
 
-pub fn read_state(conn: &Connection) -> AppResult<StudyState> {
-    let (studying, changed_at_ms) = store::read_study_state(conn)?;
-    Ok(StudyState { studying, changed_at_ms })
-}
-
-/// Manual "공부 중" toggle used to exercise the lock until 1-2 adds automatic timers.
-/// Toggling is always allowed (it is the switch that creates the lock) and is recorded
-/// with reason=test_toggle.
-pub fn set_study_state_test(conn: &mut Connection, studying: bool, at_ms: i64) -> AppResult<UpdateOutcome> {
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let (previous, _) = store::read_study_state(&tx)?;
-    store::put_study_state(&tx, studying, at_ms)?;
-    store::append_history(
-        &tx,
-        at_ms,
-        "studyState",
-        Some(&previous.to_string()),
-        &studying.to_string(),
-        Reason::TestToggle,
-        Outcome::Applied,
-    )?;
-    tx.commit()?;
-    Ok(UpdateOutcome::Applied { key: "studyState".into() })
+pub fn read_lock_state(conn: &Connection) -> AppResult<LockState> {
+    let (lock_held, changed_at_ms) = store::read_study_state(conn)?;
+    Ok(LockState { lock_held, changed_at_ms })
 }
 
 fn effective_level(conn: &Connection, date: &str) -> AppResult<(StudyLevel, bool)> {
@@ -109,16 +94,18 @@ fn effective_level(conn: &Connection, date: &str) -> AppResult<(StudyLevel, bool
     })
 }
 
-/// Chooses today's mode. Rejected while studying, with a rejected_locked history row.
-pub fn set_daily_mode(
+/// Chooses today's mode and, in the same transaction, shifts today's not-yet-started plans by
+/// the length difference. Rejected while the lock is held, with a rejected_locked history row.
+pub fn set_daily_mode<Tz: TimeZone>(
     conn: &mut Connection,
+    tz: &Tz,
     date: &str,
     level: StudyLevel,
     at_ms: i64,
-) -> AppResult<UpdateOutcome> {
+) -> AppResult<ModeChange> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let (current, _) = effective_level(&tx, date)?;
-    if is_studying(&tx)? {
+    if lock_held(&tx)? {
         store::append_history(
             &tx,
             at_ms,
@@ -129,8 +116,9 @@ pub fn set_daily_mode(
             Outcome::RejectedLocked,
         )?;
         tx.commit()?;
-        return Ok(UpdateOutcome::RejectedLocked { key: "studyMode".into() });
+        return Ok(ModeChange::rejected("studyMode".into()));
     }
+    let old = ModeLookup::load(&tx)?;
     store::put_daily_mode(&tx, date, level, at_ms)?;
     store::append_history(
         &tx,
@@ -141,8 +129,90 @@ pub fn set_daily_mode(
         Reason::User,
         Outcome::Applied,
     )?;
+    let trigger = ModeTrigger::Daily { date: date.to_string(), before: current, after: level };
+    let shift = shift_after_mode_change(&tx, tz, date, &old, &trigger, at_ms)?;
     tx.commit()?;
-    Ok(UpdateOutcome::Applied { key: "studyMode".into() })
+    Ok(ModeChange { outcome: UpdateOutcome::Applied { key: "studyMode".into() }, shift: Some(shift) })
+}
+
+/// Allowed minutes for any mode length (D-9).
+pub const MODE_MINUTES_RANGE: std::ops::RangeInclusive<i64> = 1..=240;
+/// Sets before a long break; below 2 there would be no short break between long ones.
+pub const SETS_BEFORE_LONG_BREAK_RANGE: std::ops::RangeInclusive<i64> = 2..=12;
+
+fn check_minutes(label: &str, value: i64) -> AppResult<()> {
+    if MODE_MINUTES_RANGE.contains(&value) {
+        return Ok(());
+    }
+    Err(AppError::Invalid(format!(
+        "{label} must be {}..={} minutes, got {value}",
+        MODE_MINUTES_RANGE.start(),
+        MODE_MINUTES_RANGE.end()
+    )))
+}
+
+/// Only easy defines a long break (PLAN: 4세트마다 긴 휴식); the other levels must leave it unset.
+fn validate_mode_config(config: &ModeConfig) -> AppResult<()> {
+    check_minutes("studyMin", config.study_min)?;
+    check_minutes("breakMin", config.break_min)?;
+    match (config.level, config.long_break_min, config.sets_before_long_break) {
+        (StudyLevel::Easy, Some(long), Some(sets)) => {
+            check_minutes("longBreakMin", long)?;
+            if SETS_BEFORE_LONG_BREAK_RANGE.contains(&sets) {
+                Ok(())
+            } else {
+                Err(AppError::Invalid(format!(
+                    "setsBeforeLongBreak must be {}..={}, got {sets}",
+                    SETS_BEFORE_LONG_BREAK_RANGE.start(),
+                    SETS_BEFORE_LONG_BREAK_RANGE.end()
+                )))
+            }
+        }
+        (StudyLevel::Easy, _, _) => Err(AppError::Invalid(
+            "easy needs both longBreakMin and setsBeforeLongBreak".into(),
+        )),
+        (_, None, None) => Ok(()),
+        _ => Err(AppError::Invalid(
+            "only easy has a long break; leave longBreakMin and setsBeforeLongBreak unset".into(),
+        )),
+    }
+}
+
+/// Edits one level's lengths and shifts today's not-yet-started plans by the resulting length
+/// difference (nothing moves unless `today` uses this level). Rejected while the lock is held,
+/// with a rejected_locked row (key `modeConfig.<level>`, before/after as JSON). Invalid input is
+/// an error and records nothing.
+pub fn update_mode_config<Tz: TimeZone>(
+    conn: &mut Connection,
+    tz: &Tz,
+    today: &str,
+    config: ModeConfig,
+    at_ms: i64,
+) -> AppResult<ModeChange> {
+    validate_mode_config(&config)?;
+    let key = format!("modeConfig.{}", config.level.as_str());
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let before = store::list_mode_configs(&tx)?
+        .into_iter()
+        .find(|c| c.level == config.level)
+        .ok_or_else(|| AppError::Internal(format!("mode config row missing for {}", config.level.as_str())))?;
+    let before_json = serde_json::to_string(&before)
+        .map_err(|e| AppError::Internal(format!("mode config serialization failed: {e}")))?;
+    let after_json = serde_json::to_string(&config)
+        .map_err(|e| AppError::Internal(format!("mode config serialization failed: {e}")))?;
+
+    if lock_held(&tx)? {
+        store::append_history(&tx, at_ms, &key, Some(&before_json), &after_json, Reason::User, Outcome::RejectedLocked)?;
+        tx.commit()?;
+        return Ok(ModeChange::rejected(key));
+    }
+    let old = ModeLookup::load(&tx)?;
+    store::put_mode_config(&tx, &config)?;
+    store::append_history(&tx, at_ms, &key, Some(&before_json), &after_json, Reason::User, Outcome::Applied)?;
+    let trigger = ModeTrigger::Config { before, after: config };
+    let shift = shift_after_mode_change(&tx, tz, today, &old, &trigger, at_ms)?;
+    tx.commit()?;
+    Ok(ModeChange { outcome: UpdateOutcome::Applied { key }, shift: Some(shift) })
 }
 
 pub fn mode_snapshot(conn: &Connection, date: &str) -> AppResult<ModeSnapshot> {
@@ -157,6 +227,15 @@ pub fn mode_snapshot(conn: &Connection, date: &str) -> AppResult<ModeSnapshot> {
 mod tests {
     use super::*;
     use crate::db::open_in_memory;
+    use chrono::Utc;
+
+    fn set_daily_mode(conn: &mut Connection, date: &str, level: StudyLevel, at_ms: i64) -> AppResult<UpdateOutcome> {
+        super::set_daily_mode(conn, &Utc, date, level, at_ms).map(|change| change.outcome)
+    }
+
+    fn update_mode_config(conn: &mut Connection, config: ModeConfig, at_ms: i64) -> AppResult<UpdateOutcome> {
+        super::update_mode_config(conn, &Utc, "2026-11-05", config, at_ms).map(|change| change.outcome)
+    }
 
     #[test]
     fn mode_config_matches_spec_values() {
@@ -178,6 +257,110 @@ mod tests {
         assert_eq!(by_level(StudyLevel::Hard).study_min, 90);
         assert_eq!(by_level(StudyLevel::Hard).break_min, 10);
         assert_eq!(by_level(StudyLevel::Hard).long_break_min, None);
+    }
+
+    fn easy(study: i64, brk: i64, long: Option<i64>, sets: Option<i64>) -> ModeConfig {
+        ModeConfig {
+            level: StudyLevel::Easy,
+            study_min: study,
+            break_min: brk,
+            long_break_min: long,
+            sets_before_long_break: sets,
+        }
+    }
+
+    fn medium(study: i64, brk: i64) -> ModeConfig {
+        ModeConfig {
+            level: StudyLevel::Medium,
+            study_min: study,
+            break_min: brk,
+            long_break_min: None,
+            sets_before_long_break: None,
+        }
+    }
+
+    fn config_of(conn: &Connection, level: StudyLevel) -> ModeConfig {
+        store::list_mode_configs(conn).expect("configs").into_iter().find(|c| c.level == level).expect("row")
+    }
+
+    #[test]
+    fn mode_config_serialization_matches_shared_fixture() {
+        let fixture_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../src/api/fixtures/mode-config.json");
+        let raw = std::fs::read_to_string(fixture_path).expect("fixture");
+        let expected: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        let conn = open_in_memory().expect("db");
+        let configs = store::list_mode_configs(&conn).expect("configs");
+        let actual = serde_json::to_value(&configs[..2]).expect("serialize");
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn mode_config_edit_is_stored_and_logged_as_json() {
+        let mut conn = open_in_memory().expect("db");
+        let outcome = update_mode_config(&mut conn, easy(30, 10, Some(25), Some(3)), 5).expect("edit");
+        assert_eq!(outcome, UpdateOutcome::Applied { key: "modeConfig.easy".into() });
+        assert_eq!(config_of(&conn, StudyLevel::Easy), easy(30, 10, Some(25), Some(3)));
+        assert_eq!(config_of(&conn, StudyLevel::Medium).study_min, 50, "other levels stay untouched");
+        let latest = &crate::settings::read_history(&conn, 1).expect("h")[0];
+        assert_eq!((latest.key.as_str(), latest.reason.as_str(), latest.outcome.as_str()), ("modeConfig.easy", "user", "applied"));
+        let before: serde_json::Value = serde_json::from_str(latest.before.as_deref().expect("before")).expect("json");
+        let after: serde_json::Value = serde_json::from_str(&latest.after).expect("json");
+        assert_eq!(before["studyMin"], 25);
+        assert_eq!(after["studyMin"], 30);
+        assert_eq!(after["setsBeforeLongBreak"], 3);
+    }
+
+    #[test]
+    fn mode_minutes_outside_one_to_240_are_rejected_without_a_record() {
+        let mut conn = open_in_memory().expect("db");
+        for bad in [medium(0, 15), medium(241, 15), medium(50, 0), medium(50, 241), medium(-5, 15)] {
+            assert!(update_mode_config(&mut conn, bad.clone(), 1).is_err(), "{bad:?}");
+        }
+        assert!(update_mode_config(&mut conn, easy(25, 5, Some(0), Some(4)), 1).is_err());
+        assert!(update_mode_config(&mut conn, easy(25, 5, Some(241), Some(4)), 1).is_err());
+        assert_eq!(config_of(&conn, StudyLevel::Medium).study_min, 50);
+        assert!(crate::settings::read_history(&conn, 10).expect("h").is_empty());
+        // Boundaries are inclusive.
+        update_mode_config(&mut conn, medium(1, 240), 2).expect("1/240");
+        update_mode_config(&mut conn, medium(240, 1), 3).expect("240/1");
+    }
+
+    #[test]
+    fn long_break_rules_apply_per_level() {
+        let mut conn = open_in_memory().expect("db");
+        assert!(update_mode_config(&mut conn, easy(25, 5, None, None), 1).is_err());
+        assert!(update_mode_config(&mut conn, easy(25, 5, Some(20), None), 1).is_err());
+        assert!(update_mode_config(&mut conn, easy(25, 5, Some(20), Some(1)), 1).is_err());
+        assert!(update_mode_config(&mut conn, easy(25, 5, Some(20), Some(13)), 1).is_err());
+        let mut hard = medium(90, 10);
+        hard.level = StudyLevel::Hard;
+        hard.long_break_min = Some(20);
+        assert!(update_mode_config(&mut conn, hard.clone(), 1).is_err());
+        hard.long_break_min = None;
+        hard.sets_before_long_break = Some(4);
+        assert!(update_mode_config(&mut conn, hard, 1).is_err());
+        assert!(crate::settings::read_history(&conn, 10).expect("h").is_empty());
+    }
+
+    #[test]
+    fn mode_config_edit_during_study_is_rejected_recorded_and_value_unchanged() {
+        let mut conn = open_in_memory().expect("db");
+        crate::testutil::set_lock_for_test(&conn, true);
+        let outcome = update_mode_config(&mut conn, medium(60, 20), 2).expect("attempt");
+        assert_eq!(outcome, UpdateOutcome::RejectedLocked { key: "modeConfig.medium".into() });
+        assert_eq!(config_of(&conn, StudyLevel::Medium), medium(50, 15));
+        let latest = &crate::settings::read_history(&conn, 1).expect("h")[0];
+        assert_eq!((latest.key.as_str(), latest.outcome.as_str()), ("modeConfig.medium", "rejected_locked"));
+        assert!(latest.after.contains("\"studyMin\":60"));
+    }
+
+    #[test]
+    fn mode_config_edit_refuses_when_lock_is_unknown() {
+        let mut conn = open_in_memory().expect("db");
+        conn.execute("DELETE FROM study_state", []).expect("delete");
+        assert!(update_mode_config(&mut conn, medium(60, 20), 1).is_err());
+        assert_eq!(config_of(&conn, StudyLevel::Medium), medium(50, 15));
+        assert!(crate::settings::read_history(&conn, 10).expect("h").is_empty());
     }
 
     #[test]
@@ -203,7 +386,7 @@ mod tests {
     #[test]
     fn mode_change_during_study_is_rejected_and_recorded() {
         let mut conn = open_in_memory().expect("db");
-        set_study_state_test(&mut conn, true, 1).expect("on");
+        crate::testutil::set_lock_for_test(&conn, true);
         let outcome = set_daily_mode(&mut conn, "2026-11-05", StudyLevel::Easy, 2).expect("set");
         assert_eq!(outcome, UpdateOutcome::RejectedLocked { key: "studyMode".into() });
         assert_eq!(store::read_daily_mode(&conn, "2026-11-05").expect("read"), None);
@@ -234,19 +417,19 @@ mod tests {
 
     /// AC8: the lock survives a restart because it is read from SQLite on every check.
     #[test]
-    fn studying_flag_is_restored_after_reopening_the_database() {
+    fn lock_flag_is_restored_after_reopening_the_database() {
         let dir = TempDir::new("restart");
         let path = dir.0.join("restart.sqlite");
         {
-            let mut conn = crate::db::open(&path).expect("open");
-            set_study_state_test(&mut conn, true, 2).expect("on");
+            let conn = crate::db::open(&path).expect("open");
+            crate::testutil::set_lock_for_test(&conn, true);
         }
         let reopened = crate::db::open(&path).expect("reopen");
-        assert!(is_studying(&reopened).expect("read"));
+        assert!(lock_held(&reopened).expect("read"));
     }
 
     /// Restart fail-open guard: deleting the lock row between launches must not reset the lock
-    /// to "not studying". The next launch seeds only brand-new databases, so the read errors.
+    /// to "lock free". The next launch seeds only brand-new databases, so the read errors.
     #[test]
     fn deleted_lock_row_is_not_reseeded_on_restart() {
         let dir = TempDir::new("deleted");
@@ -256,31 +439,20 @@ mod tests {
             conn.execute("DELETE FROM study_state", []).expect("delete");
         }
         let reopened = crate::db::open(&path).expect("reopen");
-        assert!(is_studying(&reopened).is_err(), "missing row must error, not read as free");
+        assert!(lock_held(&reopened).is_err(), "missing row must error, not read as free");
         assert!(
-            set_study_state_test(&mut crate::db::open(&path).expect("reopen again"), true, 3).is_err(),
+            store::put_study_state(&crate::db::open(&path).expect("reopen again"), true, 3).is_err(),
             "a write must not recreate the deleted row"
         );
     }
 
-    #[test]
-    fn toggle_records_test_toggle_reason() {
-        let mut conn = open_in_memory().expect("db");
-        set_study_state_test(&mut conn, true, 7).expect("on");
-        assert!(read_state(&conn).expect("state").studying);
-        let latest = &crate::settings::read_history(&conn, 1).expect("h")[0];
-        assert_eq!(latest.reason, "test_toggle");
-        assert_eq!(latest.before.as_deref(), Some("false"));
-        assert_eq!(latest.after, "true");
-    }
-
-    /// Fail-closed: a missing lock row must surface as an error, never as "not studying".
+    /// Fail-closed: a missing lock row must surface as an error, never as "lock free".
     #[test]
     fn missing_lock_row_is_an_error_not_free() {
         let conn = open_in_memory().expect("db");
         conn.execute("DELETE FROM study_state", []).expect("delete setup row");
-        assert!(is_studying(&conn).is_err());
-        assert!(read_state(&conn).is_err());
+        assert!(lock_held(&conn).is_err());
+        assert!(read_lock_state(&conn).is_err());
     }
 
     /// Every mutation that checks the lock must refuse to act when the lock is unknown:
@@ -295,10 +467,10 @@ mod tests {
     }
 
     #[test]
-    fn set_study_state_test_refuses_when_lock_is_unknown() {
-        let mut conn = open_in_memory().expect("db");
+    fn writing_the_lock_refuses_when_the_row_is_missing() {
+        let conn = open_in_memory().expect("db");
         conn.execute("DELETE FROM study_state", []).expect("delete");
-        assert!(set_study_state_test(&mut conn, true, 1).is_err());
+        assert!(store::put_study_state(&conn, true, 1).is_err());
         assert!(crate::settings::read_history(&conn, 10).expect("h").is_empty());
     }
 }

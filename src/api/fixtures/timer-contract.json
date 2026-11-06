@@ -1,0 +1,65 @@
+{
+  "idleState": {
+    "phase": "idle",
+    "runId": null,
+    "segmentId": null,
+    "setIndex": 0,
+    "setsTotal": 0,
+    "plannedEndMs": null,
+    "lockHeld": false,
+    "nowMs": 1773000000000,
+    "next": {
+      "planId": 7,
+      "name": "수학 문제풀이",
+      "subject": "수학",
+      "date": "2026-03-09",
+      "sets": 3,
+      "plannedStartMs": 1773054000000,
+      "plannedEndMs": 1773064800000
+    }
+  },
+  "breakState": {
+    "phase": "longBreak",
+    "runId": 4,
+    "segmentId": 19,
+    "setIndex": 4,
+    "setsTotal": 5,
+    "plannedEndMs": 1773057000000,
+    "lockHeld": true,
+    "nowMs": 1773056000000,
+    "next": null
+  },
+  "health": {
+    "degraded": true,
+    "consecutiveFailures": 5,
+    "restarts": 2,
+    "clockJumpMs": 60000
+  },
+  "breakEndingSoon": {
+    "runId": 4,
+    "segmentId": 19,
+    "plannedEndMs": 1773057000000,
+    "remainingMs": 60000
+  },
+  "setSummary": {
+    "runId": 4,
+    "setIndex": 2,
+    "setStudiedMs": 3000000,
+    "todayStudiedMs": 6000000,
+    "attemptCount": 3,
+    "focusCreditedMs": 2700000,
+    "focusScore": 90,
+    "firstAwayAfterMs": 600000,
+    "returnAfterMs": null
+  },
+  "runSummary": {
+    "runId": 4,
+    "setsTotal": 5,
+    "runStudiedMs": 12000000,
+    "todayStudiedMs": 12000000,
+    "attemptCount": 5,
+    "focusCreditedMs": 10800000,
+    "focusScore": 90,
+    "status": "completed"
+  }
+}

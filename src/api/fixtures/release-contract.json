@@ -1,0 +1,31 @@
+{
+  "challenge": { "challengeId": 3, "kind": "emergencyPass", "sentence": "예시 문장" },
+  "outcomes": [
+    { "outcome": "released", "kind": "emergencyPass", "expiresAtMs": 1773057000000 },
+    { "outcome": "released", "kind": "skipToday", "expiresAtMs": null },
+    { "outcome": "mismatch", "attempts": 2 },
+    { "outcome": "noChallenge" },
+    { "outcome": "nothingToRelease" },
+    { "outcome": "limitReached", "limit": 1 },
+    { "outcome": "alreadyActive", "expiresAtMs": 1773057000000 }
+  ],
+  "passStatus": {
+    "dailyLimit": 1,
+    "usedToday": 1,
+    "remainingToday": 0,
+    "activeUntilMs": 1773057000000,
+    "durationMin": 10,
+    "penaltyPoints": 5
+  },
+  "record": {
+    "id": 4,
+    "atMs": 1773056400000,
+    "date": "2026-03-09",
+    "kind": "emergency_pass",
+    "runId": 2,
+    "expiresAtMs": 1773057000000,
+    "challengeLen": 95,
+    "typingMs": 61000,
+    "penaltyPoints": 5
+  }
+}

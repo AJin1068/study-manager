@@ -1,0 +1,40 @@
+{
+  "siteRules": {
+    "config": {
+      "strict": true,
+      "allow": ["github.com", "docs.rs"],
+      "youtubePlaylists": ["PLstudy"],
+      "youtubeChannels": ["@StudyChannel"]
+    },
+    "strictDefaultAllow": ["github.com", "docs.python.org"]
+  },
+  "siteRulesDefaultAllow": {
+    "config": { "strict": false, "allow": null, "youtubePlaylists": [], "youtubeChannels": [] },
+    "strictDefaultAllow": []
+  },
+  "presetStatus": {
+    "onboarded": true,
+    "version": 1,
+    "categories": [
+      {
+        "id": "messenger",
+        "label": "메신저",
+        "defaultOn": true,
+        "enabled": false,
+        "apps": ["com.hnc.discord"],
+        "sites": ["discord.com"]
+      }
+    ]
+  },
+  "linkStatus": {
+    "transportActive": true,
+    "transportError": null,
+    "connected": false,
+    "connections": 0,
+    "lastConnectedAtMs": 1773000000000,
+    "lastDisconnectedAtMs": 1773000005000,
+    "lastDisconnectReason": "closed"
+  },
+  "hostRegistration": { "supported": true, "registered": false },
+  "coverage": { "studyMs": 3000000, "unmonitoredMs": 600000 }
+}

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:extension": "tsc --noEmit && vite build --config extension/vite.config.ts",
     "tsc": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",

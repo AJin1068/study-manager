@@ -1,0 +1,30 @@
+{
+  "studyApp": {
+    "id": 2,
+    "kind": "app",
+    "appId": "com.microsoft.vscode",
+    "enabled": true,
+    "createdAtMs": 1773000000000
+  },
+  "setup": {
+    "studyAppCount": 0,
+    "needsStudyApps": true,
+    "titleAccess": "denied",
+    "sensorsAvailable": true
+  },
+  "selfReportStatus": {
+    "shortcut": "CommandOrControl+Alt+Shift+D",
+    "shortcutRegistered": false,
+    "shortcutError": "already registered"
+  },
+  "checkinPrompt": {
+    "runId": 3,
+    "segmentId": 5,
+    "askedAtMs": 1773000000000
+  },
+  "outcomes": {
+    "recorded": { "status": "recorded" },
+    "acknowledged": { "status": "acknowledged" },
+    "ignored": { "status": "ignored", "reason": "notStudying" }
+  }
+}

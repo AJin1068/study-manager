@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Main window capabilities. UI calls only app commands and events; OS access stays in the Rust core.",
   "windows": ["main"],
-  "permissions": ["core:default", "core:event:default"]
+  "permissions": ["core:default", "core:event:default", "notification:default"]
 }

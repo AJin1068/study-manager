@@ -5,7 +5,8 @@
 ## 1. 프로젝트 개요
 
 - 목적: 공부 시간 관리 데스크톱 앱. 공부 중 방해 요소(앱, 탭)를 관리하고 기록한다.
-- 현재 단계: **설계 완료, 1단계(PC 차단기 MVP) 착수 전. 소스 코드는 아직 없다.** 요청 없이 코드를 만들지 않는다.
+- 현재 단계: **1단계(PC 차단기 MVP) 진행 중. 1단계-1(뼈대) 완료, 1단계-2(캘린더 계획·타이머) 진행 중.**
+- 모듈 구조: `src-tauri/src/` — `commands/`(`mod.rs`: AppState·종료 게이트, `settings`·`study`·`downtime`·`power`: Tauri command), `db/`(`mod.rs`, `migrations/mNNN_*.sql`), `store.rs`(SQL 접근), `settings.rs`, `study.rs`(잠금·공부 모드), `downtime.rs`, `power.rs`, `platform/`, `tray.rs`, `clock.rs`, `error.rs`. UI는 `src/` — `api/`(`index.ts`가 `settings`·`study`·`downtime` 재수출), `hooks/`, `pages/`. CI: `.github/workflows/ci.yml`(macOS·Windows).
 
 ## 1-1. 요구사항 기준 (가장 먼저 읽을 것)
 
@@ -90,6 +91,8 @@
 - 설계 결정은 `docs/`에 짧게 기록한다. 요청 없이 새 문서를 대량으로 만들지 않는다.
 - 새 파일보다 기존 파일 수정을 우선한다.
 - 이 AGENTS.md는 규칙 변경 시 같은 커밋에서 함께 갱신한다.
+- 용어: 잠금 상태는 `lock_held`(Rust `study::lock_held`, `LockState`, TS `lockHeld`)이다. DB 컬럼 `study_state.studying`은 이력상 이름이며 같은 의미다.
+- 개인정보 스키마 가드: 테이블·컬럼 이름에 `title`, `window_title`, `url`, `typed*`, `sentence*`를 쓰지 않는다. `db` 테스트 `privacy_schema_guard`가 `sqlite_master`로 검사하며 모든 마이그레이션이 통과해야 한다. 로그 검증은 `testutil::capture_logs`를 쓴다.
 
 ## 10. 열린 질문 (결정 전까지 보류)
 
@@ -100,5 +103,5 @@
 결정됨:
 - 종료 대상 선정 기준: 블랙리스트(카테고리 프리셋, PLAN.md 2번). 브라우저는 엄격 모드(허용 목록) 선택 가능.
 - Supabase 동기화 범위: 상태·횟수·계획·공유 위키만. 탭 기록과 창 제목은 제외 (6절).
-- 공부 중 잠금 범위: 공부 모드를 포함한 전체 설정 잠금. 공부 외 시간에만 변경 (PLAN.md 13, 17번).
+- 잠금 범위: 계획된 공부 run 전체(공부+휴식) 동안 전체 설정·종료·계획 변경 잠금. run 밖에서만 변경 (PLAN.md 13, 17번, D-1).
 - 공부 모드 기본 길이: 쉬움 25/5분(4세트마다 20분), 중간 50/15분, 어려움 90/10분 (PLAN.md 17번).

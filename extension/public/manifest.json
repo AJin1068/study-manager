@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Study Manager 브라우저 연결",
+  "description": "공부 시간에 차단 사이트로 이동하면 Study Manager 앱의 판단에 따라 차단 화면으로 바꿉니다.",
+  "version": "0.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwap5ablBiT0CmOrR2uks1NPngTWW/uJTpMfPKPUb+TBXcKraUTqSdVlCYs57ZodSI/MouEMHFICbQTRcNkXisI0Bns8ra52E6fjCAb2oUPAQtge0Ny5UNVRAeBFwS4gcSVTH/pcSMkEoXlNo+TzgJdNESw81bHgbqlVxRbiOJ4QBTyFF64hWmEiKZvSY7IYZW7ZLdWwbf+uyKZ0Ba1v/A2IvGI0Sv9F+CDEKTOosspYHAIp4soAtxfw3aqeGc14f6f2b3ghVSE1v34MxMVI6zhI5OEA6LRCR03aDGiM/Tt3UCnJrPoxTYH0xbb1HnEEz2GFPQTyyMr+ljgChERZ2YQIDAQAB",
+  "minimum_chrome_version": "116",
+  "permissions": ["nativeMessaging", "tabs", "webNavigation"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_title": "Study Manager 연결 상태" }
+}

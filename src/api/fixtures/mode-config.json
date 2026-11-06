@@ -1,0 +1,4 @@
+[
+  { "level": "easy", "studyMin": 25, "breakMin": 5, "longBreakMin": 20, "setsBeforeLongBreak": 4 },
+  { "level": "medium", "studyMin": 50, "breakMin": 15, "longBreakMin": null, "setsBeforeLongBreak": null }
+]

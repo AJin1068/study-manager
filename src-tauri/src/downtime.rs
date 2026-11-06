@@ -119,6 +119,36 @@ pub fn record_measured_sleep(conn: &Connection, interval: Interval) -> AppResult
     store::insert_downtime(conn, DowntimeKind::Sleep, interval, false)
 }
 
+/// Time the app was off or the machine asleep inside a window, per kind. `forced_quit` is the
+/// "app killed" time the relaunch watcher bridges; it is shown, never hidden, in statistics.
+#[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DowntimeSummary {
+    pub sleep_ms: i64,
+    pub forced_quit_ms: i64,
+    pub forced_quit_count: i64,
+}
+
+/// Sums each kind's overlap with `[from_ms, to_ms)`. Rows of one kind never overlap each other
+/// (overlap is removed before insert); rows of different kinds are reported separately.
+pub fn summarize(records: &[DowntimeRecord], from_ms: i64, to_ms: i64) -> DowntimeSummary {
+    let mut out = DowntimeSummary { sleep_ms: 0, forced_quit_ms: 0, forced_quit_count: 0 };
+    for record in records {
+        let overlap = record.end_at_ms.min(to_ms) - record.start_at_ms.max(from_ms);
+        if overlap <= 0 {
+            continue;
+        }
+        match record.kind {
+            DowntimeKind::Sleep => out.sleep_ms += overlap,
+            DowntimeKind::ForcedQuit => {
+                out.forced_quit_ms += overlap;
+                out.forced_quit_count += 1;
+            }
+        }
+    }
+    out
+}
+
 /// Closes every session that never recorded a clean exit, writing a forced_quit row from its
 /// last heartbeat to `now_ms`. Each session is marked `clean_exit = 0` so it is recorded once.
 pub fn recover_unclean_sessions(conn: &mut Connection, now_ms: i64) -> AppResult<usize> {
@@ -202,6 +232,21 @@ mod tests {
     fn short_gap_within_threshold_writes_nothing() {
         let conn = open_in_memory().expect("db");
         assert!(record_estimated_gap(&conn, 0, 30_000).expect("gap").is_empty());
+    }
+
+    #[test]
+    fn summary_clips_to_the_window_and_counts_forced_quits() {
+        let rec = |kind, start_at_ms, end_at_ms| DowntimeRecord { id: 0, kind, start_at_ms, end_at_ms, estimated: false };
+        let rows = [
+            rec(DowntimeKind::Sleep, 0, 100),
+            rec(DowntimeKind::ForcedQuit, 150, 250),
+            rec(DowntimeKind::ForcedQuit, 400, 500),
+            rec(DowntimeKind::ForcedQuit, 600, 700),
+        ];
+        let s = summarize(&rows, 50, 450);
+        assert_eq!((s.sleep_ms, s.forced_quit_ms, s.forced_quit_count), (50, 150, 2));
+        let empty = summarize(&rows, 250, 400);
+        assert_eq!((empty.sleep_ms, empty.forced_quit_ms, empty.forced_quit_count), (0, 0, 0));
     }
 
     #[test]

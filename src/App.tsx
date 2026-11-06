@@ -1,8 +1,11 @@
 import { useState } from 'react';
+import { FirstRunPresets } from './components/FirstRunPresets';
+import { CalendarScreen } from './pages/CalendarScreen';
+import { DashboardScreen } from './pages/DashboardScreen';
 import { MainScreen } from './pages/MainScreen';
 import { SettingsScreen } from './pages/SettingsScreen';
 
-type Page = 'main' | 'settings';
+type Page = 'main' | 'calendar' | 'dashboard' | 'settings';
 
 export function App() {
   const [page, setPage] = useState<Page>('main');
@@ -13,11 +16,21 @@ export function App() {
         <button type="button" aria-pressed={page === 'main'} onClick={() => setPage('main')}>
           메인
         </button>
+        <button type="button" aria-pressed={page === 'calendar'} onClick={() => setPage('calendar')}>
+          계획
+        </button>
+        <button type="button" aria-pressed={page === 'dashboard'} onClick={() => setPage('dashboard')}>
+          대시보드
+        </button>
         <button type="button" aria-pressed={page === 'settings'} onClick={() => setPage('settings')}>
           설정
         </button>
       </nav>
-      {page === 'main' ? <MainScreen /> : <SettingsScreen />}
+      <FirstRunPresets />
+      {page === 'main' && <MainScreen />}
+      {page === 'calendar' && <CalendarScreen />}
+      {page === 'dashboard' && <DashboardScreen />}
+      {page === 'settings' && <SettingsScreen />}
     </div>
   );
 }

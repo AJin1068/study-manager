@@ -1,0 +1,42 @@
+{
+  "changes": [
+    { "outcome": { "outcome": "applied", "key": "plan" }, "planId": 7 },
+    { "outcome": { "outcome": "rejectedLocked", "key": "plan" }, "planId": null }
+  ],
+  "occurrence": {
+    "planId": 7,
+    "seriesId": 7,
+    "name": "수학 문제풀이",
+    "subject": "수학",
+    "date": "2026-03-09",
+    "sourceDate": "2026-03-02",
+    "startTime": "20:00",
+    "sets": 3,
+    "moved": true,
+    "level": "medium",
+    "durationMin": 180,
+    "plannedStartMs": 1773054000000,
+    "plannedEndMs": 1773064800000,
+    "eligibleForMissed": true
+  },
+  "historyEntry": {
+    "id": 3,
+    "planId": 7,
+    "atMs": 1773000000000,
+    "action": "move",
+    "reasonCode": "postponed",
+    "reasonText": null,
+    "beforeJson": "{\"date\":\"2026-03-02\",\"sets\":3,\"time\":\"20:00\"}",
+    "afterJson": "{\"date\":\"2026-03-09\",\"sets\":3,\"time\":\"20:00\"}",
+    "outcome": "applied",
+    "batchId": null
+  },
+  "stats": {
+    "month": "2026-03",
+    "postponedCount": 3,
+    "bySubject": [
+      { "subject": "수학", "count": 2 },
+      { "subject": "영어", "count": 1 }
+    ]
+  }
+}

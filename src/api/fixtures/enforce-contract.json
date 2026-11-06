@@ -1,0 +1,44 @@
+{
+  "entry": {
+    "id": 3,
+    "kind": "app",
+    "pattern": "com.example.game",
+    "source": "user",
+    "category": null,
+    "enabled": true,
+    "createdAtMs": 1773000000000
+  },
+  "status": {
+    "mode": "dryRun",
+    "graceWaitSec": 10,
+    "forceQuitAllowed": false,
+    "active": true,
+    "enforceConfirmation": "실행 모드를 켭니다",
+    "recentEvents": [
+      {
+        "id": 7,
+        "atMs": 1773000001000,
+        "runId": 4,
+        "segmentId": 19,
+        "targetKind": "app",
+        "targetId": "com.example.game",
+        "action": "would_terminate",
+        "mode": "dryRun",
+        "detailCode": null
+      },
+      {
+        "id": 8,
+        "atMs": 1773000002000,
+        "runId": null,
+        "segmentId": null,
+        "targetKind": "app",
+        "targetId": "com.example.game",
+        "action": "failed",
+        "mode": "enforce",
+        "detailCode": "os_refused"
+      }
+    ]
+  },
+  "runningApp": { "id": "com.apple.finder", "displayName": "Finder", "isProtected": true },
+  "attempt": { "targetId": "com.example.game", "action": "terminate_requested" }
+}

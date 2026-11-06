@@ -1,0 +1,18 @@
+{
+  "status": {
+    "balance": 60,
+    "earned": 90,
+    "level": 4,
+    "stage": "sprout",
+    "stageLabel": "새싹",
+    "nextLevelAt": 140
+  },
+  "entry": {
+    "id": 3,
+    "atMs": 1773000000000,
+    "delta": 20,
+    "reasonCode": "focus_window",
+    "refKey": "focus30:run:12:win:0"
+  },
+  "stages": ["seed", "sprout", "small_tree", "forest_spirit"]
+}

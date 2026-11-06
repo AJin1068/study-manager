@@ -4,12 +4,19 @@ import {
   onResumed,
   type ResumedPayload,
   type SettingKey,
-} from '../api/commands';
+  type SettingValue,
+} from '../api';
 import { describeOutcome, useStudyLock } from '../hooks/useStudyLock';
 import { useAsync } from '../hooks/useAsync';
 import { asyncStatus, type AsyncStatus } from '../hooks/useAsyncStatus';
+import { ModeConfigEditor } from './ModeConfigEditor';
+import { BlockListPanel } from '../components/BlockListPanel';
+import { PresetPanel } from '../components/PresetPanel';
+import { SiteRulesPanel } from '../components/SiteRulesPanel';
+import { ModeShiftToast } from '../components/ModeShiftToast';
+import type { ModeNotice } from './modeShiftNotice';
 
-const LOCK_REASON = '공부 중이라 잠겨 있습니다. 공부 외 시간에 바꿀 수 있습니다.';
+const LOCK_REASON = '계획된 공부 진행 중이라 잠겨 있습니다. 진행이 끝난 뒤에 바꿀 수 있습니다.';
 
 function formatTime(ms: number): string {
   return new Date(ms).toLocaleString('ko-KR');
@@ -25,10 +32,12 @@ export function SettingsScreen() {
   const settings = useAsync(commands.getSettings);
   const autostartOs = useAsync(commands.getAutostartStatus);
   const power = useAsync(commands.getPowerStatus);
+  const modes = useAsync(commands.getModeConfig);
   const history = useAsync(commands.getSettingHistory);
   const { reload: reloadDowntime, ...downtime } = useAsync(commands.getDowntimeRecords);
   const [resumed, setResumed] = useState<ResumedPayload | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [modeNotice, setModeNotice] = useState<ModeNotice | null>(null);
 
   useEffect(() => {
     let disposed = false;
@@ -49,7 +58,7 @@ export function SettingsScreen() {
     };
   }, [reloadDowntime]);
 
-  async function change(key: SettingKey, value: boolean) {
+  async function change(key: SettingKey, value: SettingValue) {
     try {
       const outcome = await commands.updateSetting(key, value);
       setMessage(describeOutcome(outcome));
@@ -64,6 +73,19 @@ export function SettingsScreen() {
     history.reload();
   }
 
+  function modeAttempted(notice: ModeNotice) {
+    setModeNotice(notice);
+    lock.refresh();
+    modes.reload();
+    history.reload();
+  }
+
+  function blockAttempted(text: string) {
+    setMessage(text);
+    lock.refresh();
+    history.reload();
+  }
+
   const settingsStatus = asyncStatus(settings.data, settings.error);
   const autostartStatus = asyncStatus(autostartOs.data, autostartOs.error);
   const powerStatus = asyncStatus(power.data, power.error);
@@ -71,7 +93,7 @@ export function SettingsScreen() {
 
   return (
     <main className="page">
-      {lock.studying && <p className="locked" role="note">{LOCK_REASON}</p>}
+      {lock.lockHeld && <p className="locked" role="note">{LOCK_REASON}</p>}
       {lock.error !== null && <p className="error" role="alert">잠금 상태를 읽지 못해 설정을 바꿀 수 없습니다: {lock.error}</p>}
 
       <section className="card" aria-labelledby="general-title">
@@ -105,11 +127,59 @@ export function SettingsScreen() {
               강제 종료 허용
             </label>
             <p className="hint">
-              체크 내용은 기록만 합니다. 실제 강제 종료 집행은 1단계-3에서 붙습니다.
+              실행 모드에서 정상 종료 요청과 유예 시간 뒤에도 앱이 남아 있을 때만 강제 종료합니다. 저장하지 않은 작업이 사라질 수 있습니다.
+            </p>
+
+            <label className="row">
+              <input
+                type="checkbox"
+                checked={current.recheckPlanOnWake}
+                onChange={(e) => void change('recheckPlanOnWake', e.target.checked)}
+              />
+              수면에서 깨면 계획 다시 확인 표시
+            </label>
+            <p className="hint">
+              표시만 바뀝니다. 계획 재확인 자체는 항상 수행됩니다.
+            </p>
+
+            <label className="row">
+              <input
+                type="checkbox"
+                checked={current.relaunchOnKill}
+                onChange={(e) => void change('relaunchOnKill', e.target.checked)}
+              />
+              강제 종료되면 다시 실행 (macOS)
+            </label>
+            <p className="hint">
+              앱이 강제 종료(kill)되거나 비정상 종료되면 자동으로 다시 실행합니다. 정상 종료는 다시 실행하지 않으며, 로그인 시 자동 실행이 켜져 있어야 합니다. 꺼져 있던 시간은 통계에 표시됩니다.
             </p>
           </>
         )}
       </section>
+
+      <section className="card" aria-labelledby="mode-length-title">
+        <h2 id="mode-length-title">모드 길이</h2>
+        {readError(asyncStatus(modes.data, modes.error), '모드 길이를 읽지 못했습니다')}
+        {!lock.allowed && <p className="hint">잠금 상태가 확인되지 않거나 진행 중이면 수정할 수 없습니다.</p>}
+        {(modes.data?.configs ?? []).map((config) => (
+          // Remount on a saved change so the inputs show the stored values, not stale drafts.
+          <ModeConfigEditor
+            key={`${config.level}-${config.studyMin}-${config.breakMin}-${config.longBreakMin}-${config.setsBeforeLongBreak}`}
+            config={config}
+            editable={lock.allowed}
+            onAttempted={modeAttempted}
+          />
+        ))}
+      </section>
+
+      <BlockListPanel
+        editable={lock.allowed}
+        onAttempted={blockAttempted}
+      />
+
+      <PresetPanel editable={lock.allowed} onAttempted={blockAttempted} />
+
+      <SiteRulesPanel editable={lock.allowed} onAttempted={blockAttempted} />
 
       <section className="card" aria-labelledby="sleep-title">
         <h2 id="sleep-title">수면과 꺼진 시간</h2>
@@ -150,6 +220,17 @@ export function SettingsScreen() {
       </section>
 
       {message && <p role="status" className="message">{message}</p>}
+      {modeNotice && (
+        <ModeShiftToast
+          notice={modeNotice}
+          onNotice={setModeNotice}
+          onUndoAttempted={() => {
+            lock.refresh();
+            modes.reload();
+            history.reload();
+          }}
+        />
+      )}
     </main>
   );
 }

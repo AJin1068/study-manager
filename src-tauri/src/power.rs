@@ -17,6 +17,7 @@ use crate::clock::now_ms;
 use crate::downtime::{self, Interval, HEARTBEAT_INTERVAL_MS};
 use crate::error::AppResult;
 use crate::platform::PowerEvent;
+use crate::timer::engine::{EngineHandle, WakeReason};
 use crate::store;
 
 /// Event sent to the UI after a sleep interval is recorded. The UI re-checks the plan here
@@ -132,7 +133,13 @@ pub fn on_tick(
 }
 
 /// Starts the worker. `db` and `session_id` are shared with the command handlers.
-pub fn spawn(app: AppHandle, db: Arc<Mutex<Connection>>, session_id: i64, events: Receiver<PowerEvent>) {
+pub fn spawn(
+    app: AppHandle,
+    db: Arc<Mutex<Connection>>,
+    session_id: i64,
+    events: Receiver<PowerEvent>,
+    engine: EngineHandle,
+) {
     thread::spawn(move || {
         let mut tracker = SleepTracker::default();
         let interval = Duration::from_millis(HEARTBEAT_INTERVAL_MS.unsigned_abs());
@@ -155,7 +162,10 @@ pub fn spawn(app: AppHandle, db: Arc<Mutex<Connection>>, session_id: i64, events
                         on_power_event(conn, &mut tracker, session_id, event, now_ms()?)
                     });
                     match result {
-                        Ok(Some(measured)) => emit_resumed(&app, measured, false),
+                        Ok(Some(measured)) => {
+                            emit_resumed(&app, measured, false);
+                            engine.wake(WakeReason::Resumed);
+                        }
                         Ok(None) => {}
                         Err(err) => tracing::error!(error = %err, "power event handling failed"),
                     }
@@ -164,8 +174,12 @@ pub fn spawn(app: AppHandle, db: Arc<Mutex<Connection>>, session_id: i64, events
                     let result = with_db(&db, |conn| on_tick(conn, &mut tracker, session_id, now_ms()?));
                     match result {
                         Ok(written) => {
+                            let slept = !written.is_empty();
                             for piece in written {
                                 emit_resumed(&app, piece, true);
+                            }
+                            if slept {
+                                engine.wake(WakeReason::Resumed);
                             }
                         }
                         Err(err) => tracing::error!(error = %err, "heartbeat tick failed"),

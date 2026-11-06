@@ -1,0 +1,5 @@
+[
+  { "outcome": "applied", "key": "studyMode", "shift": { "batchId": "modeshift-3", "movedCount": 1, "overflowsMidnight": false } },
+  { "outcome": "applied", "key": "modeConfig.medium", "shift": { "batchId": null, "movedCount": 0, "overflowsMidnight": true } },
+  { "outcome": "rejectedLocked", "key": "studyMode", "shift": null }
+]

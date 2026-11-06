@@ -1,37 +1,37 @@
 import { useCallback, useEffect, useState } from 'react';
-import { commands, type StudyState, type UpdateOutcome } from '../api/commands';
+import { commands, type LockState, type UpdateOutcome } from '../api';
 
 export interface LockView {
   loaded: boolean;
   /** true or false once the state is known; null while unknown (not loaded, or the load failed). */
-  studying: boolean | null;
+  lockHeld: boolean | null;
   error: string | null;
-  /** Change controls may be enabled: state known, not studying, no load error. */
+  /** Change controls may be enabled: state known, lock free, no load error. */
   allowed: boolean;
 }
 
 /**
  * Pure mapping from the last load result to what the UI may show and enable.
- * Fail-closed: an unknown or failed state is `null`, never "not studying".
+ * Fail-closed: an unknown or failed state is `null`, never "lock free".
  */
-export function lockView(state: StudyState | null, error: string | null): LockView {
-  const studying = state === null ? null : state.studying;
+export function lockView(state: LockState | null, error: string | null): LockView {
+  const lockHeld = state === null ? null : state.lockHeld;
   return {
     loaded: state !== null,
-    studying,
+    lockHeld,
     error,
-    allowed: studying === false && error === null,
+    allowed: lockHeld === false && error === null,
   };
 }
 
 /** Loads the study-lock state from the Rust core. The UI never decides the lock itself. */
 export function useStudyLock(): LockView & { refresh: () => void } {
-  const [state, setState] = useState<StudyState | null>(null);
+  const [state, setState] = useState<LockState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     commands
-      .getStudyState()
+      .getLockState()
       .then((value) => {
         setState(value);
         setError(null);
@@ -45,7 +45,7 @@ export function useStudyLock(): LockView & { refresh: () => void } {
   useEffect(() => {
     let active = true;
     commands
-      .getStudyState()
+      .getLockState()
       .then((value) => {
         if (active) setState(value);
       })
@@ -64,5 +64,5 @@ export function useStudyLock(): LockView & { refresh: () => void } {
 export function describeOutcome(outcome: UpdateOutcome): string {
   return outcome.outcome === 'applied'
     ? '변경했습니다.'
-    : '공부 중이라 변경하지 않았습니다. 시도는 기록에 남았습니다.';
+    : '계획된 공부 진행 중이라 변경하지 않았습니다. 시도는 기록에 남았습니다.';
 }
