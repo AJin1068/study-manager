@@ -32,7 +32,7 @@
 | `pnpm test` (vitest, `supabase/**`·`web/**`·`fixtures/**`·`.github/**`·`phone/**` 포함) | 루트 | 511개 통과 |
 | `cargo clippy --all-targets -- -D warnings` | `src-tauri` | 종료 0 |
 | `cargo test` | `src-tauri` | 1061개 통과 (+통합 7·4·doc 3) |
-| `cargo test` (link-protocol) | `crates/link-protocol` | 14개 통과 |
+| `cargo test` (link-protocol) | `crates/link-protocol` | 14 + 통합 6개 통과 |
 | `cargo test` (폰 코어: 55개 시험, 이 에이전트가 실행·통과) | `phone/core` | 55개 통과 |
 | `cargo check` / `cargo test` (폰 Tauri 셸, 호스트 타깃만; 안드로이드 타깃은 시도하지 못함) | `phone/src-tauri` | 종료 0 / 10개 통과 |
 | `pnpm build:web` | 루트 | 종료 0 |
