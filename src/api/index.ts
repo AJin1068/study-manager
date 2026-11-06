@@ -2,6 +2,7 @@
 // Each area lives in its own file; this index re-exports them so callers import from '../api'.
 
 import { browserCommands } from './browser';
+import { characterCommands } from './character';
 import { chatCommands } from './chat';
 import { contextCommands } from './context';
 import { dashboardCommands } from './dashboard';
@@ -13,17 +14,22 @@ import { llmCommands } from './llm';
 import { messageCommands } from './messages';
 import { planCommands } from './plan';
 import { pointsCommands } from './points';
+import { profileCommands } from './profile';
 import { quizCommands } from './quiz';
 import { releaseCommands } from './release';
 import { remoteCommands } from './remote';
 import { retroCommands } from './retro';
+import { roomCommands } from './rooms';
 import { settingsCommands } from './settings';
+import { sharedWikiCommands } from './sharedWiki';
+import { shopCommands } from './shop';
 import { studyCommands } from './study';
 import { timerCommands } from './timer';
 import { topicCommands } from './topic';
 import { wikiCommands } from './wiki';
 
 export * from './browser';
+export * from './character';
 export * from './chat';
 export * from './context';
 export * from './dashboard';
@@ -35,11 +41,15 @@ export * from './llm';
 export * from './messages';
 export * from './plan';
 export * from './points';
+export * from './profile';
 export * from './quiz';
 export * from './release';
 export * from './remote';
 export * from './retro';
+export * from './rooms';
 export * from './settings';
+export * from './sharedWiki';
+export * from './shop';
 export * from './study';
 export * from './timer';
 export * from './topic';
@@ -56,6 +66,7 @@ export const commands = {
   ...browserCommands,
   ...focusCommands,
   ...pointsCommands,
+  ...profileCommands,
   ...dashboardCommands,
   ...remoteCommands,
   ...llmCommands,
@@ -67,4 +78,8 @@ export const commands = {
   ...topicCommands,
   ...chatCommands,
   ...growthCommands,
+  ...characterCommands,
+  ...shopCommands,
+  ...roomCommands,
+  ...sharedWikiCommands,
 };

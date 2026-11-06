@@ -1,0 +1,83 @@
+{
+  "list": {
+    "rooms": [{ "roomId": "r1", "name": "스터디", "role": "owner", "memberCount": 2, "capacity": 8 }],
+    "stale": false,
+    "refreshedAtMs": 10
+  },
+  "action": { "code": "ok", "roomId": "r1" },
+  "invite": {
+    "code": "ok",
+    "inviteId": "i1",
+    "inviteCode": "ABCDE-FGHJK",
+    "expiresAtMs": 86400000,
+    "deepLink": "studymanager://join?c=ABCDEFGHJK",
+    "qrSvg": "<svg></svg>"
+  },
+  "feed": {
+    "room": {
+      "roomId": "r1",
+      "name": "스터디",
+      "role": "owner",
+      "capacity": 8,
+      "members": [
+        {
+          "userId": "u1",
+          "nickname": "가",
+          "role": "owner",
+          "isSelf": true,
+          "level": 4,
+          "presence": { "kind": "studying", "remainingSec": 600 },
+          "attemptsToday": null,
+          "character": { "species": "cat", "hat": null, "top": null, "accessory": null, "hand": null }
+        },
+        {
+          "userId": "u2",
+          "nickname": "나",
+          "role": "member",
+          "isSelf": false,
+          "level": null,
+          "presence": { "kind": "hidden", "remainingSec": null },
+          "attemptsToday": null,
+          "character": null
+        }
+      ],
+      "todayRanking": [
+        { "userId": "u1", "nickname": "가", "isSelf": true, "minutes": 30, "rank": 1 },
+        { "userId": "u2", "nickname": "나", "isSelf": false, "minutes": null, "rank": null }
+      ],
+      "weekRanking": [
+        { "userId": "u1", "nickname": "가", "isSelf": true, "minutes": 120, "rank": 1 },
+        { "userId": "u2", "nickname": "나", "isSelf": false, "minutes": null, "rank": null }
+      ],
+      "invites": [{ "inviteId": "i1", "expiresAtMs": 86400000, "maxUses": 10, "uses": 1, "revoked": false, "expired": false }],
+      "scheduleUpdatedAtMs": 5,
+      "schedule": [
+        {
+          "key": "1794013200000",
+          "name": "수학 집중",
+          "subject": "수학",
+          "sets": 2,
+          "startAtUtcMs": 1794013200000,
+          "localDate": "2026-11-07",
+          "localTime": "10:00",
+          "alreadyImported": false,
+          "inPast": false
+        }
+      ],
+      "fetchedAtMs": 10
+    },
+    "degradedCode": null,
+    "lastOkMs": 10,
+    "pollIntervalMs": 5000
+  },
+  "friendSettings": {
+    "shareLevel": true,
+    "shareStatus": true,
+    "shareWeekTime": false,
+    "shareAttempts": false,
+    "distractionPublish": false,
+    "distractionReceive": false
+  },
+  "importResult": { "key": "1794013200000", "outcome": "applied", "planId": 3 },
+  "notice": { "nickname": "나", "atMs": 5 }
+}

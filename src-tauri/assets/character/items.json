@@ -1,0 +1,27 @@
+{
+  "items": [
+    {"id": "top_vest", "kind": "clothing", "slot": "top", "label": "조끼", "price": 0, "source": "starter", "svg": "<rect x='{x}' y='{y}' width='{w}' height='{h}' rx='4' fill='#7a9e7e'/>"},
+    {"id": "top_hoodie", "kind": "clothing", "slot": "top", "label": "후드티", "price": 0, "source": "starter", "svg": "<rect x='{x}' y='{y}' width='{w}' height='{h}' rx='6' fill='#7d8fb5'/>"},
+    {"id": "top_cardigan", "kind": "clothing", "slot": "top", "label": "가디건", "price": 0, "source": "starter", "svg": "<rect x='{x}' y='{y}' width='{w}' height='{h}' rx='4' fill='#c58f8f'/>"},
+    {"id": "hat_beanie", "kind": "clothing", "slot": "hat", "label": "비니", "price": 40, "source": "shop", "svg": "<path d='M{x} {yb} Q{cx} {y} {xr} {yb} Z' fill='#c25b5b'/>"},
+    {"id": "hat_straw", "kind": "clothing", "slot": "hat", "label": "밀짚모자", "price": 60, "source": "shop", "svg": "<ellipse cx='{cx}' cy='{yb}' rx='{hw}' ry='3' fill='#e3c777'/><path d='M{x4} {yb} Q{cx} {y} {xr4} {yb} Z' fill='#edd790'/>"},
+    {"id": "hat_ribbon", "kind": "clothing", "slot": "hat", "label": "리본", "price": 30, "source": "shop", "svg": "<polygon points='{x},{y} {cx},{cy} {x},{yb}' fill='#e07aa0'/><polygon points='{xr},{y} {cx},{cy} {xr},{yb}' fill='#e07aa0'/>"},
+    {"id": "top_stripe", "kind": "clothing", "slot": "top", "label": "줄무늬 티", "price": 50, "source": "shop", "svg": "<rect x='{x}' y='{y}' width='{w}' height='{h}' rx='4' fill='#f0f0f0'/><rect x='{x}' y='{cy}' width='{w}' height='4' fill='#4a6fa5'/>"},
+    {"id": "top_overalls", "kind": "clothing", "slot": "top", "label": "멜빵바지", "price": 80, "source": "shop", "svg": "<rect x='{x}' y='{cy}' width='{w}' height='{hh}' rx='3' fill='#5b7fb0'/>"},
+    {"id": "top_raincoat", "kind": "clothing", "slot": "top", "label": "우비", "price": 90, "source": "shop", "svg": "<rect x='{x}' y='{y}' width='{w}' height='{h}' rx='6' fill='#e8c84a'/>"},
+    {"id": "acc_bowtie", "kind": "clothing", "slot": "accessory", "label": "나비넥타이", "price": 30, "source": "shop", "svg": "<polygon points='{x},{y} {cx},{cy} {x},{yb}' fill='#b03a48'/><polygon points='{xr},{y} {cx},{cy} {xr},{yb}' fill='#b03a48'/>"},
+    {"id": "acc_glasses", "kind": "clothing", "slot": "accessory", "label": "동그란 안경", "price": 45, "source": "shop", "svg": "<circle cx='{xq}' cy='{cy}' r='3' fill='none' stroke='#333'/><circle cx='{xq3}' cy='{cy}' r='3' fill='none' stroke='#333'/>"},
+    {"id": "acc_backpack", "kind": "clothing", "slot": "accessory", "label": "책가방", "price": 70, "source": "shop", "svg": "<rect x='{x}' y='{y}' width='{w}' height='{h}' rx='2' fill='#9c6b3f'/>"},
+    {"id": "hand_umbrella", "kind": "clothing", "slot": "hand", "label": "우산", "price": 40, "source": "shop", "svg": "<path d='M{x} {cy} Q{cx} {y} {xr} {cy} Z' fill='#6a8fc4'/><line x1='{cx}' y1='{cy}' x2='{cx}' y2='{yb}' stroke='#555'/>"},
+    {"id": "hand_lantern", "kind": "clothing", "slot": "hand", "label": "작은 등불", "price": 55, "source": "shop", "svg": "<rect x='{x}' y='{y}' width='{w}' height='{h}' rx='2' fill='#f6dc8a'/>"},
+    {"id": "hand_mug", "kind": "clothing", "slot": "hand", "label": "머그컵", "price": 25, "source": "shop", "svg": "<rect x='{x}' y='{y}' width='{w}' height='{h}' rx='2' fill='#f4f1ea' stroke='#999'/>"},
+    {"id": "acc_knit_scarf", "kind": "clothing", "slot": "accessory", "label": "뜨개 목도리", "price": 0, "source": "achievement", "achievement": "streak_7", "svg": "<rect x='{x}' y='{y}' width='{w}' height='{h}' rx='3' fill='#d9765b'/><rect x='{xq3}' y='{y}' width='4' height='{hh}' fill='#c26249'/>"},
+    {"id": "hat_mortarboard", "kind": "clothing", "slot": "hat", "label": "학사모", "price": 0, "source": "achievement", "achievement": "quiz_100", "svg": "<polygon points='{x},{yb} {cx},{y} {xr},{yb} {cx},{cy}' fill='#2f3a4a'/>"},
+    {"id": "furn_desk", "kind": "furniture", "label": "나무 책상", "price": 100, "source": "shop", "svg": "<rect x='20' y='60' width='60' height='8' fill='#a9794a'/>"},
+    {"id": "furn_lamp", "kind": "furniture", "label": "스탠드", "price": 70, "source": "shop", "svg": "<circle cx='50' cy='30' r='10' fill='#f3d27a'/>"},
+    {"id": "furn_rug", "kind": "furniture", "label": "둥근 러그", "price": 60, "source": "shop", "svg": "<ellipse cx='50' cy='85' rx='30' ry='6' fill='#b88a8a'/>"},
+    {"id": "furn_shelf", "kind": "furniture", "label": "책장", "price": 120, "source": "shop", "svg": "<rect x='30' y='20' width='40' height='60' fill='#8a6a47'/>"},
+    {"id": "char_raccoon", "kind": "character", "label": "너구리 친구", "price": 200, "source": "shop", "species": "raccoon", "svg": ""},
+    {"id": "char_hedgehog", "kind": "character", "label": "고슴도치 친구", "price": 200, "source": "shop", "species": "hedgehog", "svg": ""}
+  ]
+}

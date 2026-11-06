@@ -52,6 +52,9 @@ pub const MAX_MERGE_PAGE_CHARS: usize = 12_000;
 pub const MAX_MERGE_NOTE_CHARS: usize = 2_000;
 pub const MAX_MERGE_LABELS: usize = 5;
 pub const MAX_LABEL_CHARS: usize = 80;
+/// Contributions and their size in a shared-page merge request.
+pub const MAX_SHARED_PARTS: usize = 6;
+pub const MAX_SHARED_PART_CHARS: usize = 6_000;
 /// Pages and excerpt size of a lint request.
 pub const MAX_LINT_PAGES: usize = 6;
 pub const MAX_LINT_EXCERPT_CHARS: usize = 1_200;
@@ -144,6 +147,22 @@ pub struct PromptPage {
     pub body: String,
 }
 
+/// The look of one character candidate, as catalog labels only: the user's setup answers (MBTI,
+/// birth year, gender) have no field here.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CharacterLook {
+    pub species: String,
+    pub palette: String,
+    pub expression: String,
+    pub prop: String,
+}
+
+/// Candidates named per request.
+pub const MAX_CHARACTER_LOOKS: usize = 4;
+
+const CHARACTER_SCHEMA: &str = "출력은 JSON 객체 하나만, 다른 글자 없이: {\"items\":[{\"name\":\"이름\",\"intro\":\"한 줄 소개\"}]}. \
+items는 후보와 같은 순서, 같은 개수입니다. name은 한국어 2~5글자, intro는 30자 이내 한 문장입니다. 기존 영화·만화·게임의 캐릭터 이름은 쓰지 마세요.";
+
 /// The material of a prompt. Public so the mock can derive a deterministic answer from it; only
 /// `Prompt`'s constructors can wrap it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -153,12 +172,16 @@ pub enum PromptInput {
     Ingest { subject: String, text: String },
     Ask { subject: String, question: String, pages: Vec<PromptPage> },
     Merge { subject: String, page_name: String, existing: String, note: String, context: Vec<String> },
+    /// Contributions of several room members to one shared page. `name` of each part is the
+    /// contributor's nickname; the caller passes only parts whose author agreed to LLM merging.
+    SharedMerge { page_name: String, parts: Vec<PromptPage> },
     Lint { subject: String, findings: Vec<String>, pages: Vec<PromptPage> },
     QuizGen { subject: String, page_name: String, body: String },
     TabJudge { topic: String, domain: String, label: String },
     PlanAdjust { items: Vec<AdjustItem>, now_min: i64, day_end_min: i64 },
     PlanChat { today: String, lines: Vec<ChatLine>, must_draft: bool },
     Insight(InsightInput),
+    CharacterNames { looks: Vec<CharacterLook> },
 }
 
 #[derive(Clone)]
@@ -175,12 +198,14 @@ impl std::fmt::Debug for Prompt {
             PromptInput::Ingest { .. } => "ingest",
             PromptInput::Ask { .. } => "ask",
             PromptInput::Merge { .. } => "merge",
+            PromptInput::SharedMerge { .. } => "shared_merge",
             PromptInput::Lint { .. } => "lint",
             PromptInput::QuizGen { .. } => "quiz_gen",
             PromptInput::TabJudge { .. } => "tab_judge",
             PromptInput::PlanAdjust { .. } => "plan_adjust",
             PromptInput::PlanChat { .. } => "plan_chat",
             PromptInput::Insight(_) => "insight",
+            PromptInput::CharacterNames { .. } => "character_names",
         };
         write!(f, "Prompt({kind})")
     }
@@ -234,6 +259,17 @@ impl Prompt {
         }
     }
 
+    /// Combines the consented contributions of room members into one shared page. Extra parts and
+    /// long bodies are cut. Nicknames and the page name are data, never instructions.
+    pub fn shared_merge(page_name: &str, parts: Vec<PromptPage>) -> Self {
+        let parts = parts
+            .into_iter()
+            .take(MAX_SHARED_PARTS)
+            .map(|p| PromptPage { name: truncate_chars(&p.name, 40), body: truncate_chars(&p.body, MAX_SHARED_PART_CHARS) })
+            .collect();
+        Self { input: PromptInput::SharedMerge { page_name: truncate_chars(page_name, 80), parts } }
+    }
+
     /// Improvement advice for pages the local checks flagged.
     pub fn lint(subject: &str, findings: &[String], pages: Vec<PromptPage>) -> Self {
         Self {
@@ -274,6 +310,17 @@ impl Prompt {
             .map(|l| ChatLine { role: l.role, text: truncate_chars(&l.text, MAX_CHAT_LINE_CHARS) })
             .collect();
         Self { input: PromptInput::PlanChat { today: truncate_chars(today, 10), lines, must_draft } }
+    }
+
+    /// Names and intros for character candidates, from their looks only.
+    pub fn character_names(looks: Vec<CharacterLook>) -> Self {
+        let cut = |t: &str| truncate_chars(t, 20);
+        let looks = looks
+            .into_iter()
+            .take(MAX_CHARACTER_LOOKS)
+            .map(|l| CharacterLook { species: cut(&l.species), palette: cut(&l.palette), expression: cut(&l.expression), prop: cut(&l.prop) })
+            .collect();
+        Self { input: PromptInput::CharacterNames { looks } }
     }
 
     pub fn insight(input: InsightInput) -> Self {
@@ -344,6 +391,18 @@ impl Prompt {
                     user,
                 )
             }
+            PromptInput::SharedMerge { page_name, parts } => {
+                let mut user = format!("페이지: {}\n", plain(page_name));
+                for part in parts {
+                    user.push_str(&format!("<document name=\"{}\">\n{}\n</document>\n", attr(&part.name), neutralize(&part.body)));
+                }
+                (
+                    format!(
+                        "당신은 스터디 방의 공유 위키 편집자입니다. 여러 사람이 같은 주제로 쓴 글을 하나의 페이지로 합치세요. 각 글의 내용을 빠뜨리지 말고 중복만 정리하며, 글쓴이 이름은 본문에 쓰지 마세요. {INJECTION_RULE} {MERGE_SCHEMA}"
+                    ),
+                    user,
+                )
+            }
             PromptInput::QuizGen { subject, page_name, body } => (
                 format!("당신은 학습 퀴즈 출제자입니다. 제공된 문서만 근거로 복습 문제를 만드세요. 문서에 없는 사실로 문제를 만들지 마세요. {INJECTION_RULE} {QUIZ_SCHEMA}"),
                 format!("과목: {}\n<document name=\"{}\">\n{}\n</document>", plain(subject), attr(page_name), neutralize(body)),
@@ -375,6 +434,15 @@ impl Prompt {
                     format!("당신은 학습 계획 도우미입니다. 사용자의 말에 맞게 일정을 조회하고 계획 초안을 만드세요. 계획을 직접 바꾸는 도구는 없습니다. {INJECTION_RULE} {CHAT_TOOLS}"),
                     user,
                 )
+            }
+            PromptInput::CharacterNames { looks } => {
+                let user = looks
+                    .iter()
+                    .enumerate()
+                    .map(|(i, l)| format!("{}. 종: {}, 털 색: {}, 표정: {}, 소품: {}", i + 1, plain(&l.species), plain(&l.palette), plain(&l.expression), plain(&l.prop)))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                (format!("당신은 공부 앱의 캐릭터 이름을 짓는 도우미입니다. 각 후보의 겉모습만 보고 이름과 소개를 지으세요. {CHARACTER_SCHEMA}"), user)
             }
             PromptInput::Insight(i) => {
                 let mut user = format!(
@@ -488,6 +556,12 @@ mod tests {
                 wiki_pages: 4,
                 weakest_subject: Some("수학".into()),
             }),
+            Prompt::character_names(vec![CharacterLook {
+                species: "여우".into(),
+                palette: "꿀색".into(),
+                expression: "미소".into(),
+                prop: "책".into(),
+            }]),
         ];
         let mut out = Vec::new();
         for prompt in &prompts {

@@ -1,0 +1,16 @@
+{
+  "comment": "Stage 4 tables x operation -> who may do it through the data API. 'owner' = the row's user_id equals auth.uid(); 'none' = no client policy or grant exists. Other people's rows are never readable through a table: reading a room goes through the room_snapshot RPC, which applies each member's friend_prefs. Anonymous callers are denied everywhere. Read by the Rust FakeBackend and by supabase/tests/rooms.static.test.ts; it documents the policy set but does not prove it (V4-1).",
+  "tables": {
+    "rooms":              { "select": "none",  "insert": "none", "update": "none", "delete": "none" },
+    "room_members":       { "select": "none",  "insert": "none", "update": "none", "delete": "none" },
+    "room_bans":          { "select": "none",  "insert": "none", "update": "none", "delete": "none" },
+    "room_invites":       { "select": "none",  "insert": "none", "update": "none", "delete": "none" },
+    "join_attempts":      { "select": "none",  "insert": "none", "update": "none", "delete": "none" },
+    "member_status":      { "select": "owner", "insert": "none", "update": "none", "delete": "none" },
+    "daily_summaries":    { "select": "owner", "insert": "none", "update": "none", "delete": "none" },
+    "friend_prefs":       { "select": "owner", "insert": "none", "update": "none", "delete": "none" },
+    "inventory_public":   { "select": "owner", "insert": "none", "update": "none", "delete": "none" },
+    "room_schedules":     { "select": "none",  "insert": "none", "update": "none", "delete": "none" },
+    "distraction_events": { "select": "none",  "insert": "none", "update": "none", "delete": "none" }
+  }
+}

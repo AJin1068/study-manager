@@ -1,0 +1,39 @@
+{
+  "shop": {
+    "balance": 60,
+    "items": [
+      {
+        "id": "hat_beanie",
+        "kind": "clothing",
+        "slot": "hat",
+        "label": "비니",
+        "price": 40,
+        "source": "shop",
+        "giftable": true,
+        "achievement": null,
+        "owned": true,
+        "equipped": true,
+        "affordable": true
+      },
+      {
+        "id": "acc_knit_scarf",
+        "kind": "clothing",
+        "slot": "accessory",
+        "label": "뜨개 목도리",
+        "price": 0,
+        "source": "achievement",
+        "giftable": false,
+        "achievement": "7일 연속 달성",
+        "owned": false,
+        "equipped": false,
+        "affordable": false
+      }
+    ]
+  },
+  "outcomes": [
+    { "outcome": "purchased", "balance": 60 },
+    { "outcome": "already_owned" },
+    { "outcome": "insufficient_points", "balance": 3, "price": 40 },
+    { "outcome": "not_for_sale" }
+  ]
+}

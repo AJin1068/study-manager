@@ -1,0 +1,56 @@
+{
+  "species": [
+    {"id": "fox", "label": "여우", "shop_only": false, "body": {"head_cy": 32, "head_r": 17, "torso_w": 34, "torso_h": 30},
+     "svg": "<polygon points='{left},{cy} {lq},{tt} {cx},{top}' fill='{fur}'/><polygon points='{right},{cy} {rq},{tt} {cx},{top}' fill='{fur}'/>"},
+    {"id": "rabbit", "label": "토끼", "shop_only": false, "body": {"head_cy": 34, "head_r": 16, "torso_w": 30, "torso_h": 30},
+     "svg": "<ellipse cx='{lq}' cy='{tt}' rx='{r3}' ry='{r}' fill='{fur}'/><ellipse cx='{rq}' cy='{tt}' rx='{r3}' ry='{r}' fill='{fur}'/>"},
+    {"id": "bear", "label": "곰", "shop_only": false, "body": {"head_cy": 33, "head_r": 19, "torso_w": 40, "torso_h": 28},
+     "svg": "<circle cx='{lq}' cy='{tm}' r='{r4}' fill='{fur}'/><circle cx='{rq}' cy='{tm}' r='{r4}' fill='{fur}'/>"},
+    {"id": "cat", "label": "고양이", "shop_only": false, "body": {"head_cy": 32, "head_r": 17, "torso_w": 32, "torso_h": 30},
+     "svg": "<polygon points='{left},{tm} {left},{tt} {cx},{top}' fill='{fur}'/><polygon points='{right},{tm} {right},{tt} {cx},{top}' fill='{fur}'/>"},
+    {"id": "owl", "label": "부엉이", "shop_only": false, "body": {"head_cy": 33, "head_r": 18, "torso_w": 36, "torso_h": 29},
+     "svg": "<polygon points='{lq},{top} {left},{tt} {cx},{top}' fill='{fur}'/><polygon points='{rq},{top} {right},{tt} {cx},{top}' fill='{fur}'/>"},
+    {"id": "deer", "label": "사슴", "shop_only": false, "body": {"head_cy": 31, "head_r": 16, "torso_w": 30, "torso_h": 32},
+     "svg": "<path d='M{lq} {top} L{left} {tt} M{rq} {top} L{right} {tt}' stroke='#8b5e3c' stroke-width='2' fill='none'/>"},
+    {"id": "squirrel", "label": "다람쥐", "shop_only": false, "body": {"head_cy": 34, "head_r": 16, "torso_w": 30, "torso_h": 29},
+     "svg": "<circle cx='{lq}' cy='{tm}' r='{r4}' fill='{fur}'/><circle cx='{rq}' cy='{tm}' r='{r4}' fill='{fur}'/><ellipse cx='{tr}' cy='{ty}' rx='7' ry='13' fill='{fur}'/>"},
+    {"id": "frog", "label": "개구리", "shop_only": false, "body": {"head_cy": 35, "head_r": 17, "torso_w": 34, "torso_h": 27},
+     "svg": "<circle cx='{lq}' cy='{top}' r='{r4}' fill='{fur}'/><circle cx='{rq}' cy='{top}' r='{r4}' fill='{fur}'/>"},
+    {"id": "raccoon", "label": "너구리", "shop_only": true, "body": {"head_cy": 33, "head_r": 18, "torso_w": 38, "torso_h": 28},
+     "svg": "<circle cx='{lq}' cy='{tm}' r='{r4}' fill='{fur}'/><circle cx='{rq}' cy='{tm}' r='{r4}' fill='{fur}'/><rect x='{left}' y='{cy}' width='{d}' height='5' fill='#555'/>"},
+    {"id": "hedgehog", "label": "고슴도치", "shop_only": true, "body": {"head_cy": 36, "head_r": 16, "torso_w": 36, "torso_h": 26},
+     "svg": "<path d='M{left} {cy} L{lq} {top} L{cx} {tt} L{rq} {top} L{right} {cy} Z' fill='#6b5a4a'/>"}
+  ],
+  "palettes": [
+    {"id": "honey", "label": "꿀색", "hex": "#e8b04a", "temperature": "warm"},
+    {"id": "cocoa", "label": "코코아색", "hex": "#8b5e3c", "temperature": "warm"},
+    {"id": "peach", "label": "복숭아색", "hex": "#f2b8a0", "temperature": "warm"},
+    {"id": "sand", "label": "모래색", "hex": "#d9c39a", "temperature": "warm"},
+    {"id": "snow", "label": "눈색", "hex": "#f1efe8", "temperature": "cool"},
+    {"id": "mist", "label": "안개색", "hex": "#a9b8c6", "temperature": "cool"},
+    {"id": "sky", "label": "하늘색", "hex": "#8fb7e0", "temperature": "cool"},
+    {"id": "moss", "label": "이끼색", "hex": "#8fb58a", "temperature": "cool"}
+  ],
+  "expressions": [
+    {"id": "smile", "label": "미소", "energy": "high",
+     "svg": "<circle cx='{lq}' cy='{cy}' r='1.8' fill='#333'/><circle cx='{rq}' cy='{cy}' r='1.8' fill='#333'/><path d='M{lq} {m1} Q{cx} {m2} {rq} {m1}' stroke='#333' fill='none' stroke-width='1.5'/>"},
+    {"id": "bright", "label": "반짝", "energy": "high",
+     "svg": "<circle cx='{lq}' cy='{cy}' r='2.6' fill='#333'/><circle cx='{rq}' cy='{cy}' r='2.6' fill='#333'/><ellipse cx='{cx}' cy='{m1}' rx='{r3}' ry='{r4}' fill='#a33'/>"},
+    {"id": "cheer", "label": "힘내", "energy": "high",
+     "svg": "<path d='M{lq} {cy} q1.5 -2.5 3 0' stroke='#333' fill='none' stroke-width='1.5'/><path d='M{rq} {cy} q1.5 -2.5 3 0' stroke='#333' fill='none' stroke-width='1.5'/><path d='M{lq} {m1} Q{cx} {m2} {rq} {m1}' stroke='#333' fill='none' stroke-width='1.5'/>"},
+    {"id": "calm", "label": "차분", "energy": "low",
+     "svg": "<circle cx='{lq}' cy='{cy}' r='1.8' fill='#333'/><circle cx='{rq}' cy='{cy}' r='1.8' fill='#333'/><path d='M{lq} {m1} L{rq} {m1}' stroke='#333' stroke-width='1.5'/>"},
+    {"id": "sleepy", "label": "졸림", "energy": "low",
+     "svg": "<path d='M{lq} {cy} l3 0' stroke='#333' stroke-width='1.5'/><path d='M{rq} {cy} l3 0' stroke='#333' stroke-width='1.5'/><circle cx='{cx}' cy='{m1}' r='1.5' fill='#333'/>"},
+    {"id": "serious", "label": "진지", "energy": "low",
+     "svg": "<circle cx='{lq}' cy='{cy}' r='1.8' fill='#333'/><circle cx='{rq}' cy='{cy}' r='1.8' fill='#333'/><path d='M{lq} {br} l3 1 M{rq} {br} l3 -1' stroke='#333' stroke-width='1.2'/><path d='M{lq} {m1} L{rq} {m1}' stroke='#333' stroke-width='1.5'/>"}
+  ],
+  "props": [
+    {"id": "book", "label": "책", "mind": "thinking", "svg": "<rect x='{x}' y='{y}' width='{w}' height='{h}' fill='#c9a66b'/>"},
+    {"id": "pencil", "label": "연필", "mind": "thinking", "svg": "<rect x='{hcx}' y='{y}' width='3' height='{h}' fill='#e0b341'/>"},
+    {"id": "ruler", "label": "자", "mind": "thinking", "svg": "<rect x='{x}' y='{hcy}' width='{w}' height='3' fill='#9aa7b3'/>"},
+    {"id": "leaf", "label": "나뭇잎", "mind": "feeling", "svg": "<ellipse cx='{hcx}' cy='{hcy}' rx='{hrx}' ry='{hry}' fill='#6fae6a'/>"},
+    {"id": "lantern", "label": "등불", "mind": "feeling", "svg": "<rect x='{x}' y='{y}' width='{w}' height='{h}' rx='2' fill='#f3d27a'/>"},
+    {"id": "flower", "label": "꽃", "mind": "feeling", "svg": "<circle cx='{hcx}' cy='{hcy}' r='{hrx}' fill='#e88fb0'/><circle cx='{hcx}' cy='{hcy}' r='2' fill='#f5d44b'/>"}
+  ]
+}

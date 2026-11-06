@@ -1,0 +1,7 @@
+{
+  "comment": "S4.7 tables x operation. 'none' = no client policy or grant exists: shared pages are read and written only through the RPCs, which check room membership. Anonymous callers are denied everywhere. Documents the policy set; it does not prove it (V4-1).",
+  "tables": {
+    "shared_pages": { "select": "none", "insert": "none", "update": "none", "delete": "none" },
+    "shared_page_revisions": { "select": "none", "insert": "none", "update": "none", "delete": "none" }
+  }
+}

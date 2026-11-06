@@ -1,0 +1,24 @@
+{
+  "comment": "Stage 4 server RPCs shared by supabase/migrations/*_s4_rooms.sql, the Rust FakeBackend and the real adapter. Every RPC returns jsonb {\"code\": ...}; failures come back as codes, never RAISE. 'internal' functions are not callable by any client role.",
+  "rpcs": [
+    { "name": "create_room", "params": ["p_name", "p_nickname"], "returns": ["ok", "not_signed_in", "invalid_input", "room_limit"], "roles": ["authenticated"] },
+    { "name": "create_invite", "params": ["p_room_id", "p_ttl_hours", "p_max_uses"], "returns": ["ok", "not_signed_in", "invalid_input", "not_owner", "too_many_invites"], "roles": ["authenticated"] },
+    { "name": "revoke_invite", "params": ["p_room_id", "p_invite_id"], "returns": ["ok", "not_signed_in", "not_owner", "not_found"], "roles": ["authenticated"] },
+    { "name": "join_room", "params": ["p_code", "p_nickname"], "returns": ["ok", "not_signed_in", "rate_limited", "invalid_input", "invalid_code", "revoked", "expired", "exhausted", "banned", "already_member", "room_full"], "roles": ["authenticated"] },
+    { "name": "leave_room", "params": ["p_room_id"], "returns": ["ok", "not_signed_in", "not_member"], "roles": ["authenticated"] },
+    { "name": "kick_member", "params": ["p_room_id", "p_target_user"], "returns": ["ok", "not_signed_in", "not_owner", "cannot_kick_self", "not_member"], "roles": ["authenticated"] },
+    { "name": "list_my_rooms", "params": [], "returns": ["ok", "not_signed_in"], "roles": ["authenticated"] },
+    { "name": "room_snapshot", "params": ["p_room_id"], "returns": ["ok", "not_signed_in", "not_member"], "roles": ["authenticated"] },
+    { "name": "report_status", "params": ["p_state", "p_remaining_sec", "p_level", "p_attempts_today"], "returns": ["ok", "not_signed_in", "invalid_input"], "roles": ["authenticated"] },
+    { "name": "report_daily", "params": ["p_day", "p_study_min", "p_plan_min"], "returns": ["ok", "not_signed_in", "invalid_input", "not_shared", "surge_rejected"], "roles": ["authenticated"] },
+    { "name": "set_friend_prefs", "params": ["p_share_level", "p_share_status", "p_share_week_time", "p_share_attempts", "p_distraction_publish", "p_distraction_receive"], "returns": ["ok", "not_signed_in", "invalid_input"], "roles": ["authenticated"] },
+    { "name": "set_inventory_public", "params": ["p_species", "p_hat", "p_top", "p_accessory", "p_hand"], "returns": ["ok", "not_signed_in", "invalid_input"], "roles": ["authenticated"] },
+    { "name": "report_distraction", "params": [], "returns": ["ok", "not_signed_in", "disabled", "throttled"], "roles": ["authenticated"] },
+    { "name": "poll_distraction_events", "params": ["p_since_ms"], "returns": ["ok", "not_signed_in", "invalid_input", "disabled"], "roles": ["authenticated"] },
+    { "name": "share_schedule", "params": ["p_room_id", "p_items"], "returns": ["ok", "not_signed_in", "not_owner", "invalid_input"], "roles": ["authenticated"] }
+  ],
+  "internal": [
+    { "name": "is_room_member", "params": ["p_room_id", "p_user"] },
+    { "name": "ensure_room_owner", "params": ["p_room_id"] }
+  ]
+}

@@ -3,6 +3,7 @@
 //! handlers of one area; `lib.rs` lists them in a single `generate_handler!` call.
 
 pub mod browser_link;
+pub mod character;
 pub mod chat;
 pub mod context;
 pub mod dashboard;
@@ -15,11 +16,15 @@ pub mod messages;
 pub mod plan;
 pub mod points;
 pub mod power;
+pub mod profile;
 pub mod quiz;
 pub mod release;
 pub mod remote;
 pub mod retro;
+pub mod rooms;
+pub mod shared_wiki;
 pub mod settings;
+pub mod shop;
 pub mod study;
 pub mod timer;
 pub mod topic;

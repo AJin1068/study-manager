@@ -1,0 +1,44 @@
+{
+  "view": {
+    "name": "도토리",
+    "blurb": "함께 공부해요.",
+    "look": { "species": "fox", "palette": "honey", "expression": "smile", "prop": "book" },
+    "labels": { "species": "여우", "palette": "꿀색", "expression": "미소", "prop": "책" },
+    "stage": "sprout",
+    "stageLabel": "새싹",
+    "level": 3,
+    "equipped": { "hat": "hat_beanie", "top": "top_vest", "accessory": null, "hand": null },
+    "svg": "<svg/>",
+    "chosenAtMs": 1800000000000
+  },
+  "candidateSet": {
+    "seed": 2,
+    "candidates": [
+      {
+        "look": { "species": "owl", "palette": "sand", "expression": "calm", "prop": "flower" },
+        "labels": { "species": "부엉이", "palette": "모래색", "expression": "차분", "prop": "꽃" },
+        "starterTop": "top_vest",
+        "name": "보리",
+        "blurb": "손에는 꽃, 마음에는 차분함. 같이 천천히 공부해요.",
+        "nameSource": "builtin",
+        "svg": "<svg/>"
+      }
+    ],
+    "fallbackReason": "llm_disabled"
+  },
+  "outcome": {
+    "character": {
+      "name": "도토리",
+      "blurb": "함께 공부해요.",
+      "look": { "species": "fox", "palette": "honey", "expression": "smile", "prop": "book" },
+      "labels": { "species": "여우", "palette": "꿀색", "expression": "미소", "prop": "책" },
+      "stage": "seed",
+      "stageLabel": "씨앗",
+      "level": 1,
+      "equipped": { "hat": null, "top": "top_vest", "accessory": null, "hand": null },
+      "svg": "<svg/>",
+      "chosenAtMs": 1800000000000
+    },
+    "toneApplied": "gentle"
+  }
+}

@@ -4,6 +4,7 @@ import { useStudyLock, type LockView } from '../hooks/useStudyLock';
 import { useAsync } from '../hooks/useAsync';
 import { asyncStatus } from '../hooks/useAsyncStatus';
 import { useTimerState } from '../hooks/useTimerState';
+import { CharacterBadge } from '../components/CharacterBadge';
 import { TimerPanel } from '../components/TimerPanel';
 import { FocusSignalsPanel } from '../components/FocusSignalsPanel';
 import { TopicPanel } from '../components/TopicPanel';
@@ -54,6 +55,7 @@ export function MainScreen() {
 
   return (
     <main className="page">
+      <CharacterBadge />
       <section className="card">
         <h2>공부 상태</h2>
         <p>{lockStatusText(lock)}</p>

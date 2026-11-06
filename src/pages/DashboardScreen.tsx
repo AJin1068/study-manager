@@ -17,6 +17,7 @@ import {
   scoreText,
   streakText,
 } from './dashboardView';
+import { CharacterBadge } from '../components/CharacterBadge';
 import { GrowthTab } from './GrowthTab';
 
 type Tab = 'today' | 'week' | 'weakness' | 'growth';
@@ -190,6 +191,7 @@ export function DashboardScreen() {
           </button>
         ))}
       </div>
+      {tab === 'today' && <CharacterBadge />}
       {tab === 'today' && <TodayView />}
       {tab === 'week' && <WeekView />}
       {tab === 'weakness' && <WeaknessView />}

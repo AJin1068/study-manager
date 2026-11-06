@@ -39,6 +39,7 @@ jobs:
           pnpm tsc
           pnpm lint
           pnpm test
+          pnpm build:web
 
       - name: Rust check, clippy, and tests
         working-directory: src-tauri

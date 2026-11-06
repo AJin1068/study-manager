@@ -1,0 +1,66 @@
+{
+  "home": {
+    "name": "민수",
+    "slug": "0123456789abcdef",
+    "link": "https://me.example.test/study/#/u/0123456789abcdef",
+    "webBaseUrl": "https://me.example.test/study",
+    "scopes": [
+      { "section": "room", "scope": "friends" },
+      { "section": "grass", "scope": "public" },
+      { "section": "level", "scope": "public" },
+      { "section": "badges", "scope": "friends" },
+      { "section": "guestbook", "scope": "friends" },
+      { "section": "visitors", "scope": "private" },
+      { "section": "wiki", "scope": "private" },
+      { "section": "subject", "scope": "private" },
+      { "section": "gifts", "scope": "friends" }
+    ],
+    "wikiTitles": ["미적분"],
+    "giftDailyLimit": 5,
+    "giftMessageMax": 60
+  },
+  "ack": { "code": "ok" },
+  "publish": { "code": "ok", "slug": "0123456789abcdef", "link": null },
+  "view": {
+    "code": "ok",
+    "name": "민수",
+    "slug": null,
+    "visible": ["room", "grass", "level", "badges", "guestbook", "visitors", "gifts"],
+    "room": { "species": "fox", "hat": "hat_beanie", "top": null, "accessory": null, "hand": null, "furniture": ["furn_lamp"] },
+    "grass": [{ "day": "2026-11-05", "studyMin": 90 }],
+    "level": 7,
+    "badges": ["streak_7"],
+    "guestbook": [{ "id": 3, "authorName": "친구1", "body": "응원해요", "atMs": 1000, "mine": false, "reported": false }],
+    "visitors": { "total": 4, "today": 1 },
+    "wiki": null,
+    "subject": null,
+    "gifts": [{ "itemId": "acc_bowtie", "senderName": "친구1", "message": "고마워", "atMs": 2000 }]
+  },
+  "hiddenView": {
+    "code": "not_member",
+    "name": null,
+    "slug": null,
+    "visible": [],
+    "room": null,
+    "grass": null,
+    "level": null,
+    "badges": null,
+    "guestbook": null,
+    "visitors": null,
+    "wiki": null,
+    "subject": null,
+    "gifts": null
+  },
+  "sendOutcome": { "code": "ok", "giftId": "00000000-0000-4000-8000-00000000000a", "state": "pending", "balance": 60 },
+  "refusedSend": { "code": "not_giftable", "giftId": null, "state": null, "balance": 100 },
+  "receiveOutcome": { "code": "ok", "itemId": "hat_beanie", "alreadyOwned": false },
+  "overview": {
+    "outbox": [
+      { "giftId": "00000000-0000-4000-8000-00000000000a", "recipientName": "친구", "itemId": "hat_beanie", "message": "고마워", "price": 40, "state": "pending", "createdAtMs": 5 }
+    ],
+    "inbox": [
+      { "giftId": "00000000-0000-4000-8000-00000000000b", "itemId": "furn_lamp", "senderName": "친구1", "message": "집들이", "status": "pending", "atMs": 6 }
+    ],
+    "online": true
+  }
+}

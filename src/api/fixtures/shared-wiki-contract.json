@@ -1,0 +1,15 @@
+{
+  "preview": { "pageName": "미분", "preview": "- 도함수", "memberCount": 3, "shareNotice": "공유하면 이 방의 멤버가 이 페이지를 볼 수 있어요.", "mergeNotice": "합치기를 허용하면 AI에 전송돼요." },
+  "action": { "code": "ok", "branched": false },
+  "sync": { "pushed": 1, "failed": 0 },
+  "room": {
+    "pages": [
+      { "title": "미분", "contributors": ["앨리스", "밥"], "hasMerge": true, "branched": false, "sharedByMe": true, "mergeableParts": 2, "listedOnly": ["캐롤"] }
+    ],
+    "newConcepts": [{ "title": "적분", "authors": ["밥"] }],
+    "summary": "오늘 1개 페이지에 정리가 3건 올라왔어요.",
+    "shareNotice": "공유하면 이 방의 멤버가 이 페이지를 볼 수 있어요."
+  },
+  "merge": { "code": "ok", "usedLlm": true, "fallbackReason": null, "contributors": ["앨리스", "밥"], "listedOnly": ["캐롤"], "markdown": "# 미분" },
+  "question": { "itemId": 1, "kind": "mcq", "prompt": "도함수는?", "choices": ["가", "나"], "pageName": "미분" }
+}

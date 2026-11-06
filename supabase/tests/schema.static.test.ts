@@ -10,7 +10,8 @@ import { describe, expect, it } from 'vitest';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const migrationsDir = join(root, 'supabase', 'migrations');
-const migrations = readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort();
+// Stage-2 files only; the stage-4 migration has its own matrix and contract (rooms.static.test.ts).
+const migrations = readdirSync(migrationsDir).filter((f) => f.endsWith('.sql') && f.includes('_s2_')).sort();
 const sql = migrations.map((f) => readFileSync(join(migrationsDir, f), 'utf8')).join('\n');
 // Comment lines are documentation (the cron example lives there); policy checks look at code only.
 const code = sql
@@ -187,7 +188,7 @@ describe('no secrets in the repository', () => {
     const files = roots.filter(existsSync).flatMap((r) => walk(r));
     expect(files.length).toBeGreaterThan(20);
     for (const file of files) {
-      if (file.endsWith('schema.static.test.ts')) continue;
+      if (file.endsWith('.static.test.ts')) continue;
       if (!/\.(sql|ts|tsx|rs|json|md)$/.test(file)) continue;
       const text = readFileSync(file, 'utf8');
       for (const [label, pattern] of secretPatterns) {

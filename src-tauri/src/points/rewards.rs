@@ -24,6 +24,13 @@ pub const QUIZ_BONUS_POINTS: i64 = 2;
 /// Right answers per local day that pay the bonus; later ones pay nothing.
 pub const QUIZ_BONUS_DAILY_CAP: i64 = 5;
 pub const REASON_QUIZ_BONUS: &str = "quiz_bonus";
+/// Spent in the character shop: a negative ledger row keyed `buy:<item>:<n>`. The level reads
+/// earned points only, so spending never lowers it.
+pub const REASON_SHOP_PURCHASE: &str = "shop_purchase";
+/// Spent on a gift (negative row keyed `gift:<uuid>`) and returned when the gift certainly did not
+/// arrive (positive row keyed `gift_refund:<uuid>`). The refund is not counted as earned.
+pub const REASON_GIFT_SENT: &str = "gift_sent";
+pub const REASON_GIFT_REFUND: &str = "gift_refund";
 
 /// Points earned in total needed to reach level `index + 1`. Early levels come fast, later ones
 /// slowly. Level 1 needs nothing.

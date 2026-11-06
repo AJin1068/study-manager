@@ -1,0 +1,11 @@
+{
+  "comment": "S4.9/S4.10 tables x operation -> who may do it through the data API. 'none' = no client policy or grant exists, for authenticated AND anonymous callers: profiles, grass, guestbook, visits, the gift catalog and gifts are read and written only through the RPCs of rpc-contract.json, which apply each section's scope (public / friends / private) on the server. Read by supabase/tests/profile.static.test.ts and the Rust FakeBackend; it documents the policy set but does not prove it (V4-1).",
+  "tables": {
+    "profile_settings":  { "select": "none", "insert": "none", "update": "none", "delete": "none" },
+    "profile_grass":     { "select": "none", "insert": "none", "update": "none", "delete": "none" },
+    "profile_guestbook": { "select": "none", "insert": "none", "update": "none", "delete": "none" },
+    "profile_visits":    { "select": "none", "insert": "none", "update": "none", "delete": "none" },
+    "gift_catalog":      { "select": "none", "insert": "none", "update": "none", "delete": "none" },
+    "gifts":             { "select": "none", "insert": "none", "update": "none", "delete": "none" }
+  }
+}

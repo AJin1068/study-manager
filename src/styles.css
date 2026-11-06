@@ -242,3 +242,45 @@ body {
 .chat input[type="text"] {
   flex: 1;
 }
+
+.character-candidates {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.character-avatar {
+  display: block;
+}
+
+.shop-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.grass {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 10px);
+  gap: 2px;
+  overflow-x: auto;
+}
+
+.grass-cell {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: #ebedf0;
+}
+
+.grass-1 { background: #c6e48b; }
+.grass-2 { background: #7bc96f; }
+.grass-3 { background: #239a3b; }
+.grass-4 { background: #196127; }
+
+.scope-list {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+}

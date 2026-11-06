@@ -1,0 +1,23 @@
+{
+  "comment": "S4.9/S4.10 server RPCs shared by supabase/migrations/*_s4p_profile.sql, the Rust FakeBackend and the real adapter. Every RPC returns jsonb {\"code\": ...}; failures come back as codes, never RAISE. get_public_profile is the only RPC the anon role may run. 'internal' functions are not callable by any client role.",
+  "rpcs": [
+    { "name": "set_profile_settings", "params": ["p_display_name", "p_vis_room", "p_vis_grass", "p_vis_level", "p_vis_badges", "p_vis_guestbook", "p_vis_visitors", "p_vis_wiki", "p_vis_subject", "p_vis_gifts", "p_level", "p_badges", "p_furniture", "p_wiki_titles", "p_subject_now"], "returns": ["ok", "not_signed_in", "invalid_input"], "roles": ["authenticated"] },
+    { "name": "report_profile_grass", "params": ["p_entries"], "returns": ["ok", "not_signed_in", "invalid_input", "not_shared"], "roles": ["authenticated"] },
+    { "name": "get_my_profile", "params": [], "returns": ["ok", "not_signed_in", "not_found"], "roles": ["authenticated"] },
+    { "name": "get_public_profile", "params": ["p_slug"], "returns": ["ok", "not_found"], "roles": ["anon", "authenticated"] },
+    { "name": "get_member_profile", "params": ["p_user"], "returns": ["ok", "not_signed_in", "not_member", "not_found"], "roles": ["authenticated"] },
+    { "name": "sign_guestbook", "params": ["p_owner", "p_body"], "returns": ["ok", "not_signed_in", "invalid_input", "cannot_self", "not_friends", "closed", "rate_limited"], "roles": ["authenticated"] },
+    { "name": "delete_guestbook_entry", "params": ["p_id"], "returns": ["ok", "not_signed_in", "not_found"], "roles": ["authenticated"] },
+    { "name": "report_guestbook_entry", "params": ["p_id"], "returns": ["ok", "not_signed_in", "not_found"], "roles": ["authenticated"] },
+    { "name": "send_gift", "params": ["p_idem_key", "p_recipient", "p_item_id", "p_message"], "returns": ["ok", "not_signed_in", "invalid_input", "key_conflict", "not_giftable", "cannot_self", "not_friends", "daily_limit"], "roles": ["authenticated"] },
+    { "name": "gift_status", "params": ["p_idem_key"], "returns": ["ok", "not_signed_in"], "roles": ["authenticated"] },
+    { "name": "list_gift_inbox", "params": [], "returns": ["ok", "not_signed_in"], "roles": ["authenticated"] },
+    { "name": "accept_gift", "params": ["p_gift_id"], "returns": ["ok", "not_signed_in", "not_found", "already_resolved"], "roles": ["authenticated"] },
+    { "name": "decline_gift", "params": ["p_gift_id"], "returns": ["ok", "not_signed_in", "not_found", "already_resolved"], "roles": ["authenticated"] }
+  ],
+  "internal": [
+    { "name": "profiles_share_room", "params": ["p_a", "p_b"] },
+    { "name": "profile_scope_allows", "params": ["p_scope", "p_owner", "p_viewer"] },
+    { "name": "profile_view", "params": ["p_owner", "p_viewer"] }
+  ]
+}

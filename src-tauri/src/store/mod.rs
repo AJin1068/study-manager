@@ -1,14 +1,19 @@
 //! Repository layer: all SQL lives here. Domain modules call these functions instead of
 //! writing SQL, so the storage backend can be swapped later without touching callers.
 
+pub mod character;
 pub mod chat;
 pub mod context;
 pub mod growth;
 pub mod llm;
 pub mod messages;
+pub mod profile;
 pub mod quiz;
 pub mod remote;
 pub mod retro;
+pub mod rooms;
+pub mod shared_wiki;
+pub mod shop;
 pub mod tabcache;
 pub mod topic;
 pub mod wiki;
@@ -1031,10 +1036,11 @@ pub fn list_ledger(conn: &Connection, limit: i64) -> AppResult<Vec<crate::points
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-/// `(balance, earned)`: the sum of every delta, and the sum of the positive ones.
+/// `(balance, earned)`: the sum of every delta, and the sum of the positive ones. A gift refund
+/// returns spent points and is not earned, so it never raises the level.
 pub fn ledger_sums(conn: &Connection) -> AppResult<(i64, i64)> {
     Ok(conn.query_row(
-        "SELECT COALESCE(SUM(delta), 0), COALESCE(SUM(CASE WHEN delta > 0 THEN delta ELSE 0 END), 0)
+        "SELECT COALESCE(SUM(delta), 0), COALESCE(SUM(CASE WHEN delta > 0 AND reason_code <> 'gift_refund' THEN delta ELSE 0 END), 0)
          FROM point_ledger",
         [],
         |row| Ok((row.get(0)?, row.get(1)?)),

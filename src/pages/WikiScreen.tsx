@@ -7,6 +7,7 @@ import {
   type WikiSourceKind,
   type WikiSubject,
 } from '../api';
+import { ShareToRoom } from '../components/ShareToRoom';
 import { useAsync } from '../hooks/useAsync';
 import { askSummary, canResume, ingestSummary, skipReasonText } from './wikiView';
 
@@ -26,7 +27,7 @@ export function WikiScreen() {
   const [page, setPage] = useState<WikiPageContent | null>(null);
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState<AskOutcome | null>(null);
-  const [pages, setPages] = useState<{ pageName: string }[]>([]);
+  const [pages, setPages] = useState<{ id: number; pageName: string }[]>([]);
 
   const list = subjects.data ?? [];
   const subject: WikiSubject | undefined = list.find((s) => s.id === subjectId) ?? list[0];
@@ -203,6 +204,9 @@ export function WikiScreen() {
             ))}
           </ul>
           {page && <pre>{page.markdown}</pre>}
+          {page && pages.find((p) => p.pageName === page.pageName) !== undefined && (
+            <ShareToRoom key={page.pageName} pageId={pages.find((p) => p.pageName === page.pageName)?.id ?? 0} />
+          )}
 
           <h3>묻기</h3>
           <div className="row">

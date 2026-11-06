@@ -1,0 +1,10 @@
+{
+  "comment": "S4.7 shared wiki RPCs shared by supabase/migrations/*_shared_wiki.sql, the Rust FakeBackend and the real adapter. Every RPC returns jsonb {\"code\": ...}; failures come back as codes, never RAISE.",
+  "rpcs": [
+    { "name": "publish_shared_page", "params": ["p_room_id", "p_title", "p_body", "p_base_revision", "p_allow_llm_merge"], "returns": ["ok", "not_signed_in", "not_member", "invalid_input", "too_large", "too_many"], "roles": ["authenticated"] },
+    { "name": "withdraw_shared_page", "params": ["p_room_id", "p_title"], "returns": ["ok", "not_signed_in", "not_member", "not_found", "not_shared"], "roles": ["authenticated"] },
+    { "name": "list_shared_pages", "params": ["p_room_id"], "returns": ["ok", "not_signed_in", "not_member"], "roles": ["authenticated"] },
+    { "name": "save_merged_page", "params": ["p_room_id", "p_title", "p_body", "p_source_revisions"], "returns": ["ok", "not_signed_in", "not_member", "not_found", "invalid_input", "too_large", "not_consented", "too_many"], "roles": ["authenticated"] }
+  ],
+  "internal": []
+}

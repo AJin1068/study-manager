@@ -15,6 +15,10 @@ use super::auth::{AuthError, AuthProvider, AuthTokens, DeviceDirectory};
 use super::http::{HttpRequest, HttpResponse, HttpTransport, Method, TransportError};
 use super::Clock;
 
+mod profile;
+mod rooms;
+mod shared_wiki;
+
 /// The only code the fake accepts. Mock mode only: the real adapter never sees this value.
 pub const FAKE_CODE: &str = "000000";
 /// Public client key the mock project expects in `apikey`.
@@ -25,6 +29,10 @@ const ACCESS_TTL_SEC: i64 = 3600;
 
 const RLS_MATRIX: &str = include_str!("../../../../fixtures/sync/rls-matrix.json");
 const RPC_CONTRACT: &str = include_str!("../../../../fixtures/sync/rpc-contract.json");
+const ROOMS_MATRIX: &str = include_str!("../../../../fixtures/rooms/rls-matrix.json");
+const ROOMS_CONTRACT: &str = include_str!("../../../../fixtures/rooms/rpc-contract.json");
+const PROFILE_CONTRACT: &str = include_str!("../../../../fixtures/profile/rpc-contract.json");
+const SHARED_WIKI_CONTRACT: &str = include_str!("../../../../fixtures/shared_wiki/rpc-contract.json");
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Caller {
@@ -101,6 +109,9 @@ struct State {
     refresh_calls: u32,
     verify_calls: u32,
     next_row_id: i64,
+    rooms: rooms::RoomsState,
+    profile: profile::ProfileState,
+    shared_wiki: shared_wiki::SharedWikiState,
 }
 
 pub struct FakeBackend {
@@ -121,15 +132,17 @@ fn unique_keys(table: &str) -> &'static [&'static str] {
 
 impl FakeBackend {
     pub fn new(clock: Arc<dyn Clock>) -> Self {
-        let parsed: Value = serde_json::from_str(RLS_MATRIX).unwrap_or(Value::Null);
         let mut matrix = HashMap::new();
-        if let Some(tables) = parsed.get("tables").and_then(Value::as_object) {
-            for (table, ops) in tables {
-                let ops = ops
-                    .as_object()
-                    .map(|m| m.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect())
-                    .unwrap_or_default();
-                matrix.insert(table.clone(), ops);
+        for source in [RLS_MATRIX, ROOMS_MATRIX] {
+            let parsed: Value = serde_json::from_str(source).unwrap_or(Value::Null);
+            if let Some(tables) = parsed.get("tables").and_then(Value::as_object) {
+                for (table, ops) in tables {
+                    let ops = ops
+                        .as_object()
+                        .map(|m| m.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect())
+                        .unwrap_or_default();
+                    matrix.insert(table.clone(), ops);
+                }
             }
         }
         Self { clock, matrix, state: Mutex::new(State::default()) }
@@ -431,21 +444,37 @@ impl FakeBackend {
     // ---- RPCs ----
 
     pub fn rpc(&self, caller: &Caller, name: &str, args: &Value) -> Result<Value, DataError> {
-        let contract: Value = serde_json::from_str(RPC_CONTRACT).map_err(|_| DataError::BadRequest)?;
-        let entry = contract
-            .get("rpcs")
-            .and_then(Value::as_array)
-            .and_then(|rpcs| rpcs.iter().find(|r| r.get("name").and_then(Value::as_str) == Some(name)))
-            .ok_or(DataError::NotFound)?;
+        let contracts = [RPC_CONTRACT, ROOMS_CONTRACT, SHARED_WIKI_CONTRACT, PROFILE_CONTRACT]
+            .map(|source| serde_json::from_str::<Value>(source).map_err(|_| DataError::BadRequest));
+        let mut entry = None;
+        for contract in &contracts {
+            let contract = contract.as_ref().map_err(|e| *e)?;
+            entry = entry.or_else(|| {
+                contract
+                    .get("rpcs")
+                    .and_then(Value::as_array)
+                    .and_then(|rpcs| rpcs.iter().find(|r| r.get("name").and_then(Value::as_str) == Some(name)))
+            });
+        }
+        let entry = entry.ok_or(DataError::NotFound)?;
         let role_ok = match caller {
             Caller::Service => true,
             Caller::User(_) => has_role(entry, "authenticated"),
-            Caller::Anon => false,
+            Caller::Anon => has_role(entry, "anon"),
         };
         if !role_ok {
             return Err(DataError::Forbidden);
         }
         let args = args.as_object().ok_or(DataError::BadRequest)?;
+        if profile::PROFILE_RPCS.contains(&name) {
+            return self.profile_rpc(caller, name, args);
+        }
+        if rooms::ROOM_RPCS.contains(&name) {
+            return self.room_rpc(caller, name, args);
+        }
+        if shared_wiki::SHARED_WIKI_RPCS.contains(&name) {
+            return self.shared_wiki_rpc(caller, name, args);
+        }
         let code = match name {
             "replace_plan_snapshot" => self.replace_plan_snapshot(caller, args),
             "heartbeat" => self.heartbeat(caller, args),

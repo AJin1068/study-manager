@@ -86,11 +86,39 @@ pub fn apply_label(app: &AppHandle, applied: &mut Option<TrayLabel>, label: Tray
     *applied = Some(label);
 }
 
-pub fn install(app: &AppHandle) -> tauri::Result<()> {
+/// The tray menu. `character_line` (stage glyph, name, level) is a disabled first row when the
+/// user has a character; it never reaches anything but the local menu.
+fn build_menu(app: &AppHandle, character_line: Option<&str>) -> tauri::Result<Menu<tauri::Wry>> {
     let open_settings = MenuItem::with_id(app, "open_settings", "설정 열기", true, None::<&str>)?;
     let open_chat = MenuItem::with_id(app, "open_chat", "챗봇 입력", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "종료", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open_settings, &open_chat, &quit])?;
+    match character_line {
+        Some(line) => {
+            let character = MenuItem::with_id(app, "character_line", line, false, None::<&str>)?;
+            Menu::with_items(app, &[&character, &open_settings, &open_chat, &quit])
+        }
+        None => Menu::with_items(app, &[&open_settings, &open_chat, &quit]),
+    }
+}
+
+static CHARACTER_LINE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Shows the character in the menu bar menu (or removes the row). Rebuilds the menu only when the
+/// line changed.
+pub fn set_character_line(app: &AppHandle, line: Option<&str>) {
+    let Ok(mut shown) = CHARACTER_LINE.lock() else { return };
+    if shown.as_deref() == line {
+        return;
+    }
+    let Some(tray) = app.tray_by_id(TRAY_ID) else { return };
+    match build_menu(app, line).and_then(|menu| tray.set_menu(Some(menu))) {
+        Ok(()) => *shown = line.map(str::to_string),
+        Err(err) => tracing::warn!(error = %err, "failed to update the tray character line"),
+    }
+}
+
+pub fn install(app: &AppHandle) -> tauri::Result<()> {
+    let menu = build_menu(app, None)?;
     let icon = app
         .default_window_icon()
         .cloned()

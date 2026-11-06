@@ -6,6 +6,7 @@ use super::*;
 use crate::remote::ManualClock;
 
 const SQL: &str = include_str!("../../../../supabase/migrations/20260601000000_s2_core.sql");
+const S4_SQL: &str = include_str!("../../../../supabase/migrations/20260601000200_s4_rooms.sql");
 
 fn backend() -> (Arc<FakeBackend>, Arc<ManualClock>) {
     let clock = Arc::new(ManualClock::new(5_000_000));
@@ -185,9 +186,10 @@ fn rpc_contract_names_and_roles_are_implemented_and_present_in_the_sql() {
 #[test]
 fn every_matrix_table_exists_in_the_sql_with_rls_enabled() {
     let (backend, _, _) = two_users();
+    let sql = format!("{SQL}\n{S4_SQL}");
     for table in backend.table_names() {
-        assert!(SQL.contains(&format!("create table public.{table} (")), "{table} not created");
-        assert!(SQL.contains(&format!("alter table public.{table}")) && SQL.contains("enable row level security"), "{table} RLS");
+        assert!(sql.contains(&format!("create table public.{table} (")), "{table} not created");
+        assert!(sql.contains(&format!("alter table public.{table}")) && sql.contains("enable row level security"), "{table} RLS");
     }
 }
 

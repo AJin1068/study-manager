@@ -110,10 +110,12 @@ fn template_answer(input: &PromptInput) -> String {
         PromptInput::Ingest { text, .. } => pages_json(section_drafts(text)),
         PromptInput::Ask { pages, .. } => ask(pages),
         PromptInput::Merge { existing, note, .. } => merge(existing, note),
+        PromptInput::SharedMerge { parts, .. } => shared_merge(parts),
         PromptInput::Lint { pages, .. } => lint(pages),
         PromptInput::TabJudge { domain, label, .. } => tab_verdict(domain, label),
         PromptInput::PlanAdjust { items, now_min, day_end_min } => plan_adjust(items, *now_min, *day_end_min),
         PromptInput::PlanChat { .. } => json!({ "reply": "어떤 계획을 만들까요? 날짜와 과목을 알려 주세요." }).to_string(),
+        PromptInput::CharacterNames { looks } => crate::character::compose::mock_names_json(looks.len()),
         PromptInput::Insight(input) => json!({ "insight": crate::growth::rule_insight(input) }).to_string(),
     }
 }
@@ -124,6 +126,12 @@ fn merge(existing: &str, note: &str) -> String {
     let base = existing.trim_end();
     let merged = if base.is_empty() { format!("## 회고\n\n{}", bullets.join("\n")) } else { format!("{base}\n\n## 회고\n\n{}", bullets.join("\n")) };
     json!({"markdown": merged}).to_string()
+}
+
+/// Every part, one after the other under its own heading: nothing of any contribution is lost.
+fn shared_merge(parts: &[PromptPage]) -> String {
+    let merged: Vec<String> = parts.iter().enumerate().map(|(i, p)| format!("## 정리 {}\n\n{}", i + 1, p.body.trim())).collect();
+    json!({"markdown": merged.join("\n\n")}).to_string()
 }
 
 fn lint(pages: &[PromptPage]) -> String {

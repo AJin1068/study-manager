@@ -2,6 +2,7 @@
 //! React UI only calls the commands in `commands/` and listens for events.
 
 mod browser_link;
+mod character;
 mod chat;
 mod clock;
 mod commands;
@@ -21,11 +22,15 @@ mod plan_import;
 mod plan_shift;
 mod platform;
 mod points;
+mod profile;
+mod rooms;
 mod power;
 mod presets;
 pub mod quiz;
 pub mod remote;
 mod settings;
+mod shared_wiki;
+mod shop;
 mod site_rules;
 mod store;
 mod study;
@@ -93,6 +98,9 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     .with_llm_transports(llm::anthropic::ureq_factory()));
     // Mirror and presence workers: idle (nothing sent) until a server is configured and the user
     // is signed in. Sleep/wake events reach the presence worker through power::spawn below.
+    let rooms = Arc::new(rooms::service::RoomsService::new(Arc::clone(&db), Arc::clone(&remote), Arc::new(remote::SystemClock)));
+    app.manage(Arc::clone(&rooms));
+    app.manage(Arc::new(profile::service::ProfileService::new(Arc::clone(&db), Arc::clone(&remote), Arc::new(remote::SystemClock))));
     let sync = sync::app::start(Arc::clone(&db), Arc::clone(&remote), Arc::new(remote::SystemClock));
     let llm = Arc::new(llm::service::LlmService::new(Arc::clone(&db), Arc::clone(&remote), Arc::new(remote::SystemClock)));
     let wiki = Arc::new(wiki::service::WikiService::new(
@@ -105,7 +113,14 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let retro = Arc::new(wiki::retro_service::RetroService::new(Arc::clone(&db), Arc::clone(&llm), Arc::new(remote::SystemClock)));
     app.manage(retro);
     app.manage(Arc::new(chat::service::ChatService::new(Arc::clone(&db), Arc::clone(&llm), Arc::new(remote::SystemClock))));
+    app.manage(Arc::new(character::service::CharacterService::new(Arc::clone(&llm), Arc::new(remote::SystemClock))));
     app.manage(Arc::new(growth::GrowthService::new(Arc::clone(&db), Arc::clone(&llm), Arc::new(remote::SystemClock))));
+    app.manage(Arc::new(shared_wiki::service::SharedWikiService::new(
+        Arc::clone(&db),
+        Arc::clone(&remote),
+        Arc::new(remote::SystemClock),
+        Arc::clone(&llm),
+    )));
     let browser_llm = Arc::clone(&llm);
     let (engine, wakes) = timer::engine::channel();
     let health = Arc::new(timer::engine::EngineHealth::default());
@@ -129,6 +144,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         quiz: Arc::clone(&quiz),
     });
     tray::install(&handle)?;
+    character::refresh_tray(&handle, &db);
     install_quit_gate(&handle);
     let notifier: Arc<dyn platform::Notifier> = Arc::new(platform::PluginNotifier::new(handle.clone()));
     timer::engine::spawn(
@@ -151,6 +167,12 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     );
     enforce::spawn(handle.clone(), Arc::clone(&db), high_water, process, notifier);
     quiz::watch::spawn(handle.clone(), Arc::clone(&db), quiz);
+    let notice_handle = handle.clone();
+    rooms::service::spawn(rooms, move |notice| {
+        if let Err(err) = tauri::Emitter::emit(&notice_handle, "rooms://distraction", notice) {
+            tracing::error!(error = %err, "failed to emit a room notice");
+        }
+    });
     power::spawn(handle, db, session_id, events, engine, sync.presence.clone());
     Ok(())
 }
@@ -300,6 +322,21 @@ pub fn run() {
             commands::dashboard::get_dashboard_today,
             commands::dashboard::get_dashboard_week,
             commands::dashboard::get_weakness,
+            commands::rooms::rooms_list,
+            commands::rooms::rooms_create,
+            commands::rooms::rooms_join,
+            commands::rooms::rooms_leave,
+            commands::rooms::rooms_kick,
+            commands::rooms::rooms_create_invite,
+            commands::rooms::rooms_revoke_invite,
+            commands::rooms::rooms_parse_invite,
+            commands::rooms::rooms_open,
+            commands::rooms::rooms_close,
+            commands::rooms::rooms_feed,
+            commands::rooms::rooms_friend_settings,
+            commands::rooms::rooms_update_friend_setting,
+            commands::rooms::rooms_share_schedule,
+            commands::rooms::rooms_import_together,
             commands::remote::get_integration_states,
             commands::remote::set_integration_mode,
             commands::remote::get_remote_settings,
@@ -378,6 +415,37 @@ pub fn run() {
             commands::growth::get_weekly_insight,
             commands::growth::get_insight_subject,
             commands::growth::set_insight_subject,
+            commands::character::get_character,
+            commands::character::roll_character_candidates,
+            commands::character::choose_character,
+            commands::shared_wiki::shared_wiki_preview,
+            commands::shared_wiki::shared_wiki_share,
+            commands::shared_wiki::shared_wiki_sync,
+            commands::shared_wiki::shared_wiki_withdraw,
+            commands::shared_wiki::shared_wiki_room,
+            commands::shared_wiki::shared_wiki_acknowledge,
+            commands::shared_wiki::shared_wiki_merge,
+            commands::shared_wiki::shared_wiki_quiz_start,
+            commands::shared_wiki::shared_wiki_quiz_answer,
+            commands::shop::get_shop,
+            commands::shop::purchase_item,
+            commands::shop::equip_item,
+            commands::shop::unequip_slot,
+            commands::profile::profile_home,
+            commands::profile::profile_set_name,
+            commands::profile::profile_set_scope,
+            commands::profile::profile_set_wiki_titles,
+            commands::profile::profile_set_web_base,
+            commands::profile::profile_publish,
+            commands::profile::profile_my_view,
+            commands::profile::profile_member_view,
+            commands::profile::profile_sign_guestbook,
+            commands::profile::profile_delete_entry,
+            commands::profile::profile_report_entry,
+            commands::profile::gift_send,
+            commands::profile::gift_overview,
+            commands::profile::gift_accept,
+            commands::profile::gift_decline,
         ])
         .build(tauri::generate_context!())
         .unwrap_or_else(|err| {

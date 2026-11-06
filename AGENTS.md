@@ -5,8 +5,8 @@
 ## 1. 프로젝트 개요
 
 - 목적: 공부 시간 관리 데스크톱 앱. 공부 중 방해 요소(앱, 탭)를 관리하고 기록한다.
-- 현재 단계: **3단계(LLM Wiki 연동) 구현 완료(PDF 추출기 미연결), 사람 검증 대기.** 1단계 완료 기준(일주일 실사용), 2단계(실제 서버에서 5분 안 알림), 3단계(한 과목의 위키가 실제 공부로 자라나고 퀴즈가 나옴)는 사람이 확인해야 하며, 확인 전까지 단계 완료로 표기하지 않는다. 검증 안 된 항목은 `docs/stage-2-verification.md`, `docs/stage-3-verification.md`.
-- 모듈 구조: `src-tauri/src/` — `commands/`(`mod.rs`: AppState·종료 게이트, `settings`·`study`·`downtime`·`power`: Tauri command), `db/`(`mod.rs`, `migrations/mNNN_*.sql`), `store/`(SQL 접근, `remote.rs`는 반출 기록·동기화 커서), `remote/`(외부 포트: 포트·모드, HTTP 계층·호스트 정책, 봉인된 반출 페이로드, 비밀, Supabase·알림 어댑터, 가짜 서버), `sync/`(미러 워커, 켜짐 신호), `llm/`(LLM 포트·모의·Anthropic 어댑터·예산·봉인 프롬프트), `wiki/`(위키 저장소·넣기·묻기·회고·점검·주제 추천), `quiz/`(문제은행, 조기 해제 관문, 복습 카드), `chat/`(계획 챗봇), `messages/`(응원·채찍), `study_context.rs`, `plan_adjust.rs`, `growth.rs`, `plan_ics.rs`·`plan_import.rs`(ICS), `settings.rs`, `study.rs`(잠금·공부 모드), `downtime.rs`, `power.rs`, `platform/`, `tray.rs`, `clock.rs`, `error.rs`, 루트의 `supabase/`(마이그레이션·pgTAP·Edge Function `functions/`과 순수 로직 `functions/_shared`)와 `fixtures/`(Rust·TS 공유 계약). UI는 `src/` — `api/`(`index.ts`가 `settings`·`study`·`downtime` 재수출), `hooks/`, `pages/`. CI: `.github/workflows/ci.yml`(macOS·Windows).
+- 현재 단계: **4단계(스터디방) 구현 완료(Realtime 소켓 전송 미구현, 그림은 자리표시), 사람 검증 대기.** 1단계 완료 기준(일주일 실사용), 2단계(실제 서버에서 5분 안 알림), 3단계(한 과목의 위키가 실제 공부로 자라나고 퀴즈가 나옴), 4단계(친구 2명 이상이 같은 방에서 공부함; 실제 Postgres RLS 포함)는 사람이 확인해야 하며, 확인 전까지 단계 완료로 표기하지 않는다. 검증 안 된 항목은 `docs/stage-2-verification.md`, `docs/stage-3-verification.md`, `docs/stage-4-verification.md`.
+- 모듈 구조: `src-tauri/src/` — `commands/`(`mod.rs`: AppState·종료 게이트, `settings`·`study`·`downtime`·`power`: Tauri command), `db/`(`mod.rs`, `migrations/mNNN_*.sql`), `store/`(SQL 접근, `remote.rs`는 반출 기록·동기화 커서), `remote/`(외부 포트: 포트·모드, HTTP 계층·호스트 정책, 봉인된 반출 페이로드, 비밀, Supabase·알림 어댑터, 가짜 서버), `sync/`(미러 워커, 켜짐 신호), `llm/`(LLM 포트·모의·Anthropic 어댑터·예산·봉인 프롬프트), `wiki/`(위키 저장소·넣기·묻기·회고·점검·주제 추천), `quiz/`(문제은행, 조기 해제 관문, 복습 카드), `chat/`(계획 챗봇), `messages/`(응원·채찍), `rooms/`(스터디방 포트·폴링·랭킹·Realtime 코덱), `character/`(캐릭터 조합·자리표시 SVG 렌더, 데이터 `src-tauri/assets/character/`), `shop/`(상점), `profile/`(프로필 홈·방명록·선물), `shared_wiki/`(공유 위키), `study_context.rs`, `plan_adjust.rs`, `growth.rs`, `plan_ics.rs`·`plan_import.rs`(ICS), `settings.rs`, `study.rs`(잠금·공부 모드), `downtime.rs`, `power.rs`, `platform/`, `tray.rs`, `clock.rs`, `error.rs`, 루트의 `supabase/`(마이그레이션·pgTAP·Edge Function `functions/`과 순수 로직 `functions/_shared`)와 `fixtures/`(Rust·TS 공유 계약). 웹 보기는 루트 `web/`(+ `vite.web.config.ts`, `pnpm build:web`). UI는 `src/` — `api/`(`index.ts`가 `settings`·`study`·`downtime` 재수출), `hooks/`, `pages/`. CI: `.github/workflows/ci.yml`(macOS·Windows).
 
 ## 1-1. 요구사항 기준 (가장 먼저 읽을 것)
 
@@ -90,7 +90,7 @@
   - 개인정보: 창 제목/URL이 로그와 외부 전송 경로에 나오지 않는지 확인.
 - CI에 macOS와 Windows 빌드 매트릭스를 두는 것을 목표로 한다. 설정 전까지는 두 OS에서 수동 빌드 결과를 보고한다.
 - 검증하지 않은 항목은 "검증 안 됨"이라고 명시한다. 단계 문서(`docs/stage-N-verification.md`)에 `V{N}-{k} | 스토리 | 항목 | 안 된 이유 | 사람이 하는 한 줄 절차` 표로 남긴다.
-- 2·3단계 게이트 명령: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, `pnpm tsc --noEmit`, `pnpm lint`, `pnpm test`(루트 vitest가 `supabase/**` 시험 포함). 실제 Postgres가 필요한 `supabase test db`는 Docker가 있을 때만 돌리고 없으면 V2-8로 남긴다.
+- 2~4단계 게이트 명령: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, `pnpm tsc --noEmit`, `pnpm lint`, `pnpm test`(루트 vitest가 `supabase/**`·`web/**` 시험 포함), 웹 변경 시 `pnpm build:web`. 실제 Postgres가 필요한 `supabase test db`는 Docker가 있을 때만 돌리고 없으면 V2-8로 남긴다.
 
 ## 9. 문서와 파일
 
@@ -116,4 +116,5 @@
 - 동기화 모델(2단계): 쓰기는 PC 한 곳, 로컬 SQLite가 진실, Supabase는 읽기용 미러. 서버가 죽어도 로컬 기능은 약해지지 않는다.
 - 놓친 계획 알림(2단계): 유예 기본 3분(최대 3), 서버 감지 1분 주기, 문구 무과목. Telegram 봇은 공유 봇 1개(토큰은 Edge 비밀), 기본 채널 ntfy.
 - LLM 3단계: 키·동의 전 전송 0(`llm.enabled`, `llm.judge_enabled` 기본 꺼짐; PLAN 13번의 「LLM 판단 켜기: 켜짐」에서 의도적으로 변경). 위키 퀴즈는 조기 해제에만 관문이며 시도 소진 시 조기 해제는 타이핑으로 열리지 않는다(`docs/stage-3-verification.md` 잔여 위험). 근거 `docs/decision-llm-egress.md`.
+- 스터디방(4단계): 친구 = 같은 방 멤버. 서버 쓰기는 전부 `security definer` RPC(반환 코드 `{"code": ...}`), 방 화면은 `room_snapshot`/`list_my_rooms`만 읽는다. 기본 공개는 레벨·상태뿐이고 켜는 방향은 run 중 잠긴다. 공유 위키는 공유 표시+확인 화면을 거친 페이지만, LLM 합치기는 별도 동의(기본 꺼짐)한 기여분만 보낸다. 딴짓 통계·앱 이름·창 제목·MBTI·출생연도는 방·프로필에 올리지 않는다. 캐릭터 그림은 자리표시이며 교체 절차는 `docs/art-assets.md`. 실제 RLS는 `supabase test db`로 사람이 확인(`docs/stage-4-verification.md` V4-1).
 - 공부 모드 기본 길이: 쉬움 25/5분(4세트마다 20분), 중간 50/15분, 어려움 90/10분 (PLAN.md 17번).
