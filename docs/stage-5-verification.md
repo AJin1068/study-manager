@@ -10,7 +10,7 @@
 |---|---|---|---|
 | S5.0 | 모바일 구성 스파이크 | 완료(문서 조사만, 빌드 시도 없음) | 옵션 A(Tauri 모바일)의 타당성은 조사 결론일 뿐 V5-1 |
 | S5.1 | `crates/link-protocol`(타입, `lock_decision`, `LeaseHolder`) | 완료(호스트 시험) | Android 타깃 컴파일 V5-1 |
-| S5.2 | 서버 스키마·익명 로그인·`claim_pair`·해제 | 구현. **SQL은 실행된 적 없음**(FakeBackend 의미와 정적 문자열 시험만) | V5-2 |
+| S5.2 | 서버 스키마·익명 로그인·`claim_pair`·해제 | 구현. **SQL은 실제 Supabase에서 실행된 적 없음**(임시 Postgres 16+pgTAP 대용으로 한 번 통과, FakeBackend 의미와 정적 문자열 시험) | V5-2 |
 | S5.3 | PC 신호 발행, 폰 비트 간격(`phone_gap`), 폰 공통 화면 모델 | **부분**: PC 쪽(발행 큐·재시도·간격 행·경고)은 완료. 폰 쪽은 `phone/` 프로젝트가 **작성되었다**: `phone/core`(임대 폴링 드라이버 `PhonePoller`, 익명 로그인·`claim_pair`·`phone_lease`·`phone_beat` REST 어댑터, 짝짓기, 시간표·타이머·진단 모델; 호스트 `cargo test` 통과), `phone/src-tauri`(Tauri 2 모바일 셸: 상태 저장, 폴링 스레드, 명령 8개; 호스트 `cargo check`/`cargo test` 통과), `phone/src`(React 화면 4개: 시간표·타이머·진단·QR 짝짓기). **안드로이드용으로는 한 번도 빌드되지 않았다**(`#[cfg(target_os = "android")]` 가지와 `tauri-plugin-barcode-scanner` 의존은 호스트에서 컴파일되지 않음). 알려진 빈틈: ① 서버가 짝지은 폰에 계획 행을 주는 경로가 없어(폰 권한은 `phone_*` 표뿐) 시간표 화면은 항상 「표시할 시간표 없음」, ② 포그라운드 서비스를 쓰지 않아 폴링 스레드는 앱 프로세스가 죽으면 멈추고(플러그인의 이미 걸린 잠금은 자체 마감까지 유지), ③ 화면 켜짐 횟수를 세는 폰 쪽 코드가 없어 폰은 집어 든 횟수를 보고하지 않는다 | V5-1, V5-3, V5-5 |
 | S5.4 | `PhoneBlocker` 포트, `MockBlocker`, Kotlin 소스 | 포트·모의·계약 fixtures 완료. Kotlin 소스(접근성 서비스, 전체 화면 차단 액티비티, 허용 목록과 항상 허용되는 긴급 전화, 서비스 꺼짐 감지, 잠금 중 설정 앱 진입 차단, 부팅 후 복구)는 작성만 됨(**컴파일·실행 안 됨**). 이를 구동하는 곳은 이제 `phone/src-tauri`(`PluginSlot` → `AndroidAccessibilityBlocker`, 플러그인 이벤트는 웹뷰가 `addPluginListener`로 받아 Rust로 전달)이지만 **한 번도 안드로이드에서 실행되지 않았다**. 서비스 꺼짐은 `phone_beat(service_enabled=false)`로 보고되고 서버가 `phone_gap(service_disabled)`로 만든다는 연결은 호스트 시험(가짜 링크·모의 차단기)으로만 확인 | V5-1, V5-4, V5-5 |
 | S5.5 | 폰 집어 든 횟수 | 완료(호스트 시험). 점수 감점 없음(통계 표시만, O-23) | 기기 정확도 V5-6 |
