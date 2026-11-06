@@ -20,6 +20,7 @@ mod plan_ics;
 mod plan_adjust;
 mod plan_import;
 mod plan_shift;
+pub mod phone;
 mod platform;
 mod points;
 mod profile;
@@ -101,6 +102,19 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let rooms = Arc::new(rooms::service::RoomsService::new(Arc::clone(&db), Arc::clone(&remote), Arc::new(remote::SystemClock)));
     app.manage(Arc::clone(&rooms));
     app.manage(Arc::new(profile::service::ProfileService::new(Arc::clone(&db), Arc::clone(&remote), Arc::new(remote::SystemClock))));
+    app.manage(Arc::new(phone::pairing::PairingService::new(Arc::clone(&db), Arc::clone(&remote), Arc::new(remote::SystemClock))));
+    // Publishes the phone lock lease and watches the phone's heartbeat from its own thread; idle
+    // until a phone is paired. The timer engine and the release commands only wake it.
+    let phone_diag = Arc::new(phone::publisher::Diagnostics::default());
+    let phone_publisher = phone::publisher::spawn(phone::publisher::Publisher::new(
+        Arc::clone(&db),
+        Arc::new(remote::SystemClock),
+        phone::pairing::app_backend(Arc::clone(&db), Arc::clone(&remote)),
+        chrono::Local,
+        Arc::clone(&high_water),
+        Arc::clone(&phone_diag),
+    ));
+    app.manage(phone_diag);
     let sync = sync::app::start(Arc::clone(&db), Arc::clone(&remote), Arc::new(remote::SystemClock));
     let llm = Arc::new(llm::service::LlmService::new(Arc::clone(&db), Arc::clone(&remote), Arc::new(remote::SystemClock)));
     let wiki = Arc::new(wiki::service::WikiService::new(
@@ -142,6 +156,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         llm,
         wiki,
         quiz: Arc::clone(&quiz),
+        phone: phone_publisher.clone(),
     });
     tray::install(&handle)?;
     character::refresh_tray(&handle, &db);
@@ -154,6 +169,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         health,
         wakes,
         Arc::clone(&notifier),
+        phone_publisher,
     );
     browser_link::spawn(Arc::clone(&db), Arc::clone(&high_water), browser_link, browser_llm, data_dir);
     focus::spawn(Arc::clone(&db), Arc::clone(&high_water), focus_probe);
@@ -356,6 +372,12 @@ pub fn run() {
             commands::llm::get_llm_settings,
             commands::llm::update_llm_setting,
             commands::llm::get_llm_status,
+            commands::phone::phone_pair_start,
+            commands::phone::phone_pair_status,
+            commands::phone::phone_pair_revoke,
+            commands::phone::get_phone_link,
+            commands::phone_install::get_phone_install,
+            commands::phone_install::update_phone_apk_link,
             commands::wiki::list_wiki_subjects,
             commands::wiki::create_wiki_subject,
             commands::wiki::ensure_wiki_subject,

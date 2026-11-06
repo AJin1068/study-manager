@@ -1,0 +1,11 @@
+{
+  "comment": "S5.1 wire samples shared by crates/link-protocol (tests/fixtures.rs), the desktop app (src-tauri phone::wire tests) and the phone project. Field names are snake_case on the wire. The offer carries only a one-time code, the server address and the PUBLIC anon key.",
+  "pairingOffer": { "v": 1, "code": "ABCDEFGHJK", "endpoint": "https://proj.supabase.co", "anon_key": "anon-public-key" },
+  "pairingOfferQrText": "{\"v\":1,\"code\":\"ABCDEFGHJK\",\"endpoint\":\"https://proj.supabase.co\",\"anon_key\":\"anon-public-key\"}",
+  "lockedLease": { "run_id": "run-1", "seq": 7, "state": "locked", "release_cause": null, "issued_at_ms": 1000000, "valid_until_ms": 1600000 },
+  "freeLease": { "run_id": "run-1", "seq": 8, "state": "free", "release_cause": "emergency_pass", "issued_at_ms": 1200000, "valid_until_ms": 1200000 },
+  "beat": { "lease_seq": 7, "locked": true, "service_enabled": true },
+  "pickup": { "segment_id": "run-1:2", "count": 3 },
+  "phoneLockLocked": { "state": "locked" },
+  "phoneLockFree": { "state": "free", "reason": "lease_expired" }
+}

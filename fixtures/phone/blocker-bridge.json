@@ -1,0 +1,126 @@
+{
+  "comment": "Blocker plugin contract (S5.4). Read by src-tauri/src/phone/{allow_list,blocker_port,android_blocker}.rs, by src/api/phoneBlocker.test.ts and by the Kotlin plugin in phone/plugins/blocker/android/. Package names here are placeholders; the allow list never leaves the phone.",
+  "commands": {
+    "engage": {
+      "request": {
+        "run_id": "run-1",
+        "seq": 3,
+        "remaining_ms": 1860000,
+        "allow": { "roles": ["emergency_call", "dialer", "messages"], "packages": ["com.example.notes"] }
+      },
+      "replies": [
+        { "name": "engaged", "reply": { "ok": true }, "result": "ok" },
+        { "name": "service switched off", "reply": { "ok": false, "code": "service_disabled" }, "result": "service_disabled" },
+        { "name": "plugin rejects the request", "reply": { "ok": false, "code": "invalid_request" }, "result": "refused" },
+        { "name": "plugin failure", "reply": { "ok": false, "code": "internal" }, "result": "refused" }
+      ]
+    },
+    "release": {
+      "request": {},
+      "replies": [
+        { "name": "released", "reply": { "ok": true }, "result": "ok" },
+        { "name": "plugin failure", "reply": { "ok": false, "code": "internal" }, "result": "refused" }
+      ]
+    },
+    "status": {
+      "request": {},
+      "replies": [
+        { "name": "blocking", "reply": { "kind": "active" }, "status": { "kind": "active" } },
+        { "name": "idle", "reply": { "kind": "inactive" }, "status": { "kind": "inactive" } },
+        { "name": "service off", "reply": { "kind": "service_disabled" }, "status": { "kind": "service_disabled" } },
+        { "name": "unknown kind", "reply": { "kind": "locked" }, "status": { "kind": "unreachable" } }
+      ]
+    }
+  },
+  "events": [
+    {
+      "name": "service switched off during a lock",
+      "event": { "event": "service_disabled" },
+      "before": { "lease_seq": 3, "locked": true, "service_enabled": true },
+      "after": { "lease_seq": 3, "locked": true, "service_enabled": false }
+    },
+    {
+      "name": "service switched back on",
+      "event": { "event": "service_enabled" },
+      "before": { "lease_seq": 3, "locked": true, "service_enabled": false },
+      "after": { "lease_seq": 3, "locked": true, "service_enabled": true }
+    },
+    {
+      "name": "device ended the lock",
+      "event": { "event": "lock_ended" },
+      "before": { "lease_seq": 3, "locked": true, "service_enabled": true },
+      "after": { "lease_seq": 3, "locked": false, "service_enabled": true }
+    }
+  ],
+  "allowList": {
+    "emergencyRole": "emergency_call",
+    "maxCustomPackages": 50,
+    "valid": [
+      {
+        "name": "defaults",
+        "input": { "roles": ["emergency_call", "dialer", "messages"], "packages": [] },
+        "wire": { "roles": ["emergency_call", "dialer", "messages"], "packages": [] }
+      },
+      {
+        "name": "emergency call is added when missing",
+        "input": { "roles": ["messages"], "packages": [] },
+        "wire": { "roles": ["emergency_call", "messages"], "packages": [] }
+      },
+      {
+        "name": "no roles still keeps the emergency call",
+        "input": { "roles": [], "packages": [] },
+        "wire": { "roles": ["emergency_call"], "packages": [] }
+      },
+      {
+        "name": "roles are ordered, packages sorted and deduplicated",
+        "input": { "roles": ["messages", "dialer", "emergency_call", "dialer"], "packages": ["com.b.app", "com.a.app", "com.b.app"] },
+        "wire": { "roles": ["emergency_call", "dialer", "messages"], "packages": ["com.a.app", "com.b.app"] }
+      }
+    ],
+    "invalid": [
+      { "name": "unknown role", "input": { "roles": ["camera"], "packages": [] }, "error": "unknown_role" },
+      { "name": "settings app", "input": { "roles": [], "packages": ["com.android.settings"] }, "error": "settings_package" },
+      { "name": "settings subpackage, any case", "input": { "roles": [], "packages": ["com.Android.Settings.intelligence"] }, "error": "settings_package" },
+      { "name": "permission controller", "input": { "roles": [], "packages": ["com.google.android.permissioncontroller"] }, "error": "settings_package" },
+      { "name": "single segment", "input": { "roles": [], "packages": ["notes"] }, "error": "invalid_package" },
+      { "name": "empty segment", "input": { "roles": [], "packages": ["com..app"] }, "error": "invalid_package" },
+      { "name": "segment starts with a digit", "input": { "roles": [], "packages": ["com.1app"] }, "error": "invalid_package" },
+      { "name": "not an object", "input": ["emergency_call"], "error": "malformed" },
+      { "name": "extra field", "input": { "roles": [], "packages": [], "apps": [] }, "error": "malformed" },
+      { "name": "package is not a string", "input": { "roles": [], "packages": [1] }, "error": "malformed" },
+      { "name": "roles missing", "input": { "packages": [] }, "error": "malformed" }
+    ]
+  },
+  "leaseMapping": [
+    {
+      "name": "locked lease with time left",
+      "lease": { "run_id": "run-1", "seq": 3, "state": "locked", "release_cause": null, "issued_at_ms": 1000000, "valid_until_ms": 2860000 },
+      "remaining_ms": 1860000,
+      "expect": { "run_id": "run-1", "seq": 3, "remaining_ms": 1860000 }
+    },
+    {
+      "name": "free lease is released, never engaged",
+      "lease": { "run_id": "run-1", "seq": 4, "state": "free", "release_cause": "emergency_pass", "issued_at_ms": 1000000, "valid_until_ms": 1000000 },
+      "remaining_ms": 60000,
+      "expect": { "error": "not_locked" }
+    },
+    {
+      "name": "no time left",
+      "lease": { "run_id": "run-1", "seq": 3, "state": "locked", "release_cause": null, "issued_at_ms": 1000000, "valid_until_ms": 2860000 },
+      "remaining_ms": 0,
+      "expect": { "error": "bad_remaining" }
+    },
+    {
+      "name": "longer than any lease may be",
+      "lease": { "run_id": "run-1", "seq": 3, "state": "locked", "release_cause": null, "issued_at_ms": 1000000, "valid_until_ms": 2860000 },
+      "remaining_ms": 10860001,
+      "expect": { "error": "bad_remaining" }
+    },
+    {
+      "name": "invalid lease (locked with a cause)",
+      "lease": { "run_id": "run-1", "seq": 3, "state": "locked", "release_cause": "run_ended", "issued_at_ms": 1000000, "valid_until_ms": 2860000 },
+      "remaining_ms": 1000,
+      "expect": { "error": "not_locked" }
+    }
+  ]
+}

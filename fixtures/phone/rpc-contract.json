@@ -1,0 +1,16 @@
+{
+  "comment": "S5.2/S5.3/S5.5 server RPCs shared by supabase/migrations/*_s5_phone.sql, the Rust FakeBackend and the real adapters. Every RPC returns jsonb {\"code\": ...}; failures come back as codes, never RAISE (so the claim_pair attempt counter is not rolled back). All RPCs are for signed-in callers (the phone is an anonymous Supabase user, role authenticated); the anon role may run none. The caller is always auth.uid(), never a parameter. 'internal' functions are not callable by any client role.",
+  "rpcs": [
+    { "name": "create_pair_code", "params": [], "returns": ["ok", "not_signed_in", "anonymous_not_allowed", "already_paired", "invalid_input"], "roles": ["authenticated"] },
+    { "name": "claim_pair", "params": ["p_code"], "returns": ["ok", "not_signed_in", "rate_limited", "invalid_code", "used", "expired", "cannot_self", "already_paired", "phone_already_paired"], "roles": ["authenticated"] },
+    { "name": "revoke_pair", "params": [], "returns": ["ok", "not_signed_in", "not_found"], "roles": ["authenticated"] },
+    { "name": "phone_status", "params": [], "returns": ["ok", "not_signed_in"], "roles": ["authenticated"] },
+    { "name": "publish_phone_lock", "params": ["p_seq", "p_run_id", "p_state", "p_release_cause", "p_valid_until_ms"], "returns": ["ok", "not_signed_in", "invalid_input", "lease_too_long", "stale_seq"], "roles": ["authenticated"] },
+    { "name": "phone_lease", "params": [], "returns": ["ok", "not_signed_in", "not_paired"], "roles": ["authenticated"] },
+    { "name": "phone_beat", "params": ["p_lease_seq", "p_locked", "p_service_enabled"], "returns": ["ok", "not_signed_in", "not_paired", "invalid_input"], "roles": ["authenticated"] },
+    { "name": "report_phone_pickups", "params": ["p_segment_id", "p_count"], "returns": ["ok", "not_signed_in", "not_paired", "invalid_input"], "roles": ["authenticated"] }
+  ],
+  "internal": [
+    { "name": "phone_owner_of", "params": ["p_phone"] }
+  ]
+}

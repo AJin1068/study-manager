@@ -144,6 +144,22 @@ pub struct ReleaseUsage {
     pub aborted_runs: i64,
 }
 
+/// What the paired phone reported, as plain statistics. Time the phone was not under the lock is
+/// shown on its own (like `AppOffStat`) and pick-ups are only counted: neither changes the focus
+/// score or any point (decision O-23, revisited after real use).
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PhoneStat {
+    /// Union of every gap (unreachable, lease expired, service disabled) inside the window.
+    pub unreachable_ms: i64,
+    pub gaps: i64,
+    pub service_disabled_gaps: i64,
+    /// Study sets of the window the phone sent a pick-up count for.
+    pub pickup_sets_reported: i64,
+    pub pickup_sets_with_pickups: i64,
+    pub pickups_total: i64,
+}
+
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Weakness {
@@ -159,6 +175,7 @@ pub struct Weakness {
     pub postponed_plans: Vec<PostponedPlan>,
     pub app_off: AppOffStat,
     pub releases: ReleaseUsage,
+    pub phone: PhoneStat,
 }
 
 // ---- pure folds ----
@@ -440,5 +457,21 @@ pub fn weakness<Tz: TimeZone>(conn: &Connection, tz: &Tz, now_ms: i64) -> AppRes
             planned_overlap_ms: overlap_ms(off, planned),
         },
         releases: ReleaseUsage { emergency_pass, skip_today, early_release, aborted_runs },
+        phone: phone_stat(conn, from_ms, to_ms)?,
+    })
+}
+
+/// The phone's gaps (clipped to the window, each stretch of time counted once) and pick-up counts.
+fn phone_stat(conn: &Connection, from_ms: i64, to_ms: i64) -> AppResult<PhoneStat> {
+    let gaps = store::phone::gaps_between(conn, from_ms, to_ms)?;
+    let spans: Vec<Interval> = gaps.iter().map(|g| Interval { start: g.start_ms.max(from_ms), end: g.end_ms.min(to_ms) }).collect();
+    let (pickup_sets_reported, pickup_sets_with_pickups, pickups_total) = store::phone::pickup_totals(conn, from_ms, to_ms)?;
+    Ok(PhoneStat {
+        unreachable_ms: merge(spans).iter().map(|i| (i.end - i.start).max(0)).sum(),
+        gaps: i64::try_from(gaps.len()).unwrap_or(0),
+        service_disabled_gaps: i64::try_from(gaps.iter().filter(|g| g.kind == "service_disabled").count()).unwrap_or(0),
+        pickup_sets_reported,
+        pickup_sets_with_pickups,
+        pickups_total,
     })
 }

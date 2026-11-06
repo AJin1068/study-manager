@@ -29,7 +29,9 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: |
+            src-tauri
+            crates/link-protocol
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
@@ -45,6 +47,12 @@ jobs:
         working-directory: src-tauri
         run: |
           cargo check --all-targets
+          cargo clippy --all-targets -- -D warnings
+          cargo test
+
+      - name: Link protocol crate (shared with the phone app)
+        working-directory: crates/link-protocol
+        run: |
           cargo clippy --all-targets -- -D warnings
           cargo test
 

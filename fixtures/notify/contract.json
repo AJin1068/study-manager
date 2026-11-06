@@ -75,5 +75,98 @@
     "ftp://ntfy.sh",
     "not a url"
   ],
-  "safeNtfyServers": ["https://ntfy.sh", "https://ntfy.sh/", "https://ntfy.example.org"]
+  "safeNtfyServers": ["https://ntfy.sh", "https://ntfy.sh/", "https://ntfy.example.org"],
+  "phoneApp": {
+    "comment": "The phone_app channel (S5.7). The desktop mirrors the SAME ntfy topic and server it uses for the ntfy channel (notify_channels.ntfy_topic/ntfy_server); the Edge Function posts to it exactly as for ntfy, and the phone app polls it and shows a local notification. A phone_app row without a topic is invalid: the desktop mirrors such a configuration as 'none' and the server refuses to store it. The phone only ever shows the fixed phrases below; any other text arriving on the topic is shown as genericBody.",
+    "channelRow": {
+      "channel": "phone_app",
+      "ntfy_topic": "abcdefghijklmnopqrstuvwx",
+      "ntfy_server": "https://ntfy.sh",
+      "telegram_chat_id": null,
+      "missed_grace_min": 3,
+      "utc_offset_min": 540
+    },
+    "rowWithoutTopic": "none",
+    "poll": {
+      "route": "{server}/{topic}/json?poll=1&since={cursor}",
+      "requests": [
+        {
+          "name": "first poll, since a time",
+          "server": "https://ntfy.sh",
+          "topic": "abcdefghijklmnopqrstuvwx",
+          "cursor": {
+            "time": 1780000000
+          },
+          "expectUrl": "https://ntfy.sh/abcdefghijklmnopqrstuvwx/json?poll=1&since=1780000000"
+        },
+        {
+          "name": "next poll, after a message id",
+          "server": "https://ntfy.example.org/",
+          "topic": "abcdefghijklmnopqrstuvwx",
+          "cursor": {
+            "id": "msgAbc123"
+          },
+          "expectUrl": "https://ntfy.example.org/abcdefghijklmnopqrstuvwx/json?poll=1&since=msgAbc123"
+        }
+      ],
+      "response": [
+        {
+          "id": "o1",
+          "time": 1780000001,
+          "event": "open",
+          "topic": "abcdefghijklmnopqrstuvwx"
+        },
+        {
+          "id": "m1",
+          "time": 1780000002,
+          "event": "message",
+          "topic": "abcdefghijklmnopqrstuvwx",
+          "title": "Study Manager",
+          "message": "20:05인데 아직 안 앉았어! 신호가 없어요."
+        },
+        {
+          "id": "k1",
+          "time": 1780000003,
+          "event": "keepalive",
+          "topic": "abcdefghijklmnopqrstuvwx"
+        },
+        {
+          "id": "m2",
+          "time": 1780000004,
+          "event": "message",
+          "topic": "abcdefghijklmnopqrstuvwx",
+          "message": "테스트 알림이에요. 잘 보이나요?"
+        },
+        {
+          "id": "m3",
+          "time": 1780000005,
+          "event": "message",
+          "topic": "abcdefghijklmnopqrstuvwx",
+          "message": "수학 문제집 3장 풀 시간이야"
+        }
+      ],
+      "expectBodies": [
+        "20:05인데 아직 안 앉았어! 신호가 없어요.",
+        "테스트 알림이에요. 잘 보이나요?",
+        "새 알림이 도착했어요."
+      ],
+      "expectCursorId": "m3"
+    },
+    "bodies": {
+      "generic": "새 알림이 도착했어요.",
+      "fixed": [
+        "테스트 알림이에요. 잘 보이나요?",
+        "00:00인데 아직 안 앉았어! 신호가 없어요.",
+        "23:59인데 아직 안 앉았어! 신호가 없어요."
+      ],
+      "replacedByGeneric": [
+        "수학 문제집 3장 풀 시간이야",
+        "24:00인데 아직 안 앉았어! 신호가 없어요.",
+        "8:05인데 아직 안 앉았어! 신호가 없어요.",
+        "20:05인데 아직 안 앉았어! 신호가 없어요. 수학",
+        "20:60인데 아직 안 앉았어! 신호가 없어요.",
+        ""
+      ]
+    }
+  }
 }

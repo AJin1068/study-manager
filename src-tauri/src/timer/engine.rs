@@ -18,6 +18,7 @@ use tauri::{AppHandle, Emitter};
 use crate::clock::now_ms;
 use crate::commands::lock_db;
 use crate::error::AppResult;
+use crate::phone::publisher::PublisherHandle;
 use crate::platform::{self, Notifier};
 use crate::tray;
 
@@ -243,6 +244,7 @@ pub fn spawn(
     health: Arc<EngineHealth>,
     wakes: Receiver<WakeReason>,
     notifier: Arc<dyn Notifier>,
+    phone: PublisherHandle,
 ) {
     thread::spawn(move || {
         // Held for the thread's life so macOS does not throttle the timer while the window is hidden.
@@ -279,6 +281,11 @@ pub fn spawn(
             });
             match outcome {
                 Supervised::Done { value, recovered } => {
+                    // A segment change is a transition the phone follows: wake its publisher (a
+                    // channel send, it never waits for the server).
+                    if value.iter().any(|e| matches!(e, Emission::TimerChanged(_))) {
+                        phone.wake();
+                    }
                     emit_all(&app, value);
                     if let Some(state) = last.as_ref() {
                         tray::apply_label(&app, &mut tray_label, tray::tray_label(state));

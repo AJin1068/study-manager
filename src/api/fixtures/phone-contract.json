@@ -1,0 +1,27 @@
+{
+  "start": { "code": "ok", "displayCode": "ABCDE-FGHJK", "expiresAtMs": 1793975700000, "qrSvg": "<svg></svg>" },
+  "refusedStart": { "code": "rate_limited", "displayCode": null, "expiresAtMs": null, "qrSvg": null },
+  "status": { "paired": true, "pairedAtMs": 1793975000000, "lastBeatMs": 1793975100000, "serviceEnabled": true, "online": true },
+  "unpaired": { "paired": false, "pairedAtMs": null, "lastBeatMs": null, "serviceEnabled": null, "online": false },
+  "ack": { "code": "run_locked" },
+  "link": {
+    "paired": true,
+    "wantLocked": true,
+    "published": { "seq": 4, "state": "locked", "reason": null, "atMs": 1793975400000 },
+    "publishFailing": false,
+    "lastError": null,
+    "openGaps": [{ "kind": "unreachable", "sinceMs": 1793975100000 }],
+    "lastBeatMs": 1793975100000,
+    "serviceEnabled": true
+  },
+  "linkIdle": {
+    "paired": false,
+    "wantLocked": false,
+    "published": null,
+    "publishFailing": false,
+    "lastError": null,
+    "openGaps": [],
+    "lastBeatMs": null,
+    "serviceEnabled": null
+  }
+}

@@ -86,6 +86,18 @@ export interface ReleaseUsage {
   abortedRuns: number;
 }
 
+/** What the paired phone reported: statistics only, never a score or point change. */
+export interface PhoneStat {
+  /** Time the phone was not under the lock (every kind of gap, each stretch counted once). */
+  unreachableMs: number;
+  gaps: number;
+  serviceDisabledGaps: number;
+  /** Study sets of the window the phone sent a pick-up count for. */
+  pickupSetsReported: number;
+  pickupSetsWithPickups: number;
+  pickupsTotal: number;
+}
+
 export interface Weakness {
   fromMs: number;
   toMs: number;
@@ -99,6 +111,7 @@ export interface Weakness {
   postponedPlans: PostponedPlan[];
   appOff: AppOffStat;
   releases: ReleaseUsage;
+  phone: PhoneStat;
 }
 
 type Rec = Record<string, unknown>;
@@ -187,6 +200,19 @@ function isReleaseUsage(value: unknown): boolean {
   return r !== null && num(r.emergencyPass) && num(r.skipToday) && num(r.earlyRelease) && num(r.abortedRuns);
 }
 
+function isPhoneStat(value: unknown): boolean {
+  const r = rec(value);
+  return (
+    r !== null &&
+    num(r.unreachableMs) &&
+    num(r.gaps) &&
+    num(r.serviceDisabledGaps) &&
+    num(r.pickupSetsReported) &&
+    num(r.pickupSetsWithPickups) &&
+    num(r.pickupsTotal)
+  );
+}
+
 /** Seven rows of 24 counts. */
 export function isHeatmap(value: unknown): value is number[][] {
   return Array.isArray(value) && value.length === 7 && value.every((row) => Array.isArray(row) && row.length === 24 && row.every(num));
@@ -205,7 +231,8 @@ export function isWeakness(value: unknown): value is Weakness {
     isHeatmap(r.heatmap) &&
     listOf(r.postponedPlans, isPostponedPlan) &&
     isAppOffStat(r.appOff) &&
-    isReleaseUsage(r.releases)
+    isReleaseUsage(r.releases) &&
+    isPhoneStat(r.phone)
   );
 }
 

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="blocker_service_label">공부 시간 잠금</string>
+    <string name="blocker_service_description">공부 시간에 허용하지 않은 앱이 앞에 나오면 차단 화면을 보여줘요. 어떤 앱을 열었는지는 기록하거나 보내지 않아요.</string>
+    <string name="blocker_title">지금은 공부 시간이에요</string>
+    <string name="blocker_remaining">남은 시간 %1$s</string>
+    <string name="blocker_home">홈으로</string>
+    <string name="blocker_emergency_hint">긴급 전화는 언제든 걸 수 있어요.</string>
+</resources>

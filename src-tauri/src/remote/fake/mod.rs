@@ -15,6 +15,7 @@ use super::auth::{AuthError, AuthProvider, AuthTokens, DeviceDirectory};
 use super::http::{HttpRequest, HttpResponse, HttpTransport, Method, TransportError};
 use super::Clock;
 
+mod phone;
 mod profile;
 mod rooms;
 mod shared_wiki;
@@ -32,6 +33,7 @@ const RPC_CONTRACT: &str = include_str!("../../../../fixtures/sync/rpc-contract.
 const ROOMS_MATRIX: &str = include_str!("../../../../fixtures/rooms/rls-matrix.json");
 const ROOMS_CONTRACT: &str = include_str!("../../../../fixtures/rooms/rpc-contract.json");
 const PROFILE_CONTRACT: &str = include_str!("../../../../fixtures/profile/rpc-contract.json");
+const PHONE_CONTRACT: &str = include_str!("../../../../fixtures/phone/rpc-contract.json");
 const SHARED_WIKI_CONTRACT: &str = include_str!("../../../../fixtures/shared_wiki/rpc-contract.json");
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -110,6 +112,7 @@ struct State {
     verify_calls: u32,
     next_row_id: i64,
     rooms: rooms::RoomsState,
+    phone: phone::PhoneState,
     profile: profile::ProfileState,
     shared_wiki: shared_wiki::SharedWikiState,
 }
@@ -261,6 +264,10 @@ impl FakeBackend {
     // ---- data API with the RLS matrix ----
 
     fn permitted(&self, caller: &Caller, table: &str, op: Op) -> Result<Option<String>, DataError> {
+        if phone::ALL_TABLES.contains(&table) && !matches!(caller, Caller::Service) {
+            // The phone tables have SELECT policies only (`phone_select`); every write is an RPC.
+            return Err(DataError::Forbidden);
+        }
         let rule = self.matrix.get(table).ok_or(DataError::NotFound)?;
         match caller {
             Caller::Service => Ok(None),
@@ -281,6 +288,9 @@ impl FakeBackend {
     }
 
     pub fn select(&self, caller: &Caller, table: &str, filters: &[(String, String)]) -> Result<Vec<Value>, DataError> {
+        if let Some(rows) = self.phone_select(caller, table, filters) {
+            return rows;
+        }
         let owner = self.permitted(caller, table, Op::Select)?;
         let state = self.lock();
         let rows = state.tables.get(table).map(Vec::as_slice).unwrap_or_default();
@@ -444,7 +454,7 @@ impl FakeBackend {
     // ---- RPCs ----
 
     pub fn rpc(&self, caller: &Caller, name: &str, args: &Value) -> Result<Value, DataError> {
-        let contracts = [RPC_CONTRACT, ROOMS_CONTRACT, SHARED_WIKI_CONTRACT, PROFILE_CONTRACT]
+        let contracts = [RPC_CONTRACT, ROOMS_CONTRACT, SHARED_WIKI_CONTRACT, PROFILE_CONTRACT, PHONE_CONTRACT]
             .map(|source| serde_json::from_str::<Value>(source).map_err(|_| DataError::BadRequest));
         let mut entry = None;
         for contract in &contracts {
@@ -466,6 +476,9 @@ impl FakeBackend {
             return Err(DataError::Forbidden);
         }
         let args = args.as_object().ok_or(DataError::BadRequest)?;
+        if phone::PHONE_RPCS.contains(&name) {
+            return self.phone_rpc(caller, name, args);
+        }
         if profile::PROFILE_RPCS.contains(&name) {
             return self.profile_rpc(caller, name, args);
         }
@@ -733,6 +746,10 @@ impl HttpTransport for FakeBackend {
                 Err(e) => auth_failure(e),
             },
             (Method::Post, "/auth/v1/token") => match self.refresh_session(&text("refresh_token")) {
+                Ok(tokens) => Ok(json_response(200, &token_json(&tokens))),
+                Err(e) => auth_failure(e),
+            },
+            (Method::Post, "/auth/v1/signup") => match self.sign_in_anonymously() {
                 Ok(tokens) => Ok(json_response(200, &token_json(&tokens))),
                 Err(e) => auth_failure(e),
             },

@@ -38,9 +38,11 @@ pub fn channel_row(config: &RemoteConfig, topic: Option<String>, utc_offset_min:
         utc_offset_min,
     };
     match config.notify_channel.as_str() {
-        "ntfy" => match topic {
+        // `phone_app` is delivered through the same ntfy topic: the server posts to it and the
+        // phone app subscribes. Without a topic it is mirrored as `none`, like ntfy.
+        channel @ ("ntfy" | "phone_app") => match topic {
             Some(topic) => NotifyChannelRow {
-                channel: "ntfy".into(),
+                channel: channel.into(),
                 ntfy_topic: Some(topic),
                 ntfy_server: Some(config.notify_ntfy_server.clone()),
                 ..none()
@@ -52,7 +54,6 @@ pub fn channel_row(config: &RemoteConfig, topic: Option<String>, utc_offset_min:
             telegram_chat_id: Some(config.notify_telegram_chat_id.clone()),
             ..none()
         },
-        "phone_app" => NotifyChannelRow { channel: "phone_app".into(), ..none() },
         _ => none(),
     }
 }
@@ -102,7 +103,7 @@ impl SyncSource for AppSyncSource {
             RemoteConfig::load(&conn).ok()?
         };
         let topic = match self.runtime.secrets().get(SecretName::NtfyTopic) {
-            Ok(Some(value)) if config.notify_channel == "ntfy" => Some(value.expose().to_string()),
+            Ok(Some(value)) if matches!(config.notify_channel.as_str(), "ntfy" | "phone_app") => Some(value.expose().to_string()),
             _ => None,
         };
         Some(channel_row(&config, topic, local_utc_offset_min()))
@@ -174,6 +175,16 @@ mod tests {
         assert_eq!(channel_row(&config("telegram"), None, 540).channel, "none");
         assert_eq!(channel_row(&config("none"), Some("x".repeat(24)), 540).channel, "none");
         assert_eq!(channel_row(&config("none"), None, 540).ntfy_topic, None);
-        assert_eq!(channel_row(&config("phone_app"), None, 540).channel, "phone_app");
+        assert_eq!(channel_row(&config("phone_app"), None, 540).channel, "none", "a phone_app row needs the topic the phone subscribes to");
+    }
+
+    #[test]
+    fn the_phone_app_channel_row_matches_the_shared_contract() {
+        let contract: serde_json::Value = serde_json::from_str(include_str!("../../../fixtures/notify/contract.json")).expect("contract");
+        let expected = &contract["phoneApp"]["channelRow"];
+        let topic = expected["ntfy_topic"].as_str().expect("topic").to_string();
+        let row = channel_row(&config("phone_app"), Some(topic), 540);
+        assert_eq!(serde_json::to_value(&row).expect("json"), *expected);
+        assert_eq!(contract["phoneApp"]["rowWithoutTopic"], "none");
     }
 }

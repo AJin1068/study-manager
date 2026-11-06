@@ -1,7 +1,7 @@
 // Display helpers for the dashboard. The Rust core computes every number; these only turn them
 // into short Korean text and chart levels. Empty data is a normal state, never an error.
 
-import type { AppOffStat, ReleaseUsage, TodayDashboard } from '../api';
+import type { AppOffStat, PhoneStat, ReleaseUsage, TodayDashboard } from '../api';
 
 export const WEEKDAY_LABELS = ['월', '화', '수', '목', '금', '토', '일'] as const;
 
@@ -74,4 +74,17 @@ export function appOffText(off: AppOffStat): string {
 
 export function releaseText(usage: ReleaseUsage): string {
   return `긴급 패스 ${usage.emergencyPass}회 · 오늘 건너뛰기 ${usage.skipToday}회 · 중간 해제 ${usage.earlyRelease}회 · 중단된 계획 ${usage.abortedRuns}회`;
+}
+
+/** The phone-unreachable line: its own stat, so a dead phone battery never reads as lack of effort. */
+export function phoneUnreachableText(phone: PhoneStat): string {
+  if (phone.gaps === 0) return '폰이 잠금에서 벗어난 시간이 없습니다';
+  const tail = phone.serviceDisabledGaps > 0 ? ` (차단 서비스를 끈 적 ${phone.serviceDisabledGaps}회)` : '';
+  return `폰 미연결 시간 ${durationText(phone.unreachableMs)} · ${phone.gaps}번 끊김${tail}`;
+}
+
+/** Pick-ups are counted, not judged: no score or point depends on them. */
+export function phonePickupText(phone: PhoneStat): string {
+  if (phone.pickupSetsReported === 0) return '폰이 보고한 공부 세트가 없습니다';
+  return `공부 중 폰을 집어 든 횟수 ${phone.pickupsTotal}회 · 집어 든 세트 ${phone.pickupSetsWithPickups}/${phone.pickupSetsReported}`;
 }

@@ -1,0 +1,6 @@
+{
+  "link": "https://github.com/AJin1068/study-manager/releases/latest",
+  "defaultLink": "https://github.com/AJin1068/study-manager/releases/latest",
+  "qrSvg": "<svg></svg>",
+  "ios": { "kind": "unsupported", "reason": "apple_screen_time_authorization_required" }
+}

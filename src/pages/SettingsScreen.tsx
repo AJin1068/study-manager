@@ -12,6 +12,8 @@ import { asyncStatus, type AsyncStatus } from '../hooks/useAsyncStatus';
 import { ModeConfigEditor } from './ModeConfigEditor';
 import { BlockListPanel } from '../components/BlockListPanel';
 import { CalendarIoPanel } from '../components/CalendarIoPanel';
+import { PhoneInstallPanel } from '../components/PhoneInstallPanel';
+import { PhonePairPanel } from '../components/PhonePairPanel';
 import { PresetPanel } from '../components/PresetPanel';
 import { ContextSettingsPanel } from '../components/ContextSettingsPanel';
 import { MessageSettingsPanel } from '../components/MessageSettingsPanel';
@@ -186,6 +188,8 @@ export function SettingsScreen() {
       <QuizSettingsPanel />
       <MessageSettingsPanel />
       <ContextSettingsPanel />
+      <PhoneInstallPanel />
+      <PhonePairPanel />
 
       <CalendarIoPanel editable={lock.allowed} onAttempted={blockAttempted} />
 

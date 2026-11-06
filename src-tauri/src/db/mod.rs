@@ -36,6 +36,9 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/m022_shop.sql"),
     include_str!("migrations/m023_shared_wiki_local.sql"),
     include_str!("migrations/m024_profile_gift.sql"),
+    include_str!("migrations/m025_phone.sql"),
+    include_str!("migrations/m026_phone_gap.sql"),
+    include_str!("migrations/m027_phone_pickups.sql"),
 ];
 
 /// Opens (creating if needed) the database file and applies pending migrations. The lock row is

@@ -24,5 +24,13 @@ describe('dashboard contract', () => {
     expect(isHeatmap(fixture.weakness.heatmap.slice(1))).toBe(false);
     expect(isHeatmap(fixture.weakness.heatmap.map((row) => row.slice(1)))).toBe(false);
     expect(isHeatmap(fixture.weakness.heatmap)).toBe(true);
+    expect(isWeakness({ ...fixture.weakness, phone: { unreachableMs: 1 } })).toBe(false);
+    expect(isWeakness({ ...fixture.weakness, phone: undefined })).toBe(false);
+  });
+
+  it('the phone block holds durations and counts only', () => {
+    expect(Object.keys(fixture.weakness.phone).sort()).toEqual(
+      ['gaps', 'pickupSetsReported', 'pickupSetsWithPickups', 'pickupsTotal', 'serviceDisabledGaps', 'unreachableMs'].sort(),
+    );
   });
 });

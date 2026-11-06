@@ -2082,6 +2082,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "link-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3654,6 +3662,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "keyring",
+ "link-protocol",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",

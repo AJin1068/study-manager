@@ -13,6 +13,8 @@ pub mod focus;
 pub mod growth;
 pub mod llm;
 pub mod messages;
+pub mod phone;
+pub mod phone_install;
 pub mod plan;
 pub mod points;
 pub mod power;
@@ -65,6 +67,8 @@ pub struct AppState {
     pub llm: Arc<crate::llm::service::LlmService>,
     pub wiki: Arc<crate::wiki::service::WikiService>,
     pub quiz: Arc<crate::quiz::service::QuizService>,
+    /// Wakes the phone publisher (a release changed what the phone must be told).
+    pub phone: crate::phone::publisher::PublisherHandle,
 }
 
 /// Locks the shared connection. A panic in another holder (the timer engine is supervised and

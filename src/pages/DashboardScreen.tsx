@@ -13,6 +13,8 @@ import {
   heatmapMax,
   nextPlanText,
   pctText,
+  phonePickupText,
+  phoneUnreachableText,
   releaseText,
   scoreText,
   streakText,
@@ -168,6 +170,12 @@ function WeaknessView() {
             <h2 id="off-title">앱이 꺼져 있던 시간</h2>
             <p>{appOffText(w.appOff)}</p>
             <p className="hint">절전과 앱 종료는 집중 점수에서 빼고 따로 보여줍니다.</p>
+          </section>
+          <section className="card" aria-labelledby="phone-title">
+            <h2 id="phone-title">폰</h2>
+            <p>{phoneUnreachableText(w.phone)}</p>
+            <p>{phonePickupText(w.phone)}</p>
+            <p className="hint">통계로만 보여주며 집중 점수와 포인트에는 영향이 없습니다. 폰은 횟수와 구간 번호만 보냅니다.</p>
           </section>
           <section className="card" aria-labelledby="release-title">
             <h2 id="release-title">해제 사용 기록</h2>

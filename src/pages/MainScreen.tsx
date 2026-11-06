@@ -5,6 +5,7 @@ import { useAsync } from '../hooks/useAsync';
 import { asyncStatus } from '../hooks/useAsyncStatus';
 import { useTimerState } from '../hooks/useTimerState';
 import { CharacterBadge } from '../components/CharacterBadge';
+import { PhoneLinkNotice } from '../components/PhoneLinkNotice';
 import { TimerPanel } from '../components/TimerPanel';
 import { FocusSignalsPanel } from '../components/FocusSignalsPanel';
 import { TopicPanel } from '../components/TopicPanel';
@@ -61,6 +62,8 @@ export function MainScreen() {
         <p>{lockStatusText(lock)}</p>
         <TimerPanel timer={timer} />
       </section>
+
+      <PhoneLinkNotice />
 
       <FocusSignalsPanel timer={timer} />
 

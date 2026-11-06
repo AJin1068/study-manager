@@ -9,6 +9,8 @@ import {
   heatmapMax,
   nextPlanText,
   pctText,
+  phonePickupText,
+  phoneUnreachableText,
   startsInText,
   streakText,
 } from './dashboardView';
@@ -76,5 +78,25 @@ describe('chart levels', () => {
     row[20] = 2;
     expect(heatmapMax(empty)).toBe(2);
     expect(heatmapIsEmpty(empty)).toBe(false);
+  });
+});
+
+describe('phone stats', () => {
+  const none = { unreachableMs: 0, gaps: 0, serviceDisabledGaps: 0, pickupSetsReported: 0, pickupSetsWithPickups: 0, pickupsTotal: 0 };
+
+  it('says so when the phone never left the lock or reported nothing', () => {
+    expect(phoneUnreachableText(none)).toBe('폰이 잠금에서 벗어난 시간이 없습니다');
+    expect(phonePickupText(none)).toBe('폰이 보고한 공부 세트가 없습니다');
+  });
+
+  it('shows the unreachable time on its own with the number of breaks', () => {
+    expect(phoneUnreachableText({ ...none, unreachableMs: 50 * MIN, gaps: 3 })).toBe('폰 미연결 시간 50분 · 3번 끊김');
+    expect(phoneUnreachableText({ ...none, unreachableMs: 10 * MIN, gaps: 2, serviceDisabledGaps: 1 })).toContain('차단 서비스를 끈 적 1회');
+  });
+
+  it('counts pick-ups without judging them', () => {
+    const text = phonePickupText({ ...none, pickupSetsReported: 3, pickupSetsWithPickups: 2, pickupsTotal: 7 });
+    expect(text).toBe('공부 중 폰을 집어 든 횟수 7회 · 집어 든 세트 2/3');
+    expect(text).not.toMatch(/점수|감점|나쁨/);
   });
 });

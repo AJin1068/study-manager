@@ -14,6 +14,8 @@ import { llmCommands } from './llm';
 import { messageCommands } from './messages';
 import { planCommands } from './plan';
 import { pointsCommands } from './points';
+import { phoneCommands } from './phone';
+import { phoneInstallCommands } from './phoneInstall';
 import { profileCommands } from './profile';
 import { quizCommands } from './quiz';
 import { releaseCommands } from './release';
@@ -41,6 +43,8 @@ export * from './llm';
 export * from './messages';
 export * from './plan';
 export * from './points';
+export * from './phone';
+export * from './phoneInstall';
 export * from './profile';
 export * from './quiz';
 export * from './release';
@@ -67,6 +71,8 @@ export const commands = {
   ...focusCommands,
   ...pointsCommands,
   ...profileCommands,
+  ...phoneCommands,
+  ...phoneInstallCommands,
   ...dashboardCommands,
   ...remoteCommands,
   ...llmCommands,

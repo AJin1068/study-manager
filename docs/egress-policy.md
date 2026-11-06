@@ -54,6 +54,17 @@ LLM 요청은 `api.anthropic.com`으로만 가며 키는 헤더에만 있다(본
 
 서버 쪽(Edge Function) 규칙: ntfy 서버 주소는 https 공개 호스트 이름만(IP·localhost·내부 이름·포트·경로·인증 정보 거부). 이 검사는 `supabase/functions/_shared/channels.ts`에 있고 데스크톱과 같은 `fixtures/notify/contract.json`으로 시험한다.
 
+## 폰 (5단계)
+
+| 포트 | 보내는 것 | 타입 |
+|---|---|---|
+| 폰 짝짓기 | 1회용 코드(5분) | `phone::payload::ClaimPairArgs` (폰이 보냄) |
+| 폰 잠금 신호 | 실행·구간 ID, seq, 상태(locked/free), 해제 사유, 만료 시각 | `PublishLockArgs` (PC가 보냄) |
+| 폰 상태 | 받은 seq, 잠금 불리언, 차단 서비스 켜짐 불리언 | `BeatArgs` (폰이 보냄) |
+| 집어 든 횟수 | 구간 ID, 횟수 | `PickupArgs` (폰이 보냄) |
+
+앱 이름·패키지명·사용 내역·창 제목·URL 필드는 어떤 타입에도 없다(`link-protocol`의 보고 타입은 알 수 없는 필드를 거부). 허용 앱 목록은 폰 로컬에만 있고 서버에 가지 않는다. 시험: `phone::publisher_tests`(요청 본문 카나리 grep), `phone::publisher_tests::e2e`, `fixtures/phone/privacy.static.test.ts`.
+
 ## 잠금 중 설정 변경
 
 계획된 공부 진행 중에는 모든 설정이 잠긴다(D-1). 예외는 반출을 줄이는 방향뿐이며 `setting_history`에 `applied_privacy_tighten`으로 남는다: 모의 모드로 전환, 알림 채널 끄기, 비밀 삭제, 로그아웃. 키 입력·로그인·모드를 실제로 되돌리기는 잠긴다(시도는 `rejected_locked`로 기록).

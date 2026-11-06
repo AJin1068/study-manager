@@ -31,7 +31,7 @@ mod tests {
     use serde_json::{json, Value};
 
     use crate::dashboard::{
-        AppCount, AppOffStat, DayStat, NextPlan, PostponedPlan, ReleaseUsage, SubjectTime, TodayDashboard,
+        AppCount, AppOffStat, DayStat, NextPlan, PhoneStat, PostponedPlan, ReleaseUsage, SubjectTime, TodayDashboard,
         Weakness, WeekDashboard,
     };
     use crate::points;
@@ -90,6 +90,14 @@ mod tests {
                 postponed_plans: vec![PostponedPlan { plan_id: 4, name: "수학".into(), subject: "수학".into(), count: 2 }],
                 app_off: AppOffStat { sleep_ms: 100, forced_quit_ms: 200, forced_quit_count: 1, planned_overlap_ms: 50 },
                 releases: ReleaseUsage { emergency_pass: 1, skip_today: 0, early_release: 2, aborted_runs: 1 },
+                phone: PhoneStat {
+                    unreachable_ms: 180_000,
+                    gaps: 2,
+                    service_disabled_gaps: 1,
+                    pickup_sets_reported: 3,
+                    pickup_sets_with_pickups: 2,
+                    pickups_total: 7,
+                },
             },
         });
         assert_eq!(actual, expected);

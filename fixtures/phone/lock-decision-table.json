@@ -1,0 +1,43 @@
+{
+  "comment": "S5.1 state table of lock_decision and the sequence rules. Times are server milliseconds; elapsed_ms is the phone's MONOTONIC time since the lease arrived. A locked lease received at server_now_ms has remaining = valid_until_ms - server_now_ms: elapsed remaining-1 is locked, elapsed remaining is free (lease_expired). Whether the server is reachable is not an input, so 'offline' rows are the same rows. The phone's wall clock is not an input either (wall_shift_ms rows must give the same answer).",
+  "decisions": [
+    { "name": "just received", "lease": "locked", "server_now_ms": 1010000, "elapsed_ms": 0, "expect": { "state": "locked" } },
+    { "name": "offline, mid segment", "lease": "locked", "server_now_ms": 1010000, "elapsed_ms": 300000, "expect": { "state": "locked" } },
+    { "name": "one ms before expiry", "lease": "locked", "server_now_ms": 1010000, "elapsed_ms": 589999, "expect": { "state": "locked" } },
+    { "name": "exactly at expiry", "lease": "locked", "server_now_ms": 1010000, "elapsed_ms": 590000, "expect": { "state": "free", "reason": "lease_expired" } },
+    { "name": "one ms after expiry", "lease": "locked", "server_now_ms": 1010000, "elapsed_ms": 590001, "expect": { "state": "free", "reason": "lease_expired" } },
+    { "name": "wall clock moved one hour forward", "lease": "locked", "server_now_ms": 1010000, "elapsed_ms": 300000, "wall_shift_ms": 3600000, "expect": { "state": "locked" } },
+    { "name": "wall clock moved one hour back", "lease": "locked", "server_now_ms": 1010000, "elapsed_ms": 300000, "wall_shift_ms": -3600000, "expect": { "state": "locked" } },
+    { "name": "received after it had already ended", "lease": "locked", "server_now_ms": 1700000, "elapsed_ms": 0, "expect": { "state": "free", "reason": "lease_expired" } },
+    { "name": "received on the last millisecond", "lease": "locked", "server_now_ms": 1600000, "elapsed_ms": 0, "expect": { "state": "free", "reason": "lease_expired" } },
+    { "name": "received one ms before the end", "lease": "locked", "server_now_ms": 1599999, "elapsed_ms": 0, "expect": { "state": "locked" } },
+    { "name": "monotonic clock went backwards", "lease": "locked", "server_now_ms": 1010000, "elapsed_ms": -1, "expect": { "state": "free", "reason": "clock_invalid" } },
+    { "name": "released by emergency pass", "lease": "free", "server_now_ms": 1200000, "elapsed_ms": 0, "expect": { "state": "free", "reason": "emergency_pass" } },
+    { "name": "a free lease stays free over time", "lease": "free", "server_now_ms": 1200000, "elapsed_ms": 99999999, "expect": { "state": "free", "reason": "emergency_pass" } }
+  ],
+  "leases": {
+    "locked": { "run_id": "run-1", "seq": 7, "state": "locked", "release_cause": null, "issued_at_ms": 1000000, "valid_until_ms": 1600000 },
+    "free": { "run_id": "run-1", "seq": 8, "state": "free", "release_cause": "emergency_pass", "issued_at_ms": 1200000, "valid_until_ms": 1200000 }
+  },
+  "sequence": [
+    { "name": "first lease", "current_seq": null, "incoming_seq": 1, "expect": "ok" },
+    { "name": "next", "current_seq": 7, "incoming_seq": 8, "expect": "ok" },
+    { "name": "a gap is fine", "current_seq": 7, "incoming_seq": 20, "expect": "ok" },
+    { "name": "same seq again", "current_seq": 7, "incoming_seq": 7, "expect": "duplicate" },
+    { "name": "older seq replayed", "current_seq": 7, "incoming_seq": 6, "expect": "regressed" },
+    { "name": "seq zero is not a seq", "current_seq": null, "incoming_seq": 0, "expect": "invalid:bad_seq" }
+  ],
+  "invalid": [
+    { "name": "locked with a cause", "lease": { "run_id": "r", "seq": 1, "state": "locked", "release_cause": "run_ended", "issued_at_ms": 0, "valid_until_ms": 1000 }, "expect": "locked_with_cause" },
+    { "name": "free without a cause", "lease": { "run_id": "r", "seq": 1, "state": "free", "release_cause": null, "issued_at_ms": 0, "valid_until_ms": 0 }, "expect": "free_without_cause" },
+    { "name": "locked, empty span", "lease": { "run_id": "r", "seq": 1, "state": "locked", "release_cause": null, "issued_at_ms": 5, "valid_until_ms": 5 }, "expect": "empty_span" },
+    { "name": "locked, longest allowed", "lease": { "run_id": "r", "seq": 1, "state": "locked", "release_cause": null, "issued_at_ms": 0, "valid_until_ms": 10860000 }, "expect": "ok" },
+    { "name": "locked, one ms over the cap", "lease": { "run_id": "r", "seq": 1, "state": "locked", "release_cause": null, "issued_at_ms": 0, "valid_until_ms": 10860001 }, "expect": "lease_too_long" },
+    { "name": "free with a span", "lease": { "run_id": "r", "seq": 1, "state": "free", "release_cause": "run_ended", "issued_at_ms": 0, "valid_until_ms": 1 }, "expect": "free_with_span" },
+    { "name": "empty run id", "lease": { "run_id": "", "seq": 1, "state": "locked", "release_cause": null, "issued_at_ms": 0, "valid_until_ms": 1000 }, "expect": "bad_run_id" }
+  ],
+  "receiptCap": [
+    { "name": "remaining at receipt exactly the cap", "server_now_ms": 100000, "valid_until_ms": 10960000, "issued_at_ms": 100000, "expect": "ok" },
+    { "name": "remaining at receipt one ms over the cap", "server_now_ms": 99999, "valid_until_ms": 10960000, "issued_at_ms": 100000, "expect": "lease_too_long" }
+  ]
+}

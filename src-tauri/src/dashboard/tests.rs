@@ -444,3 +444,79 @@ fn dashboard_logs_carry_no_titles_or_urls() {
         assert!(!logs.contains(forbidden), "log leaked {forbidden:?}: {logs}");
     }
 }
+
+// ---- the phone (stage 5): statistics only ----
+
+fn segment_ids(conn: &Connection) -> Vec<i64> {
+    conn.prepare("SELECT id FROM timer_segments ORDER BY id").expect("p").query_map([], |r| r.get(0)).expect("q").collect::<Result<_, _>>().expect("rows")
+}
+
+fn gap(conn: &Connection, run_id: i64, start_ms: i64, end_ms: i64, kind: &str) {
+    store::phone::insert_gap(conn, &store::phone::GapRow { run_id, start_ms, end_ms, kind: kind.into() }).expect("gap");
+}
+
+#[test]
+fn phone_unreachable_time_counts_each_stretch_once_clipped_to_the_window_and_pickups_count_study_sets() {
+    let (conn, tue_run, _) = golden();
+    let from = now() - WEAKNESS_DAYS * DAY_MS;
+    // Tuesday: silence 20:10-20:40 and a switched-off service 20:30-20:50 overlap: 20:10-20:50.
+    gap(&conn, tue_run, t(3, 20, 10), t(3, 20, 40), "unreachable");
+    gap(&conn, tue_run, t(3, 20, 30), t(3, 20, 50), "service_disabled");
+    // Half in the window, half before it: only the inside counts.
+    gap(&conn, tue_run, from - 10 * MIN, from + 10 * MIN, "lease_expired");
+    // Entirely before the window: not counted at all.
+    gap(&conn, tue_run, from - 50 * MIN, from - 40 * MIN, "unreachable");
+
+    let segments = segment_ids(&conn);
+    let (mon, tue, wed) = (segments[0], segments[1], segments[2]);
+    let at = t(5, 11, 0);
+    // Monday reported 3 then 5 (the segment's count is 5), Tuesday 0, Wednesday 2.
+    for (segment, count) in [(mon, 3), (mon, 5), (mon, 5), (tue, 0), (wed, 2)] {
+        store::phone::record_pickups(&conn, segment, count, at).expect("pickups");
+    }
+    let phone = weakness(&conn, &Utc, now()).expect("weakness").phone;
+    assert_eq!(
+        phone,
+        PhoneStat {
+            unreachable_ms: 40 * MIN + 10 * MIN,
+            gaps: 3,
+            service_disabled_gaps: 1,
+            pickup_sets_reported: 3,
+            pickup_sets_with_pickups: 2,
+            pickups_total: 7,
+        }
+    );
+}
+
+#[test]
+fn without_a_phone_every_phone_number_is_zero() {
+    let (conn, _, _) = golden();
+    let phone = weakness(&conn, &Utc, now()).expect("weakness").phone;
+    assert_eq!(
+        phone,
+        PhoneStat { unreachable_ms: 0, gaps: 0, service_disabled_gaps: 0, pickup_sets_reported: 0, pickup_sets_with_pickups: 0, pickups_total: 0 }
+    );
+}
+
+#[test]
+fn phone_data_never_changes_a_focus_score_a_streak_or_a_point() {
+    let (mut conn, tue_run, _) = golden();
+    let before = (today(&mut conn, &Utc, now()).expect("today"), week(&conn, &Utc, now()).expect("week"));
+    let weak_before = weakness(&conn, &Utc, now()).expect("weakness");
+    let ledger_before: i64 = conn.query_row("SELECT COUNT(*) FROM point_ledger", [], |r| r.get(0)).expect("ledger");
+
+    // The worst the phone can say: pick-ups in every set and gaps across every run.
+    for segment in segment_ids(&conn) {
+        store::phone::record_pickups(&conn, segment, 500, now()).expect("pickups");
+    }
+    gap(&conn, tue_run, t(3, 20, 0), t(3, 21, 40), "unreachable");
+    gap(&conn, tue_run, t(2, 20, 0), t(2, 21, 40), "service_disabled");
+
+    let after = (today(&mut conn, &Utc, now()).expect("today"), week(&conn, &Utc, now()).expect("week"));
+    assert_eq!(before, after, "today and week, including focus score, streak and points, are unchanged");
+    let weak_after = weakness(&conn, &Utc, now()).expect("weakness");
+    assert_eq!(weak_after.phone.pickups_total, 2_000);
+    assert_eq!(Weakness { phone: weak_before.phone.clone(), ..weak_after }, weak_before, "everything but the phone block is unchanged");
+    let ledger_after: i64 = conn.query_row("SELECT COUNT(*) FROM point_ledger", [], |r| r.get(0)).expect("ledger");
+    assert_eq!(ledger_before, ledger_after, "no point was posted or deducted");
+}

@@ -1,0 +1,11 @@
+{
+  "comment": "S5.2 tables x operation -> who may do it through the data API. 'owner_or_paired_phone' = the owner, or the phone user bound to that owner by an UNREVOKED phone_pairs row; 'owner_or_phone' = either party of the pair row; 'none' = no client policy or grant exists for authenticated or anon callers. The codes and attempts tables are never visible. A revoked pair loses access at once even though the phone's JWT stays valid. Rows of other owners are never visible. Read by supabase/tests/phone.static.test.ts and the Rust FakeBackend; it documents the policy set but does not prove it (V5-2).",
+  "tables": {
+    "phone_pairs":      { "select": "owner_or_phone",        "insert": "none", "update": "none", "delete": "none" },
+    "pair_codes":       { "select": "none",                  "insert": "none", "update": "none", "delete": "none" },
+    "pair_attempts":    { "select": "none",                  "insert": "none", "update": "none", "delete": "none" },
+    "phone_lock_state": { "select": "owner_or_paired_phone", "insert": "none", "update": "none", "delete": "none" },
+    "phone_beats":      { "select": "owner_or_paired_phone", "insert": "none", "update": "none", "delete": "none" },
+    "phone_pickups":    { "select": "owner_or_paired_phone", "insert": "none", "update": "none", "delete": "none" }
+  }
+}

@@ -276,7 +276,8 @@ impl RemoteRuntime {
             IntegrationMode::NotConfigured => Err(not_configured()),
             IntegrationMode::Mock => Ok(Arc::new(RecordingNotify::default())),
             IntegrationMode::Live => match config.notify_channel.as_str() {
-                "ntfy" => {
+                // `phone_app` posts to the same ntfy topic; the phone app subscribes to it.
+                "ntfy" | "phone_app" => {
                     let topic = self.secrets.get(SecretName::NtfyTopic).ok().flatten().ok_or_else(not_configured)?;
                     let host = host_of(&config.notify_ntfy_server).ok_or_else(not_configured)?;
                     let transport = (self.transports)(HostPolicy::configured([host]));

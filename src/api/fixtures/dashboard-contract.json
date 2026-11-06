@@ -263,6 +263,14 @@
       "skipToday": 0,
       "earlyRelease": 2,
       "abortedRuns": 1
+    },
+    "phone": {
+      "unreachableMs": 180000,
+      "gaps": 2,
+      "serviceDisabledGaps": 1,
+      "pickupSetsReported": 3,
+      "pickupSetsWithPickups": 2,
+      "pickupsTotal": 7
     }
   }
 }

@@ -186,7 +186,7 @@ pub fn is_configured(port: IntegrationPort, config: &RemoteConfig, secrets: Secr
     match port {
         IntegrationPort::Supabase => config.supabase_configured(),
         IntegrationPort::Notify => match config.notify_channel.as_str() {
-            "ntfy" => secrets.ntfy_topic,
+            "ntfy" | "phone_app" => secrets.ntfy_topic,
             "telegram" => !config.notify_telegram_chat_id.is_empty(),
             _ => false,
         },
@@ -323,6 +323,9 @@ mod tests {
         assert!(is_configured(IntegrationPort::Supabase, &config, none));
         config.notify_channel = "ntfy".into();
         assert!(!is_configured(IntegrationPort::Notify, &config, none));
+        assert!(is_configured(IntegrationPort::Notify, &config, SecretFlags { ntfy_topic: true, ..none }));
+        config.notify_channel = "phone_app".into();
+        assert!(!is_configured(IntegrationPort::Notify, &config, none), "the phone app subscribes to the ntfy topic");
         assert!(is_configured(IntegrationPort::Notify, &config, SecretFlags { ntfy_topic: true, ..none }));
         config.notify_channel = "telegram".into();
         assert!(!is_configured(IntegrationPort::Notify, &config, none));

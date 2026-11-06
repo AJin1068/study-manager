@@ -43,6 +43,7 @@ pub fn submit_release(
         (outcome, snapshot)
     };
     announce(&app, snapshot);
+    wake_phone(&state, &outcome);
     Ok(outcome)
 }
 
@@ -63,6 +64,7 @@ pub fn submit_release_quiz(
         (outcome, snapshot)
     };
     announce(&app, snapshot);
+    wake_phone(&state, &outcome);
     Ok(outcome)
 }
 
@@ -72,6 +74,13 @@ pub fn get_release_quiz_status(state: State<'_, AppState>) -> AppResult<ReleaseQ
     let effective = state.high_water.observe(now_ms()?);
     let conn = lock_db(&state.db)?;
     quiz_release::status(&conn, &Local, effective)
+}
+
+/// A release is in the database: the phone is told now (a `Free` lease), not at the next tick.
+fn wake_phone(state: &AppState, outcome: &ReleaseOutcome) {
+    if matches!(outcome, ReleaseOutcome::Released { .. }) {
+        state.phone.wake();
+    }
 }
 
 type ReleasedSnapshot = Option<(crate::timer::model::TimerState, PassStatus)>;
