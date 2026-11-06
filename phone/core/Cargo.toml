@@ -1,0 +1,19 @@
+[package]
+name = "study-phone-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Host-testable core of the phone app: lease polling, pairing over the Supabase REST contract, blocker port and bridge"
+publish = false
+
+# Independent project: no root Cargo workspace, and no dependency on src-tauri (its macOS-only
+# crates break the Android targets). Only the shared wire crate is linked.
+[lib]
+name = "study_phone_core"
+path = "src/lib.rs"
+
+[dependencies]
+link-protocol = { path = "../../crates/link-protocol" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"

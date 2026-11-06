@@ -112,7 +112,7 @@ pub fn diagnose(holder: &LeaseHolder, mono_now_ms: i64, last_contact_mono_ms: Op
         lock_remaining_ms,
         timer: timer_display(lock_remaining_ms),
         last_server_contact_ago_ms: last_contact_mono_ms.map(|at| mono_now_ms.saturating_sub(at).max(0)),
-        rejected_leases: holder.rejected().len(),
+        rejected_leases: usize::try_from(holder.rejected_total()).unwrap_or(usize::MAX),
     }
 }
 

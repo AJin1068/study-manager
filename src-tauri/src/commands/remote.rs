@@ -150,16 +150,6 @@ pub enum VerifyOutcome {
     RateLimited { retry_after_ms: u64 },
 }
 
-pub(crate) fn platform_name() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "macos"
-    } else if cfg!(target_os = "windows") {
-        "windows"
-    } else {
-        "other"
-    }
-}
-
 #[tauri::command]
 pub fn auth_verify_otp(app: AppHandle, state: State<'_, AppState>, email: String, code: String) -> AppResult<VerifyOutcome> {
     let now = now_ms()?;
@@ -184,7 +174,7 @@ pub fn auth_verify_otp(app: AppHandle, state: State<'_, AppState>, email: String
     }
     // Register this device so later pushes and heartbeats have a row to point at. Offline or a
     // server hiccup only delays that; sign-in itself stands.
-    let registration = DeviceRegistration { id: device_id, app_version: env!("CARGO_PKG_VERSION").into(), platform: platform_name() };
+    let registration = DeviceRegistration { id: device_id, app_version: env!("CARGO_PKG_VERSION").into(), platform: crate::platform::name() };
     if let Err(err) = handle.rest.insert("device_register", "devices", &registration, true) {
         tracing::warn!(event = "device_register_failed", code = err.code());
     }

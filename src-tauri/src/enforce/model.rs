@@ -27,7 +27,6 @@ impl EnforceMode {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // `Site` entries arrive with stage 1-4; the DB CHECK reserves it now.
 pub enum EntryKind {
     App,
     Site,
@@ -46,7 +45,6 @@ impl EntryKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // `Preset` entries arrive with stage 1-4.
 pub enum EntrySource {
     User,
     Preset,
@@ -65,7 +63,6 @@ impl EntrySource {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // `Site` and `Extension` are recorded by stage 1-4.
 pub enum TargetKind {
     App,
     Site,
@@ -86,7 +83,6 @@ impl TargetKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // The pass, site, and extension actions are written by stages 1-3 (S4) and 1-4.
 pub enum BlockAction {
     WouldTerminate,
     TerminateRequested,
@@ -94,6 +90,8 @@ pub enum BlockAction {
     ForceKilled,
     Failed,
     SkippedProtected,
+    // Not written by any stage yet; the DB CHECK (m004_block) and the drift test keep it.
+    #[allow(dead_code)]
     SkippedPass,
     SiteBlocked,
     SiteAllowedPass,

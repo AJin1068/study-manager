@@ -67,10 +67,17 @@ pub fn lock_decision(receipt: &LeaseReceipt, mono_elapsed_ms: i64) -> PhoneLock 
 
 /// The lease in force on one phone: applies the sequence rules on arrival and decides from the
 /// phone's monotonic readings. Both the readings and the server time are passed in.
+/// Rejections kept for the diagnostics screen. The phone polls the same lease every few seconds, so
+/// "duplicate" arrives all day: only the newest are kept, the counters stay exact.
+pub const MAX_REJECTED_KEPT: usize = 32;
+
 #[derive(Debug, Default)]
 pub struct LeaseHolder {
     held: Option<(LeaseReceipt, i64)>,
+    /// The newest [`MAX_REJECTED_KEPT`] rejections, oldest first.
     rejected: Vec<LeaseReject>,
+    rejected_total: u64,
+    duplicates: u64,
     pair_revoked: bool,
 }
 
@@ -91,7 +98,14 @@ impl LeaseHolder {
                 Ok(())
             }
             Err(reject) => {
+                if self.rejected.len() >= MAX_REJECTED_KEPT {
+                    self.rejected.remove(0);
+                }
                 self.rejected.push(reject);
+                self.rejected_total = self.rejected_total.saturating_add(1);
+                if reject == LeaseReject::Duplicate {
+                    self.duplicates = self.duplicates.saturating_add(1);
+                }
                 Err(reject)
             }
         }
@@ -125,7 +139,18 @@ impl LeaseHolder {
         (lock_decision(receipt, elapsed) == PhoneLock::Locked).then(|| receipt.remaining_at_receipt_ms() - elapsed)
     }
 
+    /// The newest rejections (at most [`MAX_REJECTED_KEPT`]), oldest first.
     pub fn rejected(&self) -> &[LeaseReject] {
         &self.rejected
+    }
+
+    /// Every rejection since the holder was made, including those no longer in [`Self::rejected`].
+    pub fn rejected_total(&self) -> u64 {
+        self.rejected_total
+    }
+
+    /// How many of those were the lease already in force offered again (harmless polling repeats).
+    pub fn duplicates(&self) -> u64 {
+        self.duplicates
     }
 }

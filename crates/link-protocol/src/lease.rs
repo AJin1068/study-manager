@@ -115,7 +115,8 @@ impl LockLease {
                 if self.valid_until_ms <= self.issued_at_ms {
                     return Err(LeaseError::EmptySpan);
                 }
-                if self.valid_until_ms - self.issued_at_ms > MAX_LEASE_MS {
+                // Saturating: the wire carries any i64, and a span that overflows is too long anyway.
+                if self.valid_until_ms.saturating_sub(self.issued_at_ms) > MAX_LEASE_MS {
                     return Err(LeaseError::TooLong);
                 }
             }
@@ -161,7 +162,7 @@ impl LeaseReceipt {
 
     /// Milliseconds of lock left at the moment of receipt (never negative).
     pub fn remaining_at_receipt_ms(&self) -> i64 {
-        (self.lease.valid_until_ms - self.server_now_ms).max(0)
+        self.lease.valid_until_ms.saturating_sub(self.server_now_ms).max(0)
     }
 }
 

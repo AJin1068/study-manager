@@ -1,0 +1,7 @@
+{
+  "comment": "Which RPCs an anonymous Supabase account (the phone: role authenticated, JWT claim is_anonymous = true) may run. Every other RPC in the *rpc-contract.json files that is granted to authenticated refuses with the code below, via the guard in supabase/migrations/*_s5_anonymous_guard.sql (create_pair_code carries the same refusal in its own body; the two text-returning sync RPCs, replace_plan_snapshot and heartbeat, return the code as text, all others as jsonb {\"code\": ...}). Read by supabase/tests/anonymous_guard.static.test.ts; it documents the rule and does not prove it (V5-2).",
+  "refusalCode": "anonymous_not_allowed",
+  "allowed": ["claim_pair", "phone_lease", "phone_beat", "report_phone_pickups", "get_public_profile"],
+  "ownGuard": ["create_pair_code"],
+  "textReturning": ["replace_plan_snapshot", "heartbeat"]
+}

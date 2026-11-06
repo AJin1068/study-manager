@@ -257,7 +257,7 @@ Haiku가 캘린더, 집중 통계, 위키 과목을 읽고 계획 도구(tool us
 ## 시스템 구조와 기술 스택
 
 - **PC 앱 (Tauri, 맥·윈도우):** 공통 코어(Rust: 시간표·타이머, 차단 목록, 집중 기록, 메시지) + OS별 층(맥/윈도우: 앱 목록, 앱 종료, 알림).
-- **폰 앱 (Tauri 모바일, `phone/` 독립 프로젝트):** 공통 화면(타이머, 시간표 수신, 임대 진단, 폰 집어 든 횟수) + 차단 플러그인(안드로이드 Kotlin `phone/plugins/blocker/android/`; 아이폰은 Unsupported, Swift 없음). 임대 상태기계는 `crates/link-protocol`(독립 크레이트, PC와 폰 공용). `phone/`은 `src-tauri`에 의존하지 않고 `link-protocol`과 `fixtures/phone/`만 공유한다.
+- **폰 앱 (Tauri 모바일, `phone/` 독립 프로젝트):** 공통 화면(타이머, 시간표 수신, 임대 진단, 폰 집어 든 횟수) + 차단 플러그인(안드로이드 Kotlin `phone/plugins/blocker/android/`; 아이폰은 Unsupported, Swift 없음). 임대 상태기계는 `crates/link-protocol`(독립 크레이트, PC와 폰 공용). `phone/`은 `src-tauri`에 의존하지 않고 `link-protocol`과 `fixtures/phone/`만 공유한다. 현재 상태: `phone/core`(폴링 드라이버·짝짓기·REST·차단기 포트)·`phone/src-tauri`(Tauri 모바일 셸)·`phone/src`(화면)는 작성되어 호스트에서만 시험되었고, 안드로이드 빌드·실기기 실행은 아직 없다(`docs/stage-5-verification.md` V5-1, V5-4, V5-5).
 - **LLM Wiki (마크다운 폴더):** 퀴즈 만들기, 회고 합치기, 다음 공부 주제 추천. PC 앱과 회고·퀴즈를 주고받음. 파일이 진실이고 SQLite는 다시 만들 수 있는 색인이며, LLM이 꺼져 있어도 로컬 정리·검색은 동작한다.
 - **Supabase (서버):** 스터디방, 실시간 상태, PC-폰 짝짓기, 계획·히스토리 읽기용 미러, 친구 앱 연결, 놓친 계획 감지(pg_cron 1분 + Edge Function).
 - **외부 연동 구조 (2단계~):** 외부 서비스는 포트/어댑터로 붙인다(Supabase, 알림, LLM, 푸시). 설정이 없으면 「설정 필요」, 명시하면 키 없이 도는 「모의 모드」(외부로 아무것도 안 나감). 나가는 요청은 허용 목록 타입만 만들 수 있고 호스트는 주입된 정책이 제한한다(docs/egress-policy.md). 비밀(로그인 토큰, API 키, ntfy 토픽)은 OS 키체인에만 둔다.

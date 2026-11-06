@@ -67,6 +67,18 @@ describe('ntfy server safety', () => {
   }
 });
 
+describe('ntfy server SSRF matrix', () => {
+  const refuse = [
+    'https://localhost', 'https://localhost.', 'https://LOCALHOST.', 'https://metadata.google.internal.', 'https://foo.internal.',
+    'https://foo.local.', 'https://x.localhost.', 'https://127.0.0.1', 'https://127.1', 'https://2130706433', 'https://0x7f.1',
+    'https://169.254.169.254.', 'https://[::1]', 'https://ntfy.sh.', 'https://ntfy.sh:8443', 'https://u:p@ntfy.sh', 'https://ntfy.sh/path',
+    'https://ntfy.sh/?q=1', 'http://ntfy.sh', 'https://ntfy', 'ftp://ntfy.sh', 'https://ntfy.sh#x',
+  ];
+  for (const bad of refuse) {
+    it(`refuses ${bad}`, () => expect(isSafeNtfyServer(bad)).toBe(false));
+  }
+});
+
 describe('failures', () => {
   it('reports an HTTP failure as a code without the URL', async () => {
     const { fetchFn } = recorder(403);

@@ -1361,6 +1361,21 @@ mod quiz_gate {
         assert_eq!(state_row(&conn).map(|s| s.0), Some(2));
     }
 
+    /// Attempts are used but the cap is not reached: shrinking the bank (reports / archive) after an
+    /// attempt must not open the typed sentence for early release.
+    #[test]
+    fn rt_bank_shrunk_after_a_first_attempt_must_not_open_typing() {
+        let mut conn = quiz_run(12);
+        let desk = ReleaseDesk::default();
+        let challenge = desk.begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0)).expect("begin");
+        desk.submit_quiz(&mut conn, &Utc, challenge.challenge_id, &[], t(21, 0, 30)).expect("miss");
+        conn.execute("UPDATE wiki_subjects SET archived_at_ms = 1", []).expect("archive");
+        let after = desk.begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 10, 0));
+        assert!(after.is_err(), "typing was offered after an attempt was spent: {:?}", after.map(|c| c.proof));
+        let status = crate::quiz::release::status(&conn, &Utc, t(21, 10, 0)).expect("status");
+        assert_eq!(status.mode, "exhausted");
+    }
+
     #[test]
     fn the_bank_failing_to_read_falls_back_to_the_sentence_but_the_cap_does_not() {
         let conn = quiz_run(9);

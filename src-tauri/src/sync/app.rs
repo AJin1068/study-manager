@@ -88,7 +88,7 @@ impl SyncSource for AppSyncSource {
             device: DeviceIdentity {
                 id: device_id,
                 app_version: env!("CARGO_PKG_VERSION").to_string(),
-                platform: crate::commands::remote::platform_name(),
+                platform: crate::platform::name(),
             },
         })
     }

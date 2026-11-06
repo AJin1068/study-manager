@@ -5,7 +5,7 @@
 use std::sync::{Arc, Mutex};
 
 use chrono::Local;
-use rusqlite::Connection;
+use rusqlite::{Connection, TransactionBehavior};
 use serde::Serialize;
 
 use super::gift::{self, ReceiveOutcome, SendOutcome};
@@ -19,7 +19,8 @@ use crate::error::{AppError, AppResult};
 use crate::remote::runtime::RemoteRuntime;
 use crate::remote::supabase::RemoteError;
 use crate::remote::Clock;
-use crate::store::profile as repo;
+use crate::settings::{Outcome, Reason};
+use crate::store::{self, profile as repo};
 
 pub const NAME_MAX_CHARS: usize = 20;
 pub const TITLE_MAX_CHARS: usize = 60;
@@ -171,8 +172,30 @@ impl ProfileService {
     /// Saves one section's scope, then publishes so a narrowed scope takes effect on the server
     /// at once (the server drops what the new scope no longer allows). The local save is kept
     /// even if the server cannot be reached; the next publish applies it.
+    ///
+    /// Like every privacy setting it is locked during a study run in the loosening direction
+    /// (`run_locked`, recorded as `rejected_locked`); narrowing is allowed and recorded as
+    /// `applied_privacy_tighten`. Every change is written to `setting_history`.
     pub fn set_scope(&self, section: Section, scope: Scope) -> AppResult<PublishView> {
-        repo::set_visibility(&*lock_db(&self.db)?, section, scope, self.clock.now_ms()?)?;
+        let at_ms = self.clock.now_ms()?;
+        {
+            let mut conn = lock_db(&self.db)?;
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let before = repo::visibility(&tx)?.get(&section).copied().unwrap_or(Scope::Private);
+            let key = format!("profile.scope.{}", section.as_str());
+            let locked = crate::study::lock_held(&tx)?;
+            if locked && scope.openness() > before.openness() {
+                store::append_history(&tx, at_ms, &key, Some(before.as_str()), scope.as_str(), Reason::User, Outcome::RejectedLocked)?;
+                tx.commit()?;
+                return Ok(PublishView { code: ProfileCode::RunLocked, slug: None, link: None });
+            }
+            if scope != before {
+                let outcome = if locked { Outcome::AppliedPrivacyTighten } else { Outcome::Applied };
+                repo::set_visibility(&tx, section, scope, at_ms)?;
+                store::append_history(&tx, at_ms, &key, Some(before.as_str()), scope.as_str(), Reason::User, outcome)?;
+            }
+            tx.commit()?;
+        }
         self.publish()
     }
 

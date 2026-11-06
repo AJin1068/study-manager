@@ -24,13 +24,6 @@ impl Recorder {
         self.sent.lock().map(|s| s.clone()).unwrap_or_default()
     }
 
-    #[allow(dead_code)]
-    pub fn clear(&self) {
-        if let Ok(mut sent) = self.sent.lock() {
-            sent.clear();
-        }
-    }
-
     /// Bodies of calls to one RPC.
     pub fn bodies_of(&self, rpc: &str) -> Vec<String> {
         self.bodies().into_iter().filter(|(name, _)| name == rpc).map(|(_, body)| body).collect()

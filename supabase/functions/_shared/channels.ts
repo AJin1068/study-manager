@@ -29,7 +29,8 @@ export function isSafeNtfyServer(raw: string): boolean {
   if (url.username !== '' || url.password !== '' || url.port !== '') return false;
   if (url.pathname !== '/' || url.search !== '' || url.hash !== '') return false;
   const host = url.hostname.toLowerCase();
-  if (host.startsWith('[') || IPV4.test(host)) return false;
+  // A trailing dot ("localhost.", "metadata.google.internal.") is the same name to the resolver.
+  if (host.endsWith('.') || host.startsWith('[') || IPV4.test(host)) return false;
   if (!host.includes('.')) return false;
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) return false;
   return true;

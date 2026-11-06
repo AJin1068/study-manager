@@ -6,7 +6,6 @@ use serde::Serialize;
 use crate::plan::BlockKind;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // `Skipped` is written by stage 1-3; the DB CHECK reserves it now.
 pub enum RunStatus {
     Active,
     Completed,
@@ -43,7 +42,6 @@ impl RunStatus {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // `Skipped` and `EarlyRelease` are written by stage 1-3.
 pub enum EndReason {
     Elapsed,
     ElapsedWhileDown,

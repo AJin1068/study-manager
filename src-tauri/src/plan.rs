@@ -31,7 +31,6 @@ const PLAN_KEY: &str = "plan";
 /// Variants beyond create/move/retime/resize/delete/repeat are written by later stories
 /// (mode shift, undo, chatbot); they exist now because the DB CHECK reserves them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum Action {
     Create,
     Move,

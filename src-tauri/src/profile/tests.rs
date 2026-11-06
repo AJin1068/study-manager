@@ -702,6 +702,47 @@ fn the_service_starts_private_and_a_scope_change_publishes() {
 }
 
 #[test]
+fn a_scope_cannot_be_widened_during_a_run_but_can_be_narrowed_and_every_change_is_in_the_history() {
+    let world = World::new();
+    let a = member(&world, "a@example.test");
+    let db = db_with_points(0);
+    let svc = service(&world, Some(a.api.clone()), Arc::clone(&db));
+    svc.set_name("민수").expect("name");
+    svc.set_scope(Section::Level, Scope::Friends).expect("widen while free");
+
+    crate::testutil::set_lock_for_test(&db.lock().expect("db"), true);
+    let refused = svc.set_scope(Section::Level, Scope::Public).expect("refusal is an answer");
+    assert_eq!((refused.code, refused.slug), (ProfileCode::RunLocked, None));
+    let refused_new = svc.set_scope(Section::Badges, Scope::Friends).expect("private -> friends");
+    assert_eq!(refused_new.code, ProfileCode::RunLocked);
+    let scope_of = |section| svc.home().expect("home").scopes.iter().find(|r| r.section == section).map(|r| r.scope);
+    assert_eq!((scope_of(Section::Level), scope_of(Section::Badges)), (Some(Scope::Friends), Some(Scope::Private)));
+
+    assert_eq!(svc.set_scope(Section::Level, Scope::Private).expect("narrow").code, ProfileCode::Ok);
+    assert_eq!(scope_of(Section::Level), Some(Scope::Private));
+    crate::testutil::set_lock_for_test(&db.lock().expect("db"), false);
+
+    let conn = db.lock().expect("db");
+    let rows: Vec<(String, Option<String>, String, String)> = conn
+        .prepare("SELECT key, before, after, outcome FROM setting_history WHERE key LIKE 'profile.scope.%' ORDER BY id")
+        .expect("prepare")
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+        .expect("query")
+        .collect::<Result<_, _>>()
+        .expect("rows");
+    let row = |key: &str, before: &str, after: &str, outcome: &str| (key.to_string(), Some(before.to_string()), after.to_string(), outcome.to_string());
+    assert_eq!(
+        rows,
+        vec![
+            row("profile.scope.level", "private", "friends", "applied"),
+            row("profile.scope.level", "friends", "public", "rejected_locked"),
+            row("profile.scope.badges", "private", "friends", "rejected_locked"),
+            row("profile.scope.level", "friends", "private", "applied_privacy_tighten"),
+        ]
+    );
+}
+
+#[test]
 fn the_service_reports_a_missing_connection_as_an_error_and_keeps_local_choices() {
     let world = World::new();
     let db = db_with_points(0);

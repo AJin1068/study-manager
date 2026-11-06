@@ -22,6 +22,7 @@ const CODE_TEXT: Record<ProfileCode, string> = {
   already_owned: '이미 가지고 있습니다',
   unknown_item: '없는 물건입니다',
   too_many: '너무 많습니다 (위키 페이지는 10개까지)',
+  run_locked: '공부 중에는 공개 범위를 넓힐 수 없습니다 (좁히는 것은 가능합니다)',
 };
 
 export function codeText(code: ProfileCode): string {

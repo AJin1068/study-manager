@@ -277,10 +277,15 @@ impl WikiService {
         }
     }
 
-    /// Archiving hides the subject and keeps its folder; restoring brings it back.
+    /// Archiving hides the subject and keeps its folder; restoring brings it back. Archiving is
+    /// refused while the study lock is held: it shrinks the quiz bank, which must not be possible
+    /// from inside a locked block (the early-release gate reads the bank size).
     pub fn set_archived(&self, id: i64, archived: bool) -> AppResult<SubjectView> {
         let at_ms = self.now()?;
         let conn = lock_db(&self.db)?;
+        if archived && crate::study::lock_held(&conn)? {
+            return Err(AppError::Invalid("subjects cannot be archived while the lock is held".into()));
+        }
         repo::set_archived(&conn, id, archived.then_some(at_ms))?;
         let wiki = Self::wiki_fs(&conn)?;
         Self::view(&conn, &wiki, repo::get_subject(&conn, id)?)
@@ -772,6 +777,19 @@ mod tests {
         assert!(r.wiki.list_subjects(false).expect("list")[0].folder_missing);
         let rebuilt = r.wiki.ensure_subject("물리").expect("rebuild");
         assert!(!rebuilt.folder_missing);
+    }
+
+    #[test]
+    fn archiving_is_refused_while_the_lock_is_held_but_restoring_is_not() {
+        let r = rig();
+        let math = r.wiki.create_subject("수학").expect("create");
+        crate::testutil::set_lock_for_test(&r.h.db.lock().expect("db"), true);
+        assert!(r.wiki.set_archived(math.id, true).is_err(), "the quiz bank must not shrink inside a locked block");
+        assert!(r.wiki.list_subjects(false).expect("list").iter().any(|s| s.id == math.id && s.archived_at_ms.is_none()));
+        crate::testutil::set_lock_for_test(&r.h.db.lock().expect("db"), false);
+        r.wiki.set_archived(math.id, true).expect("archive when free");
+        crate::testutil::set_lock_for_test(&r.h.db.lock().expect("db"), true);
+        assert!(r.wiki.set_archived(math.id, false).expect("restoring only grows the bank").archived_at_ms.is_none());
     }
 
     #[test]

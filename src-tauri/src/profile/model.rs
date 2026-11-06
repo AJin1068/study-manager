@@ -33,6 +33,8 @@ pub enum ProfileCode {
     AlreadyOwned,
     UnknownItem,
     TooMany,
+    /// Widening a scope while a study run holds the lock.
+    RunLocked,
 }
 
 impl ProfileCode {
@@ -61,6 +63,7 @@ impl ProfileCode {
             ProfileCode::AlreadyOwned => "already_owned",
             ProfileCode::UnknownItem => "unknown_item",
             ProfileCode::TooMany => "too_many",
+            ProfileCode::RunLocked => "run_locked",
         }
     }
 }
@@ -168,6 +171,15 @@ pub enum Scope {
 }
 
 impl Scope {
+    /// How much a scope shows: private < friends < public.
+    pub fn openness(self) -> u8 {
+        match self {
+            Scope::Private => 0,
+            Scope::Friends => 1,
+            Scope::Public => 2,
+        }
+    }
+
     pub const ALL: [Scope; 3] = [Scope::Public, Scope::Friends, Scope::Private];
 
     pub fn as_str(self) -> &'static str {

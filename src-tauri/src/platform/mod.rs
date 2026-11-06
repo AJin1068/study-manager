@@ -30,6 +30,17 @@ pub use notifier::PluginNotifier;
 pub use quit::QuitReason;
 pub use process::{is_protected_id, normalize_app_id, AppIdentity, ProcessControl};
 
+/// The operating system's name as it is sent to the server with the device registration.
+pub fn name() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "windows") {
+        "windows"
+    } else {
+        "other"
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum PlatformError {
     #[error("unsupported on this platform: {0}")]

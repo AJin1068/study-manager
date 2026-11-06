@@ -2,6 +2,9 @@ node_modules/
 dist/
 src-tauri/target/
 src-tauri/gen/
+phone/core/target/
+phone/src-tauri/target/
+phone/src-tauri/gen/
 *.log
 # gjc runtime state (session logs, ultragoal ledger). Runtime-owned, never source.
 .gjc/

@@ -10,7 +10,8 @@
 //!   the questions are issued, so closing the card or rerolling costs one too. Once the cap is
 //!   spent, early release is refused for the rest of the day; typing does not reopen (a parallel
 //!   exit would make the cap pointless). The counter is checked before the bank size on purpose:
-//!   the bank cannot be made small enough to fall back to typing after attempts were used.
+//!   the bank cannot be made small enough to fall back to typing after attempts were used: with an
+//!   attempt on record and fewer than [`RELEASE_QUESTIONS`] drawable questions, the day is closed.
 //! - A failed or newly opened attempt starts a cooldown (`quiz.release_cooldown_min`).
 //! - Questions asked in the last 24 hours are avoided while enough others exist, and top up the
 //!   draw only when the bank is that small. The typing fallback is decided by the size of the
@@ -61,6 +62,10 @@ fn gate<Tz: TimeZone>(conn: &Connection, tz: &Tz, config: &QuizConfig, now_ms: i
     }
     let drawable = repo::drawable_count(conn)?;
     let enough = usize::try_from(drawable).is_ok_and(|n| n >= RELEASE_QUESTIONS);
+    if !enough && attempts > 0 {
+        // The bank shrank after an attempt was spent: typing must not open as a way around the cap.
+        return Ok((Gate::Exhausted, attempts));
+    }
     Ok((if enough { Gate::Quiz } else { Gate::Typing }, attempts))
 }
 

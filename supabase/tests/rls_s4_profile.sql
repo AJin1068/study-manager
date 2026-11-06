@@ -17,6 +17,7 @@ values ('20000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-0000000
 
 -- Anonymous callers cannot read tables or run any RPC except get_public_profile.
 set local role anon;
+set local request.jwt.claims = '';
 select throws_ok($$select * from public.profile_settings$$, '42501', null, 'anon cannot read profile_settings');
 select throws_ok($$select * from public.gifts$$, '42501', null, 'anon cannot read gifts');
 select throws_ok($$select public.get_my_profile()$$, '42501', null, 'anon cannot run get_my_profile');
@@ -28,7 +29,7 @@ reset role;
 set local role authenticated;
 set local request.jwt.claims = '{"sub":"00000000-0000-4000-8000-00000000000a","role":"authenticated"}';
 create temp table ctx (slug text) on commit drop;
-grant all on ctx to authenticated;
+grant all on ctx to authenticated, anon;
 insert into ctx select public.set_profile_settings('가', 'public', 'private', 'friends', 'private', 'friends', 'private', 'private', 'private', 'private',
   7, '{}', '{furn_desk}', '{비밀 페이지}', '수학')->>'slug';
 select matches((select slug from ctx), '^[a-f0-9]{16}$', 'a slug is issued');
@@ -37,6 +38,7 @@ reset role;
 
 -- Anonymous: only the public section appears.
 set local role anon;
+set local request.jwt.claims = '';
 select is((select public.get_public_profile((select slug from ctx))->'sections'->>'level'), null, 'anon does not get the friends-only level');
 select isnt((select public.get_public_profile((select slug from ctx))->'sections'->'room'), null, 'anon gets the public room');
 select is((select count(*)::int from jsonb_object_keys(public.get_public_profile((select slug from ctx))->'sections')), 1, 'anon gets exactly the public sections');

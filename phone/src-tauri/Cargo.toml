@@ -1,0 +1,35 @@
+[package]
+name = "study-phone"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Study Manager phone app: Tauri 2 mobile shell around study-phone-core and the Kotlin blocker plugin"
+publish = false
+
+# Independent project (no root Cargo workspace). It links only the shared wire crate and the
+# phone core; it must never depend on the desktop crate (its macOS-only crates break the Android targets).
+[lib]
+name = "study_phone_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "study-phone"
+path = "src/main.rs"
+
+[dependencies]
+link-protocol = { path = "../../crates/link-protocol" }
+study-phone-core = { path = "../core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
+libc = "0.2"
+
+# QR scanning for the pairing screen (camera permission is declared by the plugin).
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-barcode-scanner = "2"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }

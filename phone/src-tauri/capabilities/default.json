@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "default",
+  "description": "The phone UI calls only app commands and subscribes to blocker plugin events; the blocker commands themselves are called by Rust. No network, filesystem or shell permission is granted to the webview.",
+  "windows": ["main"],
+  "platforms": ["android", "iOS"],
+  "permissions": ["core:default", "blocker:default", "barcode-scanner:allow-scan", "barcode-scanner:allow-request-permissions", "barcode-scanner:allow-check-permissions"]
+}

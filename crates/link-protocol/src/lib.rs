@@ -12,7 +12,7 @@ mod lease;
 mod offer;
 mod report;
 
-pub use decision::{lock_decision, FreeReason, LeaseHolder, PhoneLock};
+pub use decision::{lock_decision, FreeReason, LeaseHolder, PhoneLock, MAX_REJECTED_KEPT};
 pub use lease::{accept_lease, LeaseError, LeaseReceipt, LeaseReject, LeaseState, LockLease, ReleaseCause, GRACE_MS, MAX_LEASE_MS, MAX_SEGMENT_MS};
 pub use offer::{normalize_code, OfferError, PairingOffer, CODE_LEN, OFFER_VERSION};
 pub use report::{PhoneBeat, PickupReport, ReportError, MAX_PICKUPS_PER_REPORT};

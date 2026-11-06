@@ -22,7 +22,8 @@ export type ProfileCode =
   | 'insufficient_points'
   | 'already_owned'
   | 'unknown_item'
-  | 'too_many';
+  | 'too_many'
+  | 'run_locked';
 
 export const SECTIONS = ['room', 'grass', 'level', 'badges', 'guestbook', 'visitors', 'wiki', 'subject', 'gifts'] as const;
 export type Section = (typeof SECTIONS)[number];
@@ -152,7 +153,7 @@ export interface GiftOverview {
 const CODES: readonly string[] = [
   'ok', 'not_signed_in', 'invalid_input', 'not_shared', 'not_found', 'not_member', 'cannot_self', 'not_friends',
   'closed', 'rate_limited', 'key_conflict', 'not_giftable', 'daily_limit', 'already_resolved', 'name_required',
-  'insufficient_points', 'already_owned', 'unknown_item', 'too_many',
+  'insufficient_points', 'already_owned', 'unknown_item', 'too_many', 'run_locked',
 ];
 const OUTBOX_STATES: readonly string[] = ['pending', 'sent', 'refunded'];
 

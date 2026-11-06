@@ -280,7 +280,9 @@ impl RemoteRuntime {
                 "ntfy" | "phone_app" => {
                     let topic = self.secrets.get(SecretName::NtfyTopic).ok().flatten().ok_or_else(not_configured)?;
                     let host = host_of(&config.notify_ntfy_server).ok_or_else(not_configured)?;
-                    let transport = (self.transports)(HostPolicy::configured([host]));
+                    let inner = (self.transports)(HostPolicy::configured([host]));
+                    let transport: Arc<dyn HttpTransport> =
+                        Arc::new(AuditedTransport::new(inner, Arc::clone(&self.sink), Arc::clone(&self.clock)));
                     Ok(Arc::new(NtfyClient::new(&config.notify_ntfy_server, topic.expose(), transport)))
                 }
                 "telegram" => Ok(Arc::new(ServerTest::new(self.supabase(conn)?.rest))),
@@ -425,6 +427,23 @@ mod tests {
         let state = &runtime.states(&conn).expect("states")[0];
         assert_eq!(state.health, Health::Degraded { code: "http_error".into() });
         assert_eq!(state.last_ok_ms, Some(1_000));
+    }
+
+    #[test]
+    fn the_ntfy_notify_transport_is_audited_without_the_topic() {
+        let mut conn = open_in_memory().expect("db");
+        set(&mut conn, config::RemoteSettingKey::NotifyChannel, "ntfy");
+        let scripted = Arc::new(ScriptedTransport::new(HostPolicy::configured(["ntfy.sh"]), vec![Ok(HttpResponse::ok_json(200, ""))]));
+        let factory: TransportFactory = {
+            let scripted = scripted.clone();
+            Arc::new(move |_| scripted.clone())
+        };
+        let (runtime, sink) = runtime_with(factory);
+        runtime.secrets().set(SecretName::NtfyTopic, "abcdefghijklmnopqrstuvwx").expect("topic");
+        runtime.notify_client(&conn).expect("client").send_test().expect("sent");
+        let records = sink.0.lock().expect("sink").clone();
+        assert_eq!(records.iter().map(|r| (r.port, r.kind, r.outcome)).collect::<Vec<_>>(), [("notify", "ntfy_test", "ok")]);
+        assert!(!format!("{records:?}").contains("abcdefghijklmnopqrstuvwx"));
     }
 
     /// Reports whether the database lock was free at the moment a request was sent.
