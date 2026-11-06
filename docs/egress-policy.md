@@ -25,11 +25,12 @@
 ## 시험
 
 - `remote::payload::tests::egress_payload_guard_*`: 모든 페이로드 표본을 직렬화해 금지 키(`title`, `window_title`, `url`, `typed*`, `sentence*`)와 카나리 문자열(`CANARY_TITLE_7f3a`, `https://canary.example/secret-path`) 부재 단언. 표본 목록이 `egress_payload!` 사용 수와 같아야 통과한다.
+- `llm::egress::tests::llm_payload_guard_*`: LLM 페이로드 표본에도 같은 금지 키·카나리 단언. `tests/llm_wire.rs`: 루프백 가짜 서버로 요청 모양·재시도·거부를 확인(실제 호스트·키 사용 없음).
 - `tests/remote_wire.rs`: 루프백 가짜 서버가 받은 모든 본문에 카나리·금지 키 부재 단언, 리다이렉트 미추적, 외부 호스트 거부.
 - `remote::secret_flow::tests`: 키 저장 뒤 settings·setting_history·remote_events·로그 어디에도 값 부재.
 - `supabase/tests/schema.static.test.ts`: 저장소 전체에 JWT·service role 키·제공자 키 모양 문자열 부재.
 
-## 허용 목록 (2단계 현재)
+## 허용 목록 (3단계 현재)
 
 | 포트 | 보내는 것 | 타입 |
 |---|---|---|
@@ -41,6 +42,13 @@
 | 알림 채널 | 채널 종류, ntfy 토픽·서버, Telegram chat_id, 유예 분, UTC 오프셋 | `NotifyChannelRow` |
 | 알림 시험 (ntfy) | 고정 시험 문장 한 줄. 받는 곳은 사용자가 설정한 ntfy 서버 | `NoticeText` |
 | 알림 시험 (Telegram) | `{"action":"test"}` 하나. 봇 토큰은 서버에만 있고 Edge Function이 보낸다 | `NotifyTestRequest` |
+
+| LLM 위키 정리 | 과목 이름, 자료 조각(한 요청에 6,000자 이하, 사용자가 직접 고른 파일·붙여넣은 글), 고정 지시문 | `llm::egress::MessagesRequest` |
+| LLM 위키 묻기 | 과목 이름, 질문(500자 이하), 로컬 검색으로 고른 위키 페이지 최대 3개(페이지당 8,000자 이하), 고정 지시문 | 같음 |
+| LLM 목차 초안 | 과목 이름 | 같음 |
+| LLM 연결 시험 | 고정 한 줄 | 같음 |
+
+LLM 요청은 `api.anthropic.com`으로만 가며 키는 헤더에만 있다(본문·로그·`remote_events`에 없음). 위키 폴더 전체, 페이지 목록, 창 제목, URL(링크 자료는 열지 않고 사용자가 쓴 메모만 보낸다), 입력한 문장은 보내지 않는다. 탭 판단은 `llm.judge_enabled`(기본 꺼짐) 동의가 있어야 하며 도메인·줄인 탭 제목(120자 이하)·공부 주제만 보낸다(경로·쿼리 없음, 저장 안 함). 병합·점검·문제 생성·자동 조정·챗봇·주간 인사이트도 같은 `MessagesRequest`로만 나간다(계획·집계·위키 본문, 창 제목·앱 이름 없음). 근거와 한도: `docs/decision-llm-egress.md`.
 
 계획 이름·과목은 폰과 방에서 보기 위해 서버 미러에 올라가지만 **알림 문구에는 절대 넣지 않는다**(시각과 고정 문장만). 탭 기록·창 제목·URL·타이핑은 이 표 어디에도 없다.
 

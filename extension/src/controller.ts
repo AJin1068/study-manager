@@ -20,6 +20,7 @@ interface QueuedEvent {
   tabId: number;
   url: string;
   kind: TabKind;
+  title?: string;
 }
 
 /**
@@ -68,21 +69,21 @@ export class LinkController {
   private async onActivated(tabId: number): Promise<void> {
     try {
       const tab = await this.chrome.tabs.get(tabId);
-      this.handleEvent(tabId, tab.url, 'activated');
+      this.handleEvent(tabId, tab.url, 'activated', tab.title);
     } catch {
       // The tab closed before it could be read: nothing to judge.
     }
   }
 
-  handleEvent(tabId: number, url: string | undefined, kind: TabKind): void {
+  handleEvent(tabId: number, url: string | undefined, kind: TabKind, title?: string): void {
     if (!isWebUrl(url) || tabId < 0) return;
     if (!this.filter.accept(tabId, url, kind)) return;
     this.ensureConnected();
     if (this.state === 'connected') {
-      this.send({ tabId, url, kind });
+      this.send({ tabId, url, kind, ...(title === undefined ? {} : { title }) });
     } else if (this.state === 'connecting') {
       if (this.queue.length >= MAX_QUEUED) this.queue.shift();
-      this.queue.push({ tabId, url, kind });
+      this.queue.push({ tabId, url, kind, ...(title === undefined ? {} : { title }) });
     }
   }
 
@@ -128,7 +129,7 @@ export class LinkController {
 
   private send(event: QueuedEvent): void {
     if (this.port === null) return;
-    this.port.postMessage(buildTabEvent(event.tabId, event.url, event.kind));
+    this.port.postMessage(buildTabEvent(event.tabId, event.url, event.kind, event.title));
     const entry = this.pending.get(event.tabId);
     this.pending.set(event.tabId, { count: (entry?.count ?? 0) + 1, domain: domainOf(event.url) });
   }

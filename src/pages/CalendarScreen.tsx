@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { commands, onPlansChanged, type Occurrence } from '../api';
+import { ChatPanel } from '../components/ChatPanel';
 import { PlanDialog, type DialogTarget } from '../components/PlanDialog';
 import { PlanHistoryPanel } from '../components/PlanHistoryPanel';
 import {
@@ -137,6 +138,7 @@ export function CalendarScreen() {
           전체 기록 보기
         </button>
       </div>
+      <ChatPanel />
       <PlanHistoryPanel planId={selectedPlan} month={monthKey(anchor)} refreshKey={refreshKey} />
     </main>
   );

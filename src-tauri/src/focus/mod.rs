@@ -147,6 +147,8 @@ pub struct Recorder {
     tracker: Tracker,
     /// The sensors failed on the previous sample, so the failure is logged once, not every tick.
     probe_failed: bool,
+    /// When the opt-in study context last looked at the front study app.
+    context_sampled_ms: i64,
 }
 
 impl Recorder {
@@ -190,6 +192,15 @@ pub fn sample(
         }
     };
     rec.probe_failed = false;
+    // The opt-in "what was I studying" label; `capture` returns at once unless the user turned it on.
+    if now_ms.saturating_sub(rec.context_sampled_ms) >= crate::study_context::SAMPLE_EVERY_MS {
+        rec.context_sampled_ms = now_ms;
+        if let Some(app) = front.as_ref().filter(|a| a.pid != self_pid && study_ids.contains(&a.id)) {
+            if let Err(err) = crate::study_context::capture(db, probe, app, scope.segment_id, now_ms) {
+                tracing::warn!(event = "study_context_failed", error = %err);
+            }
+        }
+    }
     let idle_ms = i64::try_from(idle_secs.saturating_mul(1000)).unwrap_or(i64::MAX);
     let obs = Observation { at_ms: now_ms, foreground: classify(front.as_ref(), &study_ids, self_pid), idle_ms };
     let step = rec.tracker.step(&obs, scope.started_at_ms);

@@ -5,8 +5,8 @@
 ## 1. 프로젝트 개요
 
 - 목적: 공부 시간 관리 데스크톱 앱. 공부 중 방해 요소(앱, 탭)를 관리하고 기록한다.
-- 현재 단계: **2단계(서버 연결과 놓친 계획 알림) 구현 완료, 사람 검증 대기.** 1단계 완료 기준(일주일 실사용)과 2단계 완료 기준(실제 서버에서 5분 안 알림)은 사람이 확인해야 하며, 확인 전까지 단계 완료로 표기하지 않는다. 검증 안 된 항목은 `docs/stage-2-verification.md`.
-- 모듈 구조: `src-tauri/src/` — `commands/`(`mod.rs`: AppState·종료 게이트, `settings`·`study`·`downtime`·`power`: Tauri command), `db/`(`mod.rs`, `migrations/mNNN_*.sql`), `store/`(SQL 접근, `remote.rs`는 반출 기록·동기화 커서), `remote/`(외부 포트: 포트·모드, HTTP 계층·호스트 정책, 봉인된 반출 페이로드, 비밀, Supabase·알림 어댑터, 가짜 서버), `sync/`(미러 워커, 켜짐 신호), `plan_ics.rs`·`plan_import.rs`(ICS), `settings.rs`, `study.rs`(잠금·공부 모드), `downtime.rs`, `power.rs`, `platform/`, `tray.rs`, `clock.rs`, `error.rs`, 루트의 `supabase/`(마이그레이션·pgTAP·Edge Function `functions/`과 순수 로직 `functions/_shared`)와 `fixtures/`(Rust·TS 공유 계약). UI는 `src/` — `api/`(`index.ts`가 `settings`·`study`·`downtime` 재수출), `hooks/`, `pages/`. CI: `.github/workflows/ci.yml`(macOS·Windows).
+- 현재 단계: **3단계(LLM Wiki 연동) 구현 완료(PDF 추출기 미연결), 사람 검증 대기.** 1단계 완료 기준(일주일 실사용), 2단계(실제 서버에서 5분 안 알림), 3단계(한 과목의 위키가 실제 공부로 자라나고 퀴즈가 나옴)는 사람이 확인해야 하며, 확인 전까지 단계 완료로 표기하지 않는다. 검증 안 된 항목은 `docs/stage-2-verification.md`, `docs/stage-3-verification.md`.
+- 모듈 구조: `src-tauri/src/` — `commands/`(`mod.rs`: AppState·종료 게이트, `settings`·`study`·`downtime`·`power`: Tauri command), `db/`(`mod.rs`, `migrations/mNNN_*.sql`), `store/`(SQL 접근, `remote.rs`는 반출 기록·동기화 커서), `remote/`(외부 포트: 포트·모드, HTTP 계층·호스트 정책, 봉인된 반출 페이로드, 비밀, Supabase·알림 어댑터, 가짜 서버), `sync/`(미러 워커, 켜짐 신호), `llm/`(LLM 포트·모의·Anthropic 어댑터·예산·봉인 프롬프트), `wiki/`(위키 저장소·넣기·묻기·회고·점검·주제 추천), `quiz/`(문제은행, 조기 해제 관문, 복습 카드), `chat/`(계획 챗봇), `messages/`(응원·채찍), `study_context.rs`, `plan_adjust.rs`, `growth.rs`, `plan_ics.rs`·`plan_import.rs`(ICS), `settings.rs`, `study.rs`(잠금·공부 모드), `downtime.rs`, `power.rs`, `platform/`, `tray.rs`, `clock.rs`, `error.rs`, 루트의 `supabase/`(마이그레이션·pgTAP·Edge Function `functions/`과 순수 로직 `functions/_shared`)와 `fixtures/`(Rust·TS 공유 계약). UI는 `src/` — `api/`(`index.ts`가 `settings`·`study`·`downtime` 재수출), `hooks/`, `pages/`. CI: `.github/workflows/ci.yml`(macOS·Windows).
 
 ## 1-1. 요구사항 기준 (가장 먼저 읽을 것)
 
@@ -26,7 +26,7 @@
 | 로컬 저장소 | SQLite |
 | 서버 | Supabase (2단계 도입 완료: 읽기용 미러 모델, 계정 없이도 모의 모드로 동작) |
 | 브라우저 차단 | 크롬 확장 프로그램 (1단계-4) |
-| 앱 내 LLM | Anthropic API, Claude Haiku (앱 설정의 사용자 API 키, 3단계부터) |
+| 앱 내 LLM | Anthropic API, Claude Haiku (앱 설정의 사용자 API 키, 3단계 도입 완료: 기본 꺼짐, 키 없이도 모의·로컬 경로로 동작) |
 
 ## 3. 아키텍처 원칙
 
@@ -65,7 +65,8 @@
 - 알림 문구에는 과목·계획 이름을 넣지 않는다(잠금 화면 노출). 시각과 고정 문장만 쓴다.
 - 비밀(로그인 토큰, API 키, ntfy 토픽)은 OS 키체인에만 저장한다. 설정·`setting_history`·로그·DB에는 값도 해시도 남기지 않고 설정 여부만 남긴다. 서버에는 비밀을 두지 않는다(Telegram 봇 토큰은 Edge Function 비밀). 코드·fixture에 service role 키나 JWT 모양 문자열을 넣지 않는다.
 - 새 반출은 `docs/egress-policy.md`와 `remote::payload` 타입, `egress_payload_guard` 표본을 같은 변경에서 추가한다. 프라이버시를 줄이는 쪽 설정 변경(모의 전환, 알림 끄기, 비밀 삭제, 로그아웃)은 공부 run 중에도 허용하고 `applied_privacy_tighten`으로 기록한다.
-- 브라우저 탭 판단은 로컬에서 한다: 규칙 → 캐시 → 애매할 때만 Haiku (제목+URL+현재 주제만 전송, 저장하지 않음).
+- 브라우저 탭 판단은 로컬에서 한다: 규칙 → 캐시 → 애매할 때만 Haiku. 기본 꺼짐(`llm.judge_enabled`, 키와 동의 전 전송 0). 보내는 것은 도메인·줄인 탭 제목(120자 이하)·현재 주제뿐이며 경로·쿼리·전체 URL은 보내지 않고 저장하지 않는다(캐시에는 해시와 도메인만). 창 제목 LLM 분류는 호출부를 만들지 않았고 기본 꺼짐이다.
+- 위키·챗봇·인사이트 등 LLM 반출은 `docs/egress-policy.md`의 LLM 행과 `llm::egress` 타입으로만 한다. 공부 맥락(`context.*`, 기본 꺼짐)의 라벨은 80자 이하 요약만 로컬에 30일 보관하고 별도 동의(`context.llm_consent`) 없이는 LLM에 보내지 않는다.
 - 탭 기록·창 제목을 Supabase 등 외부 서버로 동기화하는 기능은 만들지 않는다. 향후 동기화가 필요하면 별도 결정 문서를 먼저 작성하고 사용자 승인을 받는다.
 - 텔레메트리, 원격 크래시 리포트, 분석 SDK에 창 제목이나 URL을 포함하지 않는다.
 - 로그에도 창 제목과 전체 URL을 기록하지 않는다. 필요하면 도메인 수준이나 해시로 줄인다.
@@ -89,7 +90,7 @@
   - 개인정보: 창 제목/URL이 로그와 외부 전송 경로에 나오지 않는지 확인.
 - CI에 macOS와 Windows 빌드 매트릭스를 두는 것을 목표로 한다. 설정 전까지는 두 OS에서 수동 빌드 결과를 보고한다.
 - 검증하지 않은 항목은 "검증 안 됨"이라고 명시한다. 단계 문서(`docs/stage-N-verification.md`)에 `V{N}-{k} | 스토리 | 항목 | 안 된 이유 | 사람이 하는 한 줄 절차` 표로 남긴다.
-- 2단계 게이트 명령: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, `pnpm tsc --noEmit`, `pnpm lint`, `pnpm test`(루트 vitest가 `supabase/**` 시험 포함). 실제 Postgres가 필요한 `supabase test db`는 Docker가 있을 때만 돌리고 없으면 V2-8로 남긴다.
+- 2·3단계 게이트 명령: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, `pnpm tsc --noEmit`, `pnpm lint`, `pnpm test`(루트 vitest가 `supabase/**` 시험 포함). 실제 Postgres가 필요한 `supabase test db`는 Docker가 있을 때만 돌리고 없으면 V2-8로 남긴다.
 
 ## 9. 문서와 파일
 
@@ -98,6 +99,8 @@
 - 이 AGENTS.md는 규칙 변경 시 같은 커밋에서 함께 갱신한다.
 - 용어: 잠금 상태는 `lock_held`(Rust `study::lock_held`, `LockState`, TS `lockHeld`)이다. DB 컬럼 `study_state.studying`은 이력상 이름이며 같은 의미다.
 - 새 마이그레이션은 마지막 번호 뒤에 붙인다(`db/migrations/mNNN_*.sql`, 서버는 `supabase/migrations/<타임스탬프>_*.sql`). 이미 적용된 파일은 고치지 않는다.
+- 퀴즈 관문(3단계, O-8·O-26): 위키 퀴즈 증명은 `PassKind::EarlyRelease`에만 쓴다(문제 3개 전부 정답, 하루 4회, 쿨다운 3분). 시도를 소진하면 그날 조기 해제는 타이핑으로도 열리지 않는다. 긴급 패스·오늘 건너뛰기는 항상 타이핑과 각자의 일일 한도를 유지한다. 딴짓 복습 카드는 차단을 풀지 않는다. 위키 문제가 3개 미만이면 조기 해제도 타이핑이다.
+- LLM(3단계): 호출은 `llm::service::LlmService::complete`로만 한다(꺼짐·키 없음·일일 예산 게이트, `llm_usage` 기록). 요청 본문은 `llm::egress::Prompt`/`MessagesRequest`뿐이고, 위키 파일은 미리보기 확인 뒤 `wiki::service::apply_ingest`에서만 쓴다. LLM이 꺼져 있어도 위키의 로컬 경로(제목 단위 정리·검색·찾은 페이지 보여주기)는 동작해야 한다. 근거: `docs/decision-llm-egress.md`.
 - 개인정보 스키마 가드: 테이블·컬럼 이름에 `title`, `window_title`, `url`, `typed*`, `sentence*`를 쓰지 않는다. `db` 테스트 `privacy_schema_guard`가 `sqlite_master`로 검사하며 모든 마이그레이션이 통과해야 한다. 로그 검증은 `testutil::capture_logs`를 쓴다.
 
 ## 10. 열린 질문 (결정 전까지 보류)
@@ -112,4 +115,5 @@
 - 확장 ↔ 로컬 앱 통신 방식: native messaging + 로컬 IPC (docs/stage-1-4-transport-decision.md).
 - 동기화 모델(2단계): 쓰기는 PC 한 곳, 로컬 SQLite가 진실, Supabase는 읽기용 미러. 서버가 죽어도 로컬 기능은 약해지지 않는다.
 - 놓친 계획 알림(2단계): 유예 기본 3분(최대 3), 서버 감지 1분 주기, 문구 무과목. Telegram 봇은 공유 봇 1개(토큰은 Edge 비밀), 기본 채널 ntfy.
+- LLM 3단계: 키·동의 전 전송 0(`llm.enabled`, `llm.judge_enabled` 기본 꺼짐; PLAN 13번의 「LLM 판단 켜기: 켜짐」에서 의도적으로 변경). 위키 퀴즈는 조기 해제에만 관문이며 시도 소진 시 조기 해제는 타이핑으로 열리지 않는다(`docs/stage-3-verification.md` 잔여 위험). 근거 `docs/decision-llm-egress.md`.
 - 공부 모드 기본 길이: 쉬움 25/5분(4세트마다 20분), 중간 50/15분, 어려움 90/10분 (PLAN.md 17번).

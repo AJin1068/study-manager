@@ -1,5 +1,7 @@
 [
-  { "outcome": "applied", "key": "studyMode", "shift": { "batchId": "modeshift-3", "movedCount": 1, "overflowsMidnight": false } },
-  { "outcome": "applied", "key": "modeConfig.medium", "shift": { "batchId": null, "movedCount": 0, "overflowsMidnight": true } },
+  { "outcome": "applied", "key": "studyMode", "shift": { "batchId": "modeshift-3", "movedCount": 1, "overflowsMidnight": false, "source": "rule", "fallbackCode": null } },
+  { "outcome": "applied", "key": "modeConfig.medium", "shift": { "batchId": null, "movedCount": 0, "overflowsMidnight": true, "source": "rule", "fallbackCode": null } },
+  { "outcome": "applied", "key": "studyMode", "shift": { "batchId": "llmadjust-9", "movedCount": 2, "overflowsMidnight": false, "source": "llm", "fallbackCode": null } },
+  { "outcome": "applied", "key": "studyMode", "shift": { "batchId": "modeshift-4", "movedCount": 1, "overflowsMidnight": false, "source": "rule", "fallbackCode": "llm_disabled" } },
   { "outcome": "rejectedLocked", "key": "studyMode", "shift": null }
 ]

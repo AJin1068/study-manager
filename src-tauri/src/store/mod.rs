@@ -1,7 +1,17 @@
 //! Repository layer: all SQL lives here. Domain modules call these functions instead of
 //! writing SQL, so the storage backend can be swapped later without touching callers.
 
+pub mod chat;
+pub mod context;
+pub mod growth;
+pub mod llm;
+pub mod messages;
+pub mod quiz;
 pub mod remote;
+pub mod retro;
+pub mod tabcache;
+pub mod topic;
+pub mod wiki;
 
 use rusqlite::{params, Connection, OptionalExtension};
 

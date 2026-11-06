@@ -70,6 +70,18 @@ describe('LinkController', () => {
     expect(port.sent).toHaveLength(2);
   });
 
+  it('sends the title of an activated tab but never one for a navigation event', async () => {
+    const { port, ack, fake, nav } = setup();
+    ack();
+    fake.tabs.set(6, { id: 6, url: 'https://d.test/', title: '선형대수 노트' });
+    fake.activated.emit({ tabId: 6 });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(port.sent[1]).toEqual({ type: 'tab_event', url: 'https://d.test/', tabId: 6, kind: 'activated', title: '선형대수 노트' });
+    nav(6, 'https://d.test/next');
+    expect(port.sent[2]).toEqual({ type: 'tab_event', url: 'https://d.test/next', tabId: 6, kind: 'updated' });
+  });
+
   it('redirects the tab to the blocked page on a block verdict', () => {
     const { port, nav, ack, fake } = setup();
     ack();

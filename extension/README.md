@@ -1,8 +1,9 @@
 # Study Manager browser extension (Chrome, MV3)
 
 Sends the app one message when the active tab changes or its address changes, and replaces the
-page with `blocked.html` when the app answers `block`. It never sends on a timer, never sends the
-page title, and the app keeps only the domain. If the app is not connected the extension allows
+page with `blocked.html` when the app answers `block`. It never sends on a timer. It sends the
+tab title (at most 120 characters) only for a tab the user just switched to; the app keeps it in
+memory for the optional LLM tab judge (off by default) and stores only the domain. If the app is not connected the extension allows
 every page (fail-open) and shows `끊김` on the toolbar icon.
 
 ## Build and load (unpacked)

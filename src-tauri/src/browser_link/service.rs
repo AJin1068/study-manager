@@ -38,9 +38,12 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const RATE_LIMIT_EVENTS: u32 = 60;
 const RATE_WINDOW_MS: i64 = 10_000;
 
-/// What a judge sees of one tab inside a locked study block. `url` lives only for the call.
+/// What a judge sees of one tab inside a locked study block. `url` and `title` live only for the
+/// call: nothing here may store or log them.
 pub struct TabContext<'a> {
     pub url: &'a str,
+    /// The tab's caption, when the extension sent one. Only the LLM judge reads it.
+    pub title: Option<&'a str>,
     pub window: StudyWindow,
     /// An emergency pass is running: blocks become `site_allowed_pass`.
     pub pass_active: bool,
@@ -62,8 +65,8 @@ impl Verdict {
     }
 }
 
-/// Decides a tab inside a locked study block. An LLM, if ever added (stage 3), sits behind the
-/// same trait.
+/// Decides a tab inside a locked study block. The LLM judge (`llm_judge`) sits behind the same
+/// trait, in front of `RulesJudge`.
 pub trait TabJudge: Send + Sync {
     fn judge(&self, tab: &TabContext<'_>) -> Verdict;
 }
@@ -256,12 +259,13 @@ impl Service {
                     return if code == "bad_message" { "protocol_error" } else { code };
                 }
             };
-            let Incoming::TabEvent { url, tab_id, kind } = message else {
+            let Incoming::TabEvent { url, tab_id, kind, title } = message else {
                 send(stream, &Outgoing::Error { code: "protocol_error" });
                 return "protocol_error";
             };
-            let verdict = self.handle_tab(&url, kind, &mut limiter);
+            let verdict = self.handle_tab(&url, title.as_deref(), kind, &mut limiter);
             drop(url);
+            drop(title);
             let reply = Outgoing::Verdict { tab_id, verdict: verdict.kind, reason_code: verdict.reason_code };
             if !send(stream, &reply) {
                 return "write_failed";
@@ -270,7 +274,7 @@ impl Service {
     }
 
     /// Every failure inside resolves to allow: the link never blocks on its own malfunction.
-    fn handle_tab(&self, url: &str, kind: TabKind, limiter: &mut RateLimiter) -> Verdict {
+    fn handle_tab(&self, url: &str, title: Option<&str>, kind: TabKind, limiter: &mut RateLimiter) -> Verdict {
         let now = match self.env.now_ms() {
             Ok(now) => now,
             Err(err) => {
@@ -301,7 +305,7 @@ impl Service {
             }
         };
         let Some(window) = window else { return Verdict::allow(REASON_OUTSIDE_STUDY) };
-        let verdict = self.judge.judge(&TabContext { url, window, pass_active });
+        let verdict = self.judge.judge(&TabContext { url, title, window, pass_active });
         let action = match (verdict.kind, verdict.reason_code) {
             (VerdictKind::Block, _) => Some(BlockAction::SiteBlocked),
             (VerdictKind::Allow, REASON_SITE_ALLOWED_PASS) => Some(BlockAction::SiteAllowedPass),

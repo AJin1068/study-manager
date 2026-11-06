@@ -79,6 +79,7 @@ export function PlanDialog({ target, onClose, onResult }: Props) {
   const [reason, setReason] = useState<ReasonDraft>({ code: null, text: '' });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [createWiki, setCreateWiki] = useState(true);
 
   async function submit() {
     setError(null);
@@ -102,7 +103,12 @@ export function PlanDialog({ target, onClose, onResult }: Props) {
     }
     setBusy(true);
     try {
-      onResult(await call);
+      const change = await call;
+      onResult(change);
+      // Best effort and after the plan is saved: a wiki problem never undoes or blocks the plan.
+      if (target.kind === 'create' && createWiki && subject.trim() !== '' && change.outcome.outcome === 'applied') {
+        await commands.ensureWikiSubject(subject.trim()).catch(() => undefined);
+      }
       onClose();
     } catch (err) {
       setError(`실패: ${String(err)}`);
@@ -142,6 +148,10 @@ export function PlanDialog({ target, onClose, onResult }: Props) {
         <>
           <label className="row">제목 <input value={name} onChange={(e) => setName(e.target.value)} /></label>
           <label className="row">과목 <input value={subject} onChange={(e) => setSubject(e.target.value)} /></label>
+          <label className="row">
+            <input type="checkbox" checked={createWiki} onChange={(e) => setCreateWiki(e.target.checked)} />
+            이 과목의 위키 폴더도 만들기
+          </label>
         </>
       )}
 

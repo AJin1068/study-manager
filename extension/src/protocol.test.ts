@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildHello, buildTabEvent, parseIncoming } from './protocol';
+import { MAX_TITLE_CHARS, buildHello, buildTabEvent, parseIncoming } from './protocol';
 
 describe('outgoing messages', () => {
   it('matches the wire format of the app', () => {
@@ -12,8 +12,11 @@ describe('outgoing messages', () => {
     });
   });
 
-  it('never carries a title', () => {
+  it('carries a title only when one is given, shortened, and never an empty one', () => {
     expect(Object.keys(buildTabEvent(1, 'https://a.test/', 'updated')).sort()).toEqual(['kind', 'tabId', 'type', 'url']);
+    expect(Object.keys(buildTabEvent(1, 'https://a.test/', 'updated', '   ')).sort()).toEqual(['kind', 'tabId', 'type', 'url']);
+    expect(buildTabEvent(1, 'https://a.test/', 'activated', ' 공부 노트 ').title).toBe('공부 노트');
+    expect(Array.from(buildTabEvent(1, 'https://a.test/', 'activated', '가'.repeat(500)).title ?? '')).toHaveLength(MAX_TITLE_CHARS);
   });
 });
 

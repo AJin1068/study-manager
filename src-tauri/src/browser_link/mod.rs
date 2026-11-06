@@ -10,6 +10,7 @@
 
 pub mod coverage;
 pub mod host;
+mod llm_judge;
 pub mod protocol;
 pub mod register;
 mod service;
@@ -123,7 +124,13 @@ impl LinkHub {
 
 /// Starts the listener thread. A transport that cannot start is reported in the status and the
 /// app carries on: the link is fail-open, so this never affects study enforcement.
-pub fn spawn(db: Arc<Mutex<Connection>>, high_water: Arc<HighWater>, hub: Arc<LinkHub>, data_dir: PathBuf) {
+pub fn spawn(
+    db: Arc<Mutex<Connection>>,
+    high_water: Arc<HighWater>,
+    hub: Arc<LinkHub>,
+    llm: Arc<crate::llm::service::LlmService>,
+    data_dir: PathBuf,
+) {
     // Links the previous run never closed (kill, crash) would otherwise read as watched forever.
     let closed = lock_db(&db).and_then(|conn| {
         let mode = enforce::read_config(&conn)?.mode;
@@ -147,7 +154,15 @@ pub fn spawn(db: Arc<Mutex<Connection>>, high_water: Arc<HighWater>, hub: Arc<Li
         Arc::clone(&db),
         Arc::clone(&hub),
         Arc::new(SystemEnv::new(high_water)),
-        Arc::new(service::RulesJudge::new(db)),
+        // Rules first; the LLM judge only ever acts on tabs the rules leave open, and only when the
+        // user switched it on (llm.judge_enabled, default off).
+        Arc::new(llm_judge::LlmTabJudge::new(
+            Arc::new(service::RulesJudge::new(Arc::clone(&db))),
+            db,
+            llm,
+            Arc::new(crate::remote::SystemClock),
+            Arc::new(llm_judge::ThreadRunner),
+        )),
         token,
         ALLOWED_EXTENSION_IDS.iter().map(|id| (*id).to_owned()).collect(),
     ));

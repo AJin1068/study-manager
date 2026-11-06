@@ -1,16 +1,39 @@
-//! Menu-bar (macOS) / tray (Windows) icon. Menu items are "설정 열기" and "종료" only.
+//! Menu-bar (macOS) / tray (Windows) icon. Menu items are "설정 열기", "챗봇 입력", and "종료".
 //! Closing the window hides it (see lib.rs); "종료" goes through the same exit gate as Cmd+Q,
 //! so a study-time quit is rejected and recorded in one place.
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use crate::platform::{self, PlatformError};
 use crate::timer::model::{Phase, TimerState};
 
 const TRAY_ID: &str = "main-tray";
 const IDLE_TOOLTIP: &str = "Study Manager";
+
+/// A macOS tray menu cannot hold a text field, so "챗봇 입력" opens this small window instead.
+/// It loads the same page as the main window; the hash selects the quick chat view.
+pub const CHAT_WINDOW_LABEL: &str = "chat-quick";
+pub const CHAT_WINDOW_URL: &str = "index.html#chat-quick";
+pub const CHAT_WINDOW_SIZE: (f64, f64) = (420.0, 300.0);
+
+/// What a tray menu item asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MenuAction {
+    OpenSettings,
+    OpenChat,
+    Quit,
+}
+
+pub fn menu_action(id: &str) -> Option<MenuAction> {
+    match id {
+        "open_settings" => Some(MenuAction::OpenSettings),
+        "open_chat" => Some(MenuAction::OpenChat),
+        "quit" => Some(MenuAction::Quit),
+        _ => None,
+    }
+}
 
 /// What the tray shows. `title` is the menu-bar text (macOS only); `tooltip` is the fallback
 /// everywhere else and carries the same information.
@@ -65,8 +88,9 @@ pub fn apply_label(app: &AppHandle, applied: &mut Option<TrayLabel>, label: Tray
 
 pub fn install(app: &AppHandle) -> tauri::Result<()> {
     let open_settings = MenuItem::with_id(app, "open_settings", "설정 열기", true, None::<&str>)?;
+    let open_chat = MenuItem::with_id(app, "open_chat", "챗봇 입력", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "종료", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open_settings, &quit])?;
+    let menu = Menu::with_items(app, &[&open_settings, &open_chat, &quit])?;
     let icon = app
         .default_window_icon()
         .cloned()
@@ -76,13 +100,36 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
         .icon(icon)
         .tooltip(IDLE_TOOLTIP)
         .menu(&menu)
-        .on_menu_event(|app, event| match event.id().as_ref() {
-            "open_settings" => show_main_window(app),
-            "quit" => app.exit(0),
-            _ => {}
+        .on_menu_event(|app, event| match menu_action(event.id().as_ref()) {
+            Some(MenuAction::OpenSettings) => show_main_window(app),
+            Some(MenuAction::OpenChat) => {
+                if let Err(err) = open_chat_window(app) {
+                    tracing::error!(error = %err, "failed to open the chat input window");
+                }
+            }
+            Some(MenuAction::Quit) => app.exit(0),
+            None => {}
         })
         .build(app)?;
     Ok(())
+}
+
+/// Opens (or raises) the small chat window. Applying a draft from it goes through the same
+/// commands, and so the same study lock, as the chat beside the calendar.
+pub fn open_chat_window(app: &AppHandle) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window(CHAT_WINDOW_LABEL) {
+        window.show()?;
+        window.set_focus()?;
+        return Ok(());
+    }
+    let (width, height) = CHAT_WINDOW_SIZE;
+    let window = WebviewWindowBuilder::new(app, CHAT_WINDOW_LABEL, WebviewUrl::App(CHAT_WINDOW_URL.into()))
+        .title("챗봇 입력")
+        .inner_size(width, height)
+        .resizable(false)
+        .always_on_top(true)
+        .build()?;
+    window.set_focus()
 }
 
 pub fn show_main_window(app: &AppHandle) {
@@ -112,6 +159,19 @@ mod tests {
             now_ms: now,
             next: None,
         }
+    }
+
+    #[test]
+    fn menu_items_map_to_actions_and_the_chat_item_opens_the_quick_window() {
+        assert_eq!(menu_action("open_settings"), Some(MenuAction::OpenSettings));
+        assert_eq!(menu_action("open_chat"), Some(MenuAction::OpenChat));
+        assert_eq!(menu_action("quit"), Some(MenuAction::Quit));
+        assert_eq!(menu_action("anything else"), None);
+        // The window is a separate label with its own view selector; the capability file lists it.
+        assert_ne!(CHAT_WINDOW_LABEL, "main");
+        assert!(CHAT_WINDOW_URL.ends_with(&format!("#{CHAT_WINDOW_LABEL}")));
+        let capability = include_str!("../capabilities/default.json");
+        assert!(capability.contains(&format!("\"{CHAT_WINDOW_LABEL}\"")), "the quick window needs the app command permissions");
     }
 
     #[test]

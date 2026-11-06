@@ -2,6 +2,7 @@
 //! React UI only calls the commands in `commands/` and listens for events.
 
 mod browser_link;
+mod chat;
 mod clock;
 mod commands;
 mod dashboard;
@@ -10,24 +11,31 @@ mod downtime;
 mod enforce;
 mod error;
 mod focus;
+mod growth;
+pub mod llm;
+mod messages;
 mod plan;
 mod plan_ics;
+mod plan_adjust;
 mod plan_import;
 mod plan_shift;
 mod platform;
 mod points;
 mod power;
 mod presets;
+pub mod quiz;
 pub mod remote;
 mod settings;
 mod site_rules;
 mod store;
 mod study;
+mod study_context;
 mod sync;
 #[cfg(test)]
 mod testutil;
 mod timer;
 mod tray;
+pub mod wiki;
 
 use std::sync::{mpsc, Arc, Mutex};
 
@@ -81,10 +89,24 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(remote::SystemClock),
         Arc::new(remote::audit::DbSink::new(Arc::clone(&db))),
         remote::runtime::ureq_factory(),
-    ));
+    )
+    .with_llm_transports(llm::anthropic::ureq_factory()));
     // Mirror and presence workers: idle (nothing sent) until a server is configured and the user
     // is signed in. Sleep/wake events reach the presence worker through power::spawn below.
     let sync = sync::app::start(Arc::clone(&db), Arc::clone(&remote), Arc::new(remote::SystemClock));
+    let llm = Arc::new(llm::service::LlmService::new(Arc::clone(&db), Arc::clone(&remote), Arc::new(remote::SystemClock)));
+    let wiki = Arc::new(wiki::service::WikiService::new(
+        Arc::clone(&db),
+        Arc::clone(&llm),
+        Arc::new(remote::SystemClock),
+        Arc::new(wiki::pdf::NoPdfExtractor),
+    ));
+    let quiz = Arc::new(quiz::service::QuizService::new(Arc::clone(&db), Arc::clone(&wiki), Arc::clone(&llm), Arc::new(remote::SystemClock)));
+    let retro = Arc::new(wiki::retro_service::RetroService::new(Arc::clone(&db), Arc::clone(&llm), Arc::new(remote::SystemClock)));
+    app.manage(retro);
+    app.manage(Arc::new(chat::service::ChatService::new(Arc::clone(&db), Arc::clone(&llm), Arc::new(remote::SystemClock))));
+    app.manage(Arc::new(growth::GrowthService::new(Arc::clone(&db), Arc::clone(&llm), Arc::new(remote::SystemClock))));
+    let browser_llm = Arc::clone(&llm);
     let (engine, wakes) = timer::engine::channel();
     let health = Arc::new(timer::engine::EngineHealth::default());
     app.manage(AppState {
@@ -102,6 +124,9 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         signals: Arc::clone(&signals),
         remote,
         sync: Arc::clone(&sync),
+        llm,
+        wiki,
+        quiz: Arc::clone(&quiz),
     });
     tray::install(&handle)?;
     install_quit_gate(&handle);
@@ -114,13 +139,18 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         wakes,
         Arc::clone(&notifier),
     );
-    browser_link::spawn(Arc::clone(&db), Arc::clone(&high_water), browser_link, data_dir);
+    browser_link::spawn(Arc::clone(&db), Arc::clone(&high_water), browser_link, browser_llm, data_dir);
     focus::spawn(Arc::clone(&db), Arc::clone(&high_water), focus_probe);
     // A shortcut that cannot be registered is reported in the status, not fatal: the in-app
     // button does the same job.
     signals.set_status(focus::signals::install_shortcut(&handle, Arc::clone(&db), Arc::clone(&high_water)))?;
     focus::signals::spawn(handle.clone(), Arc::clone(&db), Arc::clone(&high_water), signals, Arc::clone(&notifier));
+    messages::service::spawn(
+        handle.clone(),
+        Arc::new(messages::service::MessageService::new(Arc::clone(&db), Arc::new(remote::SystemClock), Arc::clone(&notifier))),
+    );
     enforce::spawn(handle.clone(), Arc::clone(&db), high_water, process, notifier);
+    quiz::watch::spawn(handle.clone(), Arc::clone(&db), quiz);
     power::spawn(handle, db, session_id, events, engine, sync.presence.clone());
     Ok(())
 }
@@ -286,6 +316,68 @@ pub fn run() {
             commands::remote::generate_ntfy_topic,
             commands::remote::get_ntfy_subscription,
             commands::remote::test_notification,
+            commands::llm::get_llm_settings,
+            commands::llm::update_llm_setting,
+            commands::llm::get_llm_status,
+            commands::wiki::list_wiki_subjects,
+            commands::wiki::create_wiki_subject,
+            commands::wiki::ensure_wiki_subject,
+            commands::wiki::set_wiki_subject_archived,
+            commands::wiki::wiki_subject_for_plan,
+            commands::wiki::list_wiki_pages,
+            commands::wiki::list_wiki_sources,
+            commands::wiki::read_wiki_page,
+            commands::wiki::reindex_wiki,
+            commands::wiki::ingest_wiki_text,
+            commands::wiki::ingest_wiki_file,
+            commands::wiki::ingest_wiki_folder,
+            commands::wiki::draft_wiki_outline,
+            commands::wiki::resume_wiki_ingest,
+            commands::wiki::cancel_wiki_ingest,
+            commands::wiki::apply_wiki_ingest,
+            commands::wiki::ask_wiki,
+            commands::quiz::get_quiz_settings,
+            commands::quiz::update_quiz_setting,
+            commands::quiz::get_quiz_stats,
+            commands::quiz::generate_quiz_bank,
+            commands::quiz::flag_quiz_item,
+            commands::quiz::start_review_quiz,
+            commands::quiz::get_session_end_quiz,
+            commands::quiz::get_checkin_quiz,
+            commands::quiz::answer_quiz_card,
+            commands::release::submit_release_quiz,
+            commands::release::get_release_quiz_status,
+            commands::wiki::preview_wiki_answer_page,
+            commands::retro::submit_retro,
+            commands::retro::retry_retro,
+            commands::retro::apply_retro,
+            commands::retro::cancel_retro,
+            commands::retro::undo_retro,
+            commands::retro::skip_retro,
+            commands::retro::get_retro,
+            commands::retro::list_open_retros,
+            commands::retro::lint_wiki,
+            commands::retro::get_retro_auto_apply,
+            commands::retro::set_retro_auto_apply,
+            commands::topic::get_today_topic,
+            commands::topic::assign_next_topics,
+            commands::topic::set_topic_assignment,
+            commands::topic::list_topic_assignments,
+            commands::topic::get_topic_history,
+            commands::messages::get_message_settings,
+            commands::messages::update_message_setting,
+            commands::context::get_context_status,
+            commands::context::update_context_setting,
+            commands::context::delete_study_context,
+            commands::chat::send_chat_message,
+            commands::chat::apply_chat_draft,
+            commands::chat::discard_chat_draft,
+            commands::chat::get_chat_draft,
+            commands::chat::open_chat_input,
+            commands::growth::get_growth_status,
+            commands::growth::get_weekly_insight,
+            commands::growth::get_insight_subject,
+            commands::growth::set_insight_subject,
         ])
         .build(tauri::generate_context!())
         .unwrap_or_else(|err| {

@@ -213,3 +213,32 @@ body {
 .heat-cell[data-level="2"] { background: rgba(22, 163, 74, 0.5); }
 .heat-cell[data-level="3"] { background: rgba(22, 163, 74, 0.75); }
 .heat-cell[data-level="4"] { background: rgba(22, 163, 74, 1); }
+
+.topic-body {
+  white-space: pre-wrap;
+  max-height: 12rem;
+  overflow: auto;
+}
+
+.chat-log {
+  max-height: 18rem;
+  overflow: auto;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.chat-line.user {
+  justify-self: end;
+  text-align: right;
+}
+
+.chat-draft {
+  opacity: 0.8;
+  border: 1px dashed currentColor;
+  border-radius: 6px;
+  padding: 0.5rem;
+}
+
+.chat input[type="text"] {
+  flex: 1;
+}

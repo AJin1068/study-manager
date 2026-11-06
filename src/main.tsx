@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import { QuickChatScreen } from './pages/QuickChatScreen';
 import './styles.css';
 
 const root = document.getElementById('root');
@@ -10,6 +11,6 @@ if (!root) {
 
 createRoot(root).render(
   <StrictMode>
-    <App />
+    {window.location.hash === '#chat-quick' ? <QuickChatScreen /> : <App />}
   </StrictMode>,
 );

@@ -1,4 +1,4 @@
-import type { PassStatus, ReleaseKind, ReleaseOutcome, TimerState } from '../api';
+import type { PassStatus, ReleaseKind, ReleaseOutcome, ReleaseQuizStatus, TimerState } from '../api';
 
 export const KIND_LABEL: Record<ReleaseKind, string> = {
   emergencyPass: '긴급 패스',
@@ -58,7 +58,47 @@ export function outcomeMessage(outcome: ReleaseOutcome): string {
       return `오늘의 긴급 패스(${outcome.limit}회)를 모두 사용했습니다.`;
     case 'alreadyActive':
       return `긴급 패스가 이미 ${clock(outcome.expiresAtMs)}까지 적용 중입니다.`;
+    case 'quizFailed':
+      // Pass or fail only: how many were right is never shown (it would allow elimination).
+      return outcome.attemptsLeft > 0
+        ? `통과하지 못했어요. ${minutesCeil(outcome.retryAfterMs)}분 후에 다시 시도할 수 있어요. 오늘 남은 시도는 ${outcome.attemptsLeft}번이에요.`
+        : EXHAUSTED_NOTICE;
   }
+}
+
+function minutesCeil(ms: number): number {
+  return Math.max(1, Math.ceil(ms / 60_000));
+}
+
+const EXHAUSTED_NOTICE =
+  '오늘 조기 해제 시도를 모두 썼어요. 긴급 패스나 오늘 건너뛰기는 기존 방식(긴 문장 타이핑)으로 계속 쓸 수 있어요.';
+
+/**
+ * What to tell the user about an early release before they start (the core decides; this is the
+ * wording). `null` while the status has not arrived.
+ */
+export function earlyReleaseNotice(status: ReleaseQuizStatus | null): string | null {
+  if (status === null) return null;
+  switch (status.mode) {
+    case 'quiz':
+      return `조기 해제는 위키 문제 ${status.required}개를 모두 맞혀야 해요. 하루 최대 ${status.maxAttempts}번 시도하고, 틀리면 ${status.cooldownMin}분 기다려야 해요. 시도를 다 쓰면 오늘은 조기 해제를 쓸 수 없어요(타이핑으로 대신할 수 없어요).`;
+    case 'typing':
+      return '위키 문제가 아직 부족해서 긴 문장 타이핑으로 해제해요.';
+    case 'cooldown':
+      return `${minutesCeil(status.cooldownRemainingMs)}분 후에 다시 시도할 수 있어요.`;
+    case 'exhausted':
+      return EXHAUSTED_NOTICE;
+  }
+}
+
+/** Early release cannot be started during a cooldown or after the attempts are used up. */
+export function earlyReleaseStartable(status: ReleaseQuizStatus | null): boolean {
+  return status === null || status.mode === 'quiz' || status.mode === 'typing';
+}
+
+/** The submit button needs an answer for every question. */
+export function quizAnswersComplete(answers: readonly string[], questionCount: number): boolean {
+  return answers.length === questionCount && answers.every((a) => a.trim().length > 0);
 }
 
 /** The settled outcomes end the challenge; a mismatch keeps it so the user can retype. */

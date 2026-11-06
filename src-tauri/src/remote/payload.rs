@@ -32,6 +32,9 @@ macro_rules! egress_payload {
     };
 }
 
+// `llm::egress` reviews its own payload structs and attaches them with the same macro.
+pub(crate) use egress_payload;
+
 /// A request body that was built from an `EgressPayload`. There is no other constructor.
 ///
 /// ```compile_fail,E0277

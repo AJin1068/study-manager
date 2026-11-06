@@ -1,6 +1,7 @@
 //! Focus sensors: which app is in front and how long the user has not touched keyboard or mouse.
-//! Only the app identity and a count of idle seconds leave this module. Window titles are never
-//! read, and no key or pointer event content is observed (macOS reports a single idle number).
+//! Only the app identity and a count of idle seconds leave this module. A window caption is read
+//! only through `front_window_title`, which the opt-in study context calls; no key or pointer
+//! event content is observed (macOS reports a single idle number).
 
 use serde::Serialize;
 
@@ -26,6 +27,12 @@ pub trait FocusProbe: Send + Sync {
     /// Whole seconds since the last keyboard or mouse input, session-wide.
     fn idle_seconds(&self) -> Result<u64, PlatformError>;
     fn window_title_access(&self) -> TitleAccess;
+    /// The caption of the front window of process `pid`, read only for the opt-in study context
+    /// (`study_context`). Callers keep it in memory just long enough to shorten it into a label:
+    /// it is never stored, logged, or sent. `None` when unavailable, denied, or unsupported.
+    fn front_window_title(&self, _pid: u32) -> Option<String> {
+        None
+    }
 }
 
 /// Converts the OS idle reading to whole seconds. A negative or non-finite value means the OS

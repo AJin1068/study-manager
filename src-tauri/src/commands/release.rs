@@ -8,6 +8,7 @@ use tauri::{AppHandle, Emitter, State};
 use super::{lock_db, AppState};
 use crate::clock::now_ms;
 use crate::error::AppResult;
+use crate::quiz::release::{self as quiz_release, ReleaseQuizStatus};
 use crate::timer::engine::TIMER_CHANGED_EVENT;
 use crate::timer::release::{ReleaseChallenge, ReleaseOutcome};
 use crate::timer::study_pass::{self, PassKind, PassRecord, PassStatus};
@@ -38,13 +39,52 @@ pub fn submit_release(
     let (outcome, snapshot) = {
         let mut conn = lock_db(&state.db)?;
         let outcome = state.release.submit(&mut conn, &Local, challenge_id, &typed, effective)?;
-        let snapshot = if matches!(outcome, ReleaseOutcome::Released { .. }) {
-            Some((timer::current_state(&conn, &Local, effective)?, study_pass::status(&conn, &Local, effective)?))
-        } else {
-            None
-        };
+        let snapshot = released_snapshot(&conn, &outcome, effective)?;
         (outcome, snapshot)
     };
+    announce(&app, snapshot);
+    Ok(outcome)
+}
+
+/// Grades the answers of an early-release quiz (one per question, in order) in Rust and applies
+/// the release only if all are right. The reply says pass or fail, never how many were right.
+#[tauri::command]
+pub fn submit_release_quiz(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    challenge_id: u64,
+    answers: Vec<String>,
+) -> AppResult<ReleaseOutcome> {
+    let effective = state.high_water.observe(now_ms()?);
+    let (outcome, snapshot) = {
+        let mut conn = lock_db(&state.db)?;
+        let outcome = state.release.submit_quiz(&mut conn, &Local, challenge_id, &answers, effective)?;
+        let snapshot = released_snapshot(&conn, &outcome, effective)?;
+        (outcome, snapshot)
+    };
+    announce(&app, snapshot);
+    Ok(outcome)
+}
+
+/// What the early-release card shows before it starts: quiz or typing, attempts, cooldown.
+#[tauri::command]
+pub fn get_release_quiz_status(state: State<'_, AppState>) -> AppResult<ReleaseQuizStatus> {
+    let effective = state.high_water.observe(now_ms()?);
+    let conn = lock_db(&state.db)?;
+    quiz_release::status(&conn, &Local, effective)
+}
+
+type ReleasedSnapshot = Option<(crate::timer::model::TimerState, PassStatus)>;
+
+fn released_snapshot(conn: &rusqlite::Connection, outcome: &ReleaseOutcome, effective: i64) -> AppResult<ReleasedSnapshot> {
+    if matches!(outcome, ReleaseOutcome::Released { .. }) {
+        Ok(Some((timer::current_state(conn, &Local, effective)?, study_pass::status(conn, &Local, effective)?)))
+    } else {
+        Ok(None)
+    }
+}
+
+fn announce(app: &AppHandle, snapshot: ReleasedSnapshot) {
     if let Some((timer_state, pass_status)) = snapshot {
         if let Err(err) = app.emit(TIMER_CHANGED_EVENT, timer_state) {
             tracing::error!(error = %err, "failed to emit timer_changed after release");
@@ -53,7 +93,6 @@ pub fn submit_release(
             tracing::error!(error = %err, "failed to emit pass_changed");
         }
     }
-    Ok(outcome)
 }
 
 /// Today's emergency-pass allowance and the running pass, if any.
@@ -76,6 +115,8 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::*;
+    use crate::quiz::{ItemKind, QuizQuestion};
+    use crate::timer::release::ChallengeProof;
     use crate::timer::study_pass::PassKind;
 
     #[test]
@@ -83,7 +124,34 @@ mod tests {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../src/api/fixtures/release-contract.json");
         let expected: Value = serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
         let actual = json!({
-            "challenge": ReleaseChallenge { challenge_id: 3, kind: PassKind::EmergencyPass, sentence: "예시 문장".into() },
+            "challenge": ReleaseChallenge {
+                challenge_id: 3,
+                kind: PassKind::EmergencyPass,
+                proof: ChallengeProof::Typing,
+                sentence: "예시 문장".into(),
+                questions: Vec::new(),
+                attempts_left: None,
+            },
+            "quizChallenge": ReleaseChallenge {
+                challenge_id: 4,
+                kind: PassKind::EarlyRelease,
+                proof: ChallengeProof::Quiz,
+                sentence: String::new(),
+                questions: vec![
+                    QuizQuestion { item_id: 7, kind: ItemKind::Mcq, prompt: "도함수는?".into(), choices: vec!["순간 변화율".into(), "넓이".into(), "평균".into(), "누적".into()] },
+                    QuizQuestion { item_id: 9, kind: ItemKind::Cloze, prompt: "미분은 ____으로 계산한다".into(), choices: Vec::new() },
+                ],
+                attempts_left: Some(3),
+            },
+            "quizStatus": ReleaseQuizStatus {
+                mode: "cooldown",
+                required: 3,
+                drawable: 12,
+                attempts_used: 1,
+                max_attempts: 4,
+                cooldown_remaining_ms: 120_000,
+                cooldown_min: 3,
+            },
             "outcomes": [
                 ReleaseOutcome::Released { kind: PassKind::EmergencyPass, expires_at_ms: Some(1_773_057_000_000) },
                 ReleaseOutcome::Released { kind: PassKind::SkipToday, expires_at_ms: None },
@@ -92,6 +160,7 @@ mod tests {
                 ReleaseOutcome::NothingToRelease,
                 ReleaseOutcome::LimitReached { limit: 1 },
                 ReleaseOutcome::AlreadyActive { expires_at_ms: 1_773_057_000_000 },
+                ReleaseOutcome::QuizFailed { retry_after_ms: 180_000, attempts_left: 3 },
             ],
             "passStatus": PassStatus {
                 daily_limit: 1,
@@ -111,6 +180,7 @@ mod tests {
                 challenge_len: 95,
                 typing_ms: 61_000,
                 penalty_points: Some(5),
+                proof_kind: "typing".into(),
             },
         });
         assert_eq!(actual, expected);

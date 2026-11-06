@@ -3,8 +3,9 @@
 //! unchanged between Chrome's stdio and the local socket.
 //!
 //! Privacy: a tab URL is parsed into a domain right away and the rest is dropped. The page title
-//! is never deserialized (the field is ignored), so it cannot reach a log or the database. The
-//! message types print `<redacted>` for the URL in `Debug`.
+//! is read into memory only for the optional LLM tab judge (default off) and is dropped after the
+//! verdict: it is never logged or stored. The message types print `<redacted>` for the URL (and
+//! omit the title) in `Debug`.
 
 use std::fmt;
 use std::io::{self, Read, Write};
@@ -88,8 +89,15 @@ pub enum Incoming {
     Auth { token: String, origin_ext_id: String },
     /// First frame the extension sends.
     Hello { ext_id: String, version: String },
-    /// `title` is deliberately absent: until the LLM stage needs it, it is never parsed.
-    TabEvent { url: String, tab_id: i64, kind: TabKind },
+    /// `title` is optional and lives in memory only: the LLM tab judge may read a shortened form of
+    /// it when the user switched that judge on; nothing stores or logs it.
+    TabEvent {
+        url: String,
+        tab_id: i64,
+        kind: TabKind,
+        #[serde(default)]
+        title: Option<String>,
+    },
 }
 
 impl fmt::Debug for Incoming {
@@ -210,7 +218,12 @@ mod tests {
         assert!(matches!(hello, Ok(Incoming::Hello { .. })));
         let tab = parse_incoming(br#"{"type":"tab_event","url":"https://a.example/x?y=1","title":"Secret","tabId":7,"kind":"updated"}"#)
             .expect("tab event");
-        assert_eq!(tab, Incoming::TabEvent { url: "https://a.example/x?y=1".into(), tab_id: 7, kind: TabKind::Updated });
+        assert_eq!(
+            tab,
+            Incoming::TabEvent { url: "https://a.example/x?y=1".into(), tab_id: 7, kind: TabKind::Updated, title: Some("Secret".into()) }
+        );
+        let untitled = parse_incoming(br#"{"type":"tab_event","url":"https://a.example/","tabId":8,"kind":"activated"}"#).expect("no title");
+        assert_eq!(untitled, Incoming::TabEvent { url: "https://a.example/".into(), tab_id: 8, kind: TabKind::Activated, title: None });
         let auth = parse_incoming(br#"{"type":"auth","token":"t","originExtId":"abc"}"#);
         assert!(matches!(auth, Ok(Incoming::Auth { .. })));
     }
@@ -255,10 +268,15 @@ mod tests {
 
     #[test]
     fn debug_never_prints_the_url_or_token() {
-        let tab = Incoming::TabEvent { url: "https://bank.example/account?token=abc".into(), tab_id: 1, kind: TabKind::Updated };
+        let tab = Incoming::TabEvent {
+            url: "https://bank.example/account?token=abc".into(),
+            tab_id: 1,
+            kind: TabKind::Updated,
+            title: Some("SECRET-TITLE".into()),
+        };
         let auth = Incoming::Auth { token: "sekrettoken".into(), origin_ext_id: "x".into() };
         let printed = format!("{tab:?} {auth:?}");
-        assert!(!printed.contains("bank.example") && !printed.contains("token=abc") && !printed.contains("sekret"), "{printed}");
+        assert!(!printed.contains("bank.example") && !printed.contains("token=abc") && !printed.contains("sekret") && !printed.contains("SECRET-TITLE"), "{printed}");
     }
 
     #[test]

@@ -12,7 +12,7 @@ use super::derive::LATE_TOLERANCE_MS;
 use super::engine::{tick_once, Emission, EngineHealth, Supervised, WakeReason, DEGRADED_AFTER};
 use super::model::{EndReason, Phase, RunRow, RunStatus, SegmentRow};
 use super::release::{ReleaseDesk, ReleaseOutcome};
-use super::study_pass::{self, Grant, PassKind, Typing};
+use super::study_pass::{self, Grant, PassKind, ReleaseProof, Typing};
 use super::*;
 use crate::commands::{exit_decision, lock_db};
 use crate::db::open_in_memory;
@@ -514,8 +514,8 @@ fn release(conn: &mut Connection, kind: PassKind, at: i64) -> ReleaseOutcome {
     desk.submit(conn, &Utc, challenge.challenge_id, &challenge.sentence, at).expect("submit")
 }
 
-fn typing() -> Typing {
-    Typing { challenge_len: 90, typing_ms: 1 }
+fn typing() -> ReleaseProof {
+    ReleaseProof::Typing(Typing { challenge_len: 90, typing_ms: 1 })
 }
 
 fn passes(conn: &Connection) -> Vec<study_pass::PassRecord> {
@@ -1173,4 +1173,362 @@ fn an_aborted_study_block_is_summarized_with_its_partial_time() {
     let out = tick_once(&db, &Utc, &hw, t(20, 30, 1), WakeReason::Tick, &mut last, &notifier).expect("tick");
     assert!(out.iter().any(|e| matches!(e, Emission::SetSummary(s) if s.set_studied_ms == 30 * MIN)), "{out:?}");
     assert!(out.iter().any(|e| matches!(e, Emission::RunSummary(r) if r.status == "aborted")), "{out:?}");
+}
+
+// ---- stage 3-6/3-7: the early-release quiz gate and the review cards ----
+
+mod quiz_gate {
+    use super::*;
+    use crate::quiz::gate::QuizGate;
+    use crate::quiz::testkit::{right_answers, seed_bank, wrong_answer};
+    use crate::quiz::{Context, QuizItem};
+    use crate::timer::release::{ChallengeProof, ReleaseChallenge};
+    use crate::timer::study_pass::{ProofKind, QuizProof};
+
+    /// Everything a quiz must never change: the lock, the runs, the block log, the recorded passes.
+    fn untouched(conn: &Connection) -> (bool, Vec<RunRow>, i64, i64) {
+        (lock(conn), runs(conn), count(conn, "block_events"), count(conn, "study_passes"))
+    }
+
+    fn items_of(conn: &Connection, challenge: &ReleaseChallenge) -> Vec<QuizItem> {
+        challenge.questions.iter().map(|q| crate::store::quiz::get_item(conn, q.item_id).expect("read").expect("item")).collect()
+    }
+
+    fn quiz_run(bank_size: usize) -> Connection {
+        let (conn, _) = locked_run();
+        seed_bank(&conn, bank_size);
+        conn
+    }
+
+    fn state_row(conn: &Connection) -> Option<(i64, i64)> {
+        conn.query_row("SELECT attempts, last_attempt_ms FROM release_quiz_state", [], |r| Ok((r.get(0)?, r.get(1)?))).ok()
+    }
+
+    #[test]
+    fn early_release_gets_questions_when_the_bank_has_three_and_the_sentence_when_it_has_fewer() {
+        for (size, expected) in [(0, ChallengeProof::Typing), (2, ChallengeProof::Typing), (3, ChallengeProof::Quiz), (9, ChallengeProof::Quiz)] {
+            let conn = quiz_run(size);
+            let challenge = ReleaseDesk::default().begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0)).expect("begin");
+            assert_eq!(challenge.proof, expected, "bank of {size}");
+            match expected {
+                ChallengeProof::Quiz => assert!(challenge.sentence.is_empty() && challenge.questions.len() == 3),
+                ChallengeProof::Typing => assert!(challenge.questions.is_empty() && !challenge.sentence.is_empty()),
+            }
+        }
+    }
+
+    #[test]
+    fn emergency_pass_and_skip_today_always_get_the_sentence_whatever_the_bank_holds() {
+        for kind in [PassKind::EmergencyPass, PassKind::SkipToday] {
+            let conn = quiz_run(12);
+            let before = state_row(&conn);
+            let challenge = ReleaseDesk::default().begin(&conn, &Utc, kind, t(21, 0, 0)).expect("begin");
+            assert_eq!(challenge.proof, ChallengeProof::Typing, "{kind:?}");
+            assert_eq!(state_row(&conn), before, "the quiz counters never move for {kind:?}");
+        }
+    }
+
+    #[test]
+    fn the_questions_carry_no_answer_in_json() {
+        let conn = quiz_run(9);
+        let challenge = ReleaseDesk::default().begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0)).expect("begin");
+        let json = serde_json::to_string(&challenge).expect("json");
+        for item in items_of(&conn, &challenge).iter().filter(|i| i.choices.is_empty()) {
+            assert!(!json.contains(&item.answer_key), "{json}");
+        }
+        assert!(!json.contains("answerKey") && !json.contains("\"answer\"") && !json.contains("evidence"));
+    }
+
+    #[test]
+    fn two_of_three_does_not_release_and_changes_nothing_about_the_block() {
+        let mut conn = quiz_run(9);
+        let desk = ReleaseDesk::default();
+        let before = untouched(&conn);
+        let challenge = desk.begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0)).expect("begin");
+        let mut answers = right_answers(&items_of(&conn, &challenge));
+        answers[2] = wrong_answer();
+        let outcome = desk.submit_quiz(&mut conn, &Utc, challenge.challenge_id, &answers, t(21, 1, 0)).expect("submit");
+        assert_eq!(outcome, ReleaseOutcome::QuizFailed { retry_after_ms: 3 * MIN, attempts_left: 3 });
+        assert_eq!(untouched(&conn), before, "lock, runs, block log, and passes are unchanged");
+        // The challenge is used up either way.
+        let right = right_answers(&items_of(&conn, &challenge));
+        let again = desk.submit_quiz(&mut conn, &Utc, challenge.challenge_id, &right, t(21, 1, 5)).expect("again");
+        assert_eq!(again, ReleaseOutcome::NoChallenge);
+        assert_eq!(untouched(&conn), before);
+    }
+
+    #[test]
+    fn missing_answers_and_an_unanswered_challenge_do_not_release() {
+        let mut conn = quiz_run(9);
+        let desk = ReleaseDesk::default();
+        let challenge = desk.begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0)).expect("begin");
+        let all = right_answers(&items_of(&conn, &challenge));
+        let outcome = desk.submit_quiz(&mut conn, &Utc, challenge.challenge_id, &all[..2], t(21, 1, 0)).expect("submit");
+        assert!(matches!(outcome, ReleaseOutcome::QuizFailed { .. }));
+        assert!(lock(&conn));
+        // Closing the app instead: nothing is submitted and nothing changes but the counted attempt.
+        let _abandoned = ReleaseDesk::default().begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 10, 0)).expect("begin");
+        assert!(lock(&conn) && count(&conn, "study_passes") == 0);
+    }
+
+    #[test]
+    fn three_of_three_releases_once_and_records_a_quiz_proof() {
+        let mut conn = quiz_run(9);
+        let desk = ReleaseDesk::default();
+        let challenge = desk.begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0)).expect("begin");
+        let items = items_of(&conn, &challenge);
+        let outcome = desk.submit_quiz(&mut conn, &Utc, challenge.challenge_id, &right_answers(&items), t(21, 1, 0)).expect("submit");
+        assert_eq!(outcome, ReleaseOutcome::Released { kind: PassKind::EarlyRelease, expires_at_ms: None });
+        assert!(!lock(&conn));
+        let run = &runs(&conn)[0];
+        assert_eq!((run.status, run.detail_code.as_deref()), (RunStatus::Aborted, Some("early_release")));
+        let rows = passes(&conn);
+        assert_eq!(rows.len(), 1, "exactly one grant");
+        assert_eq!((rows[0].kind.as_str(), rows[0].proof_kind.as_str()), ("early_release", "quiz"));
+        let chars: i64 = items.iter().map(|i| i64::try_from(i.prompt.chars().count()).expect("len")).sum();
+        assert_eq!((rows[0].challenge_len, rows[0].typing_ms), (chars, 60_000), "prompt characters and answering time");
+        let release_rows: i64 =
+            conn.query_row("SELECT COUNT(*) FROM quiz_attempts WHERE context = 'release' AND release_kind = 'early_release' AND correct = 1", [], |r| r.get(0)).expect("rows");
+        assert_eq!(release_rows, 3);
+        // The same answers cannot release twice, and no bonus points are paid for the proof.
+        assert_eq!(desk.submit_quiz(&mut conn, &Utc, challenge.challenge_id, &right_answers(&items), t(21, 1, 1)).expect("again"), ReleaseOutcome::NoChallenge);
+        assert_eq!(count(&conn, "point_ledger"), 0);
+    }
+
+    #[test]
+    fn a_quiz_challenge_cannot_be_released_by_the_sentence_endpoint_and_vice_versa() {
+        let mut conn = quiz_run(9);
+        let desk = ReleaseDesk::default();
+        let challenge = desk.begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0)).expect("begin");
+        assert_eq!(desk.submit(&mut conn, &Utc, challenge.challenge_id, "", t(21, 1, 0)).expect("typed"), ReleaseOutcome::NoChallenge);
+        assert!(lock(&conn));
+        let typing = ReleaseDesk::default().begin(&conn, &Utc, PassKind::SkipToday, t(21, 2, 0)).expect("begin");
+        let outcome = ReleaseDesk::default().submit_quiz(&mut conn, &Utc, typing.challenge_id, &[], t(21, 3, 0)).expect("quiz endpoint");
+        assert_eq!(outcome, ReleaseOutcome::NoChallenge);
+    }
+
+    #[test]
+    fn a_failed_attempt_starts_a_cooldown_and_the_cap_ends_early_release_for_the_day_without_typing() {
+        let mut conn = quiz_run(12);
+        let desk = ReleaseDesk::default();
+        let mut now = t(21, 0, 0);
+        for attempt in 1..=4 {
+            let challenge = desk.begin(&conn, &Utc, PassKind::EarlyRelease, now).expect("begin");
+            if attempt == 1 {
+                // Cooling down right after the attempt was opened.
+                assert!(desk.begin(&conn, &Utc, PassKind::EarlyRelease, now + MIN).is_err(), "cooldown");
+            }
+            let outcome = desk.submit_quiz(&mut conn, &Utc, challenge.challenge_id, &[], now + 10_000).expect("submit");
+            assert!(matches!(outcome, ReleaseOutcome::QuizFailed { attempts_left, .. } if attempts_left == 4 - attempt), "{outcome:?}");
+            now += 10_000 + 3 * MIN;
+        }
+        // Four attempts used: refused after the cooldown too, and the sentence is not offered instead.
+        let before = untouched(&conn);
+        let state = state_row(&conn);
+        assert!(desk.begin(&conn, &Utc, PassKind::EarlyRelease, now + 60 * MIN).is_err());
+        // Even a bank that shrank below three (reports, archive) opens no typing path.
+        conn.execute("UPDATE quiz_items SET disabled_at_ms = 1", []).expect("disable");
+        assert!(desk.begin(&conn, &Utc, PassKind::EarlyRelease, now + 60 * MIN).is_err());
+        assert_eq!(untouched(&conn), before, "the refusal changes no lock, run, block event, or pass");
+        assert_eq!(state_row(&conn), state);
+        let status = crate::quiz::release::status(&conn, &Utc, now + 60 * MIN).expect("status");
+        assert_eq!((status.mode, status.attempts_used, status.max_attempts), ("exhausted", 4, 4));
+        // Skip today and emergency pass still work by typing and follow their own limits.
+        for kind in [PassKind::EmergencyPass, PassKind::SkipToday] {
+            let challenge = desk.begin(&conn, &Utc, kind, now + 61 * MIN).expect("typing path stays open");
+            assert_eq!(challenge.proof, ChallengeProof::Typing);
+        }
+        assert_eq!(state_row(&conn), state, "their use does not touch the quiz counters");
+        let released = release(&mut conn, PassKind::EmergencyPass, now + 62 * MIN);
+        assert!(matches!(released, ReleaseOutcome::Released { .. }));
+        assert_eq!(state_row(&conn), state);
+        // The next local day starts fresh.
+        let next_day = t(21, 0, 0) + DAY;
+        assert_eq!(crate::quiz::release::status(&conn, &Utc, next_day).expect("status").attempts_used, 0);
+    }
+
+    #[test]
+    fn the_cooldown_ends_after_the_configured_minutes_and_a_new_attempt_is_counted() {
+        let mut conn = quiz_run(12);
+        let desk = ReleaseDesk::default();
+        let challenge = desk.begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0)).expect("begin");
+        desk.submit_quiz(&mut conn, &Utc, challenge.challenge_id, &[], t(21, 0, 30)).expect("miss");
+        let status = crate::quiz::release::status(&conn, &Utc, t(21, 1, 0)).expect("status");
+        assert_eq!((status.mode, status.cooldown_remaining_ms), ("cooldown", 150_000));
+        assert!(desk.begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 3, 29)).is_err());
+        let next = desk.begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 3, 30)).expect("cooldown over");
+        assert_eq!(next.proof, ChallengeProof::Quiz);
+        assert_eq!(state_row(&conn).map(|s| s.0), Some(2));
+    }
+
+    #[test]
+    fn the_bank_failing_to_read_falls_back_to_the_sentence_but_the_cap_does_not() {
+        let conn = quiz_run(9);
+        conn.execute_batch("ALTER TABLE quiz_items RENAME TO quiz_items_gone").expect("break the bank");
+        let challenge = ReleaseDesk::default().begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0)).expect("begin");
+        assert_eq!(challenge.proof, ChallengeProof::Typing, "an unreadable bank is an integrity error, not a lock");
+    }
+
+    #[test]
+    fn grant_refuses_a_quiz_proof_for_any_other_kind() {
+        let quiz = ReleaseProof::Quiz(QuizProof { prompt_chars: 30, total_ms: 1_000 });
+        for kind in [PassKind::EmergencyPass, PassKind::SkipToday] {
+            let (mut conn, _) = locked_run();
+            assert!(study_pass::grant(&mut conn, &Utc, kind, t(21, 1, 0), quiz).is_err(), "{kind:?}");
+            assert_eq!(count(&conn, "study_passes"), 0);
+            assert!(lock(&conn));
+        }
+        let (mut conn, _) = locked_run();
+        assert_eq!(study_pass::grant(&mut conn, &Utc, PassKind::EarlyRelease, t(21, 1, 0), quiz).expect("grant"), Grant::Granted { expires_at_ms: None });
+    }
+
+    #[test]
+    fn proof_kind_drift_matrix_defaults_and_triggers() {
+        let conn = open_in_memory().expect("db");
+        // (a) the Rust enum and the schema list the same values.
+        let sql: String = conn.query_row("SELECT sql FROM sqlite_master WHERE name = 'study_passes'", [], |r| r.get(0)).expect("schema");
+        let from = sql.find("proof_kind IN (").expect("list");
+        let list = &sql[from..from + sql[from..].find(')').expect("end")];
+        let mut in_schema: Vec<String> = list.split('\'').skip(1).step_by(2).map(str::to_string).collect();
+        in_schema.sort();
+        let mut in_rust: Vec<String> = ProofKind::ALL.iter().map(|p| p.as_str().to_string()).collect();
+        in_rust.sort();
+        assert_eq!(in_schema, in_rust);
+        // (b) every (kind, proof) pair: a quiz is accepted for early release only.
+        for kind in PassKind::ALL {
+            for proof in ProofKind::ALL {
+                let expires: Option<i64> = (kind == PassKind::EmergencyPass).then_some(9);
+                let result = conn.execute(
+                    "INSERT INTO study_passes (at_ms, date, kind, expires_at_ms, challenge_len, typing_ms, proof_kind) VALUES (1, '2026-11-05', ?1, ?2, 1, 0, ?3)",
+                    rusqlite::params![kind.as_str(), expires, proof.as_str()],
+                );
+                let allowed = proof == ProofKind::Typing || kind == PassKind::EarlyRelease;
+                assert_eq!(result.is_ok(), allowed, "{kind:?} + {proof:?}");
+            }
+        }
+        // (c) a row inserted without naming the column is a typing row.
+        conn.execute("INSERT INTO study_passes (at_ms, date, kind, challenge_len, typing_ms) VALUES (2, '2026-11-05', 'skip_today', 5, 0)", []).expect("old-style insert");
+        let last: String = conn.query_row("SELECT proof_kind FROM study_passes ORDER BY id DESC LIMIT 1", [], |r| r.get(0)).expect("last");
+        assert_eq!(last, "typing");
+        // (d) a quiz row still has to satisfy the older columns; (e) the log stays append-only.
+        assert!(conn.execute("INSERT INTO study_passes (at_ms, date, kind, challenge_len, typing_ms, proof_kind) VALUES (3, 'd', 'early_release', 0, 0, 'quiz')", []).is_err());
+        assert!(conn.execute("INSERT INTO study_passes (at_ms, date, kind, challenge_len, typing_ms, proof_kind) VALUES (3, 'd', 'early_release', 5, -1, 'quiz')", []).is_err());
+        assert!(conn.execute("INSERT INTO study_passes (at_ms, date, kind, challenge_len, typing_ms, proof_kind) VALUES (3, 'd', 'early_release', 5, 0, 'voice')", []).is_err());
+        assert!(conn.execute("UPDATE study_passes SET proof_kind = 'typing'", []).is_err());
+        assert!(conn.execute("DELETE FROM study_passes", []).is_err());
+    }
+
+    // ---- review cards (S3.7) ----
+
+    /// Study blocks run 20:00-20:50, 21:05-21:55, 22:10-23:00; this is the middle of the second.
+    const STUDY: fn() -> i64 = || t(21, 30, 0);
+    const BREAK: fn() -> i64 = || t(22, 0, 0);
+
+    fn gate_scenario() -> (Connection, QuizGate) {
+        let (mut conn, _) = locked_run();
+        seed_bank(&conn, 12);
+        tick(&mut conn, STUDY());
+        (conn, QuizGate::default())
+    }
+
+    #[test]
+    fn a_distraction_card_appears_only_inside_a_locked_study_block_and_is_rationed() {
+        let (conn, gate) = gate_scenario();
+        let card = gate.offer_distraction(&conn, &Utc, STUDY()).expect("offer").expect("a card inside the study block");
+        assert_eq!((card.context, card.questions.len(), card.skippable), (Context::Distraction, 1, false));
+        assert!(gate.offer_distraction(&conn, &Utc, STUDY() + 2 * MIN).expect("offer").is_none(), "5-minute cooldown");
+        assert!(gate.offer_distraction(&conn, &Utc, STUDY() + 5 * MIN + 1_000).expect("offer").is_some(), "after the cooldown");
+        // A break gets no pop-up, and neither does the time after the run.
+        let (conn, gate) = gate_scenario();
+        assert!(gate.offer_distraction(&conn, &Utc, BREAK()).expect("offer").is_none(), "break");
+        assert!(gate.offer_distraction(&conn, &Utc, t(23, 30, 0)).expect("offer").is_none(), "after the run");
+    }
+
+    #[test]
+    fn the_daily_limit_stops_the_cards() {
+        let (conn, gate) = gate_scenario();
+        let mut shown = 0;
+        let mut now = STUDY();
+        // Step through the rest of the run, breaks included.
+        for _ in 0..30 {
+            now += 6 * MIN;
+            if gate.offer_distraction(&conn, &Utc, now).expect("offer").is_some() {
+                shown += 1;
+            }
+        }
+        assert!(shown <= crate::quiz::gate::DAILY_LIMIT, "{shown}");
+        assert!(shown >= 1);
+    }
+
+    #[test]
+    fn answering_any_way_never_changes_blocks_or_the_end_of_the_block() {
+        for answer in [0, 1, 2] {
+            let (mut conn, gate) = gate_scenario();
+            let before = untouched(&conn);
+            let card = gate.offer_distraction(&conn, &Utc, STUDY()).expect("offer").expect("card");
+            match answer {
+                0 => {
+                    let item = crate::store::quiz::get_item(&conn, card.questions[0].item_id).expect("read").expect("item");
+                    gate.answer(&mut conn, &Utc, card.card_id, &[item.answer_key], false, STUDY() + 5_000).expect("right");
+                }
+                1 => {
+                    gate.answer(&mut conn, &Utc, card.card_id, &[wrong_answer()], false, STUDY() + 5_000).expect("wrong");
+                }
+                _ => {} // ignored
+            }
+            assert_eq!(untouched(&conn), before, "answer mode {answer}");
+            let later = tick(&mut conn, t(21, 40, 0));
+            assert!(later.state.lock_held, "the block is still held");
+            let done = tick(&mut conn, t(23, 0, 1));
+            assert_eq!(done.state.phase, Phase::Idle, "the run ends on schedule regardless");
+        }
+    }
+
+    #[test]
+    fn a_checkin_card_is_off_by_default_and_follows_the_same_rules_when_on() {
+        use crate::quiz::config::{update_setting, QuizSettingKey};
+        let (mut conn, gate) = gate_scenario();
+        assert!(gate.offer_checkin(&conn, &Utc, STUDY()).expect("offer").is_none(), "off by default");
+        crate::testutil::set_lock_for_test(&conn, false);
+        update_setting(&mut conn, QuizSettingKey::CheckinEnabled, crate::settings::SettingValue::Bool(true), t(19, 0, 0)).expect("on");
+        crate::testutil::set_lock_for_test(&conn, true);
+        let card = gate.offer_checkin(&conn, &Utc, STUDY()).expect("offer").expect("card");
+        assert_eq!(card.context, Context::Checkin);
+        assert!(gate.offer_checkin(&conn, &Utc, BREAK() + MIN).expect("break").is_none());
+    }
+
+    #[test]
+    fn the_session_end_quiz_is_offered_once_per_finished_run_and_a_skip_is_only_recorded() {
+        let (mut conn, gate) = gate_scenario();
+        assert!(gate.offer_session_end(&conn, &Utc, BREAK()).expect("offer").is_none(), "the run is still going");
+        tick(&mut conn, t(23, 0, 1));
+        let card = gate.offer_session_end(&conn, &Utc, t(23, 1, 0)).expect("offer").expect("quiz after the run");
+        assert_eq!((card.context, card.questions.len(), card.skippable), (Context::SessionEnd, 3, true));
+        assert!(gate.offer_session_end(&conn, &Utc, t(23, 2, 0)).expect("offer").is_none(), "already pending");
+        let result = gate.answer(&mut conn, &Utc, card.card_id, &[], true, t(23, 3, 0)).expect("skip").expect("result");
+        assert!(result.skipped && result.bonus_points == 0);
+        assert!(gate.offer_session_end(&conn, &Utc, t(23, 4, 0)).expect("offer").is_none(), "a skip uses up the run's quiz");
+        let run_id = runs(&conn)[0].id;
+        assert_eq!(crate::store::quiz::session_end_stats(&conn, run_id).expect("stats"), (0, 0, 3));
+        assert_eq!(crate::quiz::gate::session_end_accuracy(&conn, run_id).expect("accuracy"), (0, 0));
+        assert_eq!(count(&conn, "point_ledger"), 0);
+    }
+
+    #[test]
+    fn session_end_accuracy_counts_answers_and_pays_the_bonus_only_for_right_ones() {
+        let (mut conn, gate) = gate_scenario();
+        tick(&mut conn, t(23, 0, 1));
+        let card = gate.offer_session_end(&conn, &Utc, t(23, 1, 0)).expect("offer").expect("card");
+        let items: Vec<QuizItem> = card.questions.iter().map(|q| crate::store::quiz::get_item(&conn, q.item_id).expect("read").expect("item")).collect();
+        let mut answers = right_answers(&items);
+        answers[1] = wrong_answer();
+        let result = gate.answer(&mut conn, &Utc, card.card_id, &answers, false, t(23, 2, 0)).expect("answer").expect("result");
+        assert_eq!(result.bonus_points, 2 * crate::points::rewards::QUIZ_BONUS_POINTS);
+        let run_id = runs(&conn)[0].id;
+        assert_eq!(crate::quiz::gate::session_end_accuracy(&conn, run_id).expect("accuracy"), (3, 2));
+        // Too old: half an hour after the run ended there is no quiz.
+        let (mut conn, gate) = gate_scenario();
+        tick(&mut conn, t(23, 0, 1));
+        assert!(gate.offer_session_end(&conn, &Utc, t(23, 31, 0)).expect("offer").is_none());
+    }
 }

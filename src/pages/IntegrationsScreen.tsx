@@ -8,6 +8,7 @@ import {
 } from '../api';
 import { describeOutcome } from '../hooks/useStudyLock';
 import { useAsync } from '../hooks/useAsync';
+import { LlmCard } from './LlmCard';
 import { PhoneNotifyPanel } from './PhoneNotifyPanel';
 import {
   PORT_LABELS,
@@ -258,6 +259,8 @@ export function IntegrationsScreen({ editable, onAttempted }: Props) {
           </div>
         );
       })}
+
+      <LlmCard editable={editable} onAttempted={onAttempted} />
 
       <h3>내보낸 내용</h3>
       <p className="hint">종류와 횟수만 기록합니다. 내용(창 제목, 주소, 입력한 문장)은 기록에도, 전송에도 없습니다.</p>

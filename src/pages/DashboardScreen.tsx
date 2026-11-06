@@ -17,10 +17,11 @@ import {
   scoreText,
   streakText,
 } from './dashboardView';
+import { GrowthTab } from './GrowthTab';
 
-type Tab = 'today' | 'week' | 'weakness';
+type Tab = 'today' | 'week' | 'weakness' | 'growth';
 
-const TAB_LABEL: Record<Tab, string> = { today: '오늘', week: '이번 주', weakness: '약점' };
+const TAB_LABEL: Record<Tab, string> = { today: '오늘', week: '이번 주', weakness: '약점', growth: '성장' };
 
 /** Shows the loading state or the error (even over stale data), then the value. */
 function Loaded<T>(props: { data: T | null; error: string | null; children: (value: T) => ReactNode }) {
@@ -192,6 +193,7 @@ export function DashboardScreen() {
       {tab === 'today' && <TodayView />}
       {tab === 'week' && <WeekView />}
       {tab === 'weakness' && <WeaknessView />}
+      {tab === 'growth' && <GrowthTab />}
     </main>
   );
 }

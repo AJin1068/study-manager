@@ -1,13 +1,81 @@
 {
-  "challenge": { "challengeId": 3, "kind": "emergencyPass", "sentence": "예시 문장" },
+  "challenge": {
+    "challengeId": 3,
+    "kind": "emergencyPass",
+    "proof": "typing",
+    "sentence": "예시 문장",
+    "questions": [],
+    "attemptsLeft": null
+  },
+  "quizChallenge": {
+    "challengeId": 4,
+    "kind": "earlyRelease",
+    "proof": "quiz",
+    "sentence": "",
+    "questions": [
+      {
+        "itemId": 7,
+        "kind": "mcq",
+        "prompt": "도함수는?",
+        "choices": [
+          "순간 변화율",
+          "넓이",
+          "평균",
+          "누적"
+        ]
+      },
+      {
+        "itemId": 9,
+        "kind": "cloze",
+        "prompt": "미분은 ____으로 계산한다",
+        "choices": []
+      }
+    ],
+    "attemptsLeft": 3
+  },
+  "quizStatus": {
+    "mode": "cooldown",
+    "required": 3,
+    "drawable": 12,
+    "attemptsUsed": 1,
+    "maxAttempts": 4,
+    "cooldownRemainingMs": 120000,
+    "cooldownMin": 3
+  },
   "outcomes": [
-    { "outcome": "released", "kind": "emergencyPass", "expiresAtMs": 1773057000000 },
-    { "outcome": "released", "kind": "skipToday", "expiresAtMs": null },
-    { "outcome": "mismatch", "attempts": 2 },
-    { "outcome": "noChallenge" },
-    { "outcome": "nothingToRelease" },
-    { "outcome": "limitReached", "limit": 1 },
-    { "outcome": "alreadyActive", "expiresAtMs": 1773057000000 }
+    {
+      "outcome": "released",
+      "kind": "emergencyPass",
+      "expiresAtMs": 1773057000000
+    },
+    {
+      "outcome": "released",
+      "kind": "skipToday",
+      "expiresAtMs": null
+    },
+    {
+      "outcome": "mismatch",
+      "attempts": 2
+    },
+    {
+      "outcome": "noChallenge"
+    },
+    {
+      "outcome": "nothingToRelease"
+    },
+    {
+      "outcome": "limitReached",
+      "limit": 1
+    },
+    {
+      "outcome": "alreadyActive",
+      "expiresAtMs": 1773057000000
+    },
+    {
+      "outcome": "quizFailed",
+      "retryAfterMs": 180000,
+      "attemptsLeft": 3
+    }
   ],
   "passStatus": {
     "dailyLimit": 1,
@@ -26,6 +94,7 @@
     "expiresAtMs": 1773057000000,
     "challengeLen": 95,
     "typingMs": 61000,
-    "penaltyPoints": 5
+    "penaltyPoints": 5,
+    "proofKind": "typing"
   }
 }

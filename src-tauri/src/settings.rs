@@ -52,6 +52,8 @@ pub enum FreeShape {
     Endpoint,
     /// One token without whitespace or control characters (keys, ids).
     Token,
+    /// An absolute folder path without `..` components or control characters.
+    Path,
 }
 
 impl FreeShape {
@@ -62,6 +64,12 @@ impl FreeShape {
         match self {
             FreeShape::Token => !text.chars().any(|c| c.is_whitespace() || c.is_control()),
             FreeShape::Endpoint => crate::remote::http::is_valid_endpoint(text),
+            FreeShape::Path => {
+                let path = std::path::Path::new(text);
+                path.is_absolute()
+                    && !text.chars().any(char::is_control)
+                    && !path.components().any(|c| matches!(c, std::path::Component::ParentDir))
+            }
         }
     }
 }

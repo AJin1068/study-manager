@@ -100,6 +100,7 @@ const KIND_LABELS: Record<string, string> = {
   auth_logout: '로그아웃',
   device_register: '기기 등록',
   device_remove: '기기 삭제',
+  messages: 'LLM 요청 (자료 조각·질문)',
 };
 
 export function eventKindLabel(kind: string): string {

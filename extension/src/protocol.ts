@@ -1,10 +1,14 @@
 // Wire messages of the browser link. Mirrors src-tauri/src/browser_link/protocol.rs: JSON
 // objects with a snake_case `type` tag and camelCase fields.
 //
-// Privacy: the page title is never sent, and the builders accept only the fields below.
+// Privacy: the builders accept only the fields below. The page title is sent only for a tab the
+// user just switched to, shortened to MAX_TITLE_CHARS; the app uses it in memory for the optional
+// LLM tab judge (off by default) and never stores or logs it.
 
 export const HOST_NAME = 'com.studymanager.app.browser';
 export const PROTOCOL_VERSION = 1;
+/** Matches MAX_TAB_LABEL_CHARS in src-tauri/src/llm/egress.rs. */
+export const MAX_TITLE_CHARS = 120;
 
 export type TabKind = 'activated' | 'updated';
 export type VerdictKind = 'allow' | 'block';
@@ -20,6 +24,7 @@ export interface TabEventMessage {
   url: string;
   tabId: number;
   kind: TabKind;
+  title?: string;
 }
 
 export type OutgoingMessage = HelloMessage | TabEventMessage;
@@ -47,8 +52,10 @@ export function buildHello(extId: string, version: string): HelloMessage {
   return { type: 'hello', extId, version };
 }
 
-export function buildTabEvent(tabId: number, url: string, kind: TabKind): TabEventMessage {
-  return { type: 'tab_event', url, tabId, kind };
+export function buildTabEvent(tabId: number, url: string, kind: TabKind, title?: string): TabEventMessage {
+  const message: TabEventMessage = { type: 'tab_event', url, tabId, kind };
+  const short = title === undefined ? '' : Array.from(title.trim()).slice(0, MAX_TITLE_CHARS).join('');
+  return short === '' ? message : { ...message, title: short };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

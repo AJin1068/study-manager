@@ -206,6 +206,44 @@ impl FocusProbe for MacFocusProbe {
         // SAFETY: argument-free query with no side effects.
         if unsafe { AXIsProcessTrusted() } != 0 { TitleAccess::Granted } else { TitleAccess::Denied }
     }
+
+    fn front_window_title(&self, pid: u32) -> Option<String> {
+        if self.window_title_access() != TitleAccess::Granted {
+            return None;
+        }
+        read_front_window_title(pid)
+    }
+}
+
+/// Asks System Events for the caption of the front window of one process. The script text holds
+/// only the numeric pid; the answer is returned to the caller and never logged here. Gives up
+/// after two seconds so a stuck app cannot hold the sampler.
+fn read_front_window_title(pid: u32) -> Option<String> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    let script = format!(
+        "tell application \"System Events\" to get name of front window of (first process whose unix id is {pid})"
+    );
+    let mut child = Command::new("osascript").arg("-e").arg(script).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => break,
+            Ok(Some(_)) | Err(_) => return None,
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(25)),
+        }
+    }
+    let mut out = String::new();
+    child.stdout.take()?.take(4096).read_to_string(&mut out).ok()?;
+    let title = out.trim().to_string();
+    (!title.is_empty()).then_some(title)
 }
 
 #[cfg(test)]

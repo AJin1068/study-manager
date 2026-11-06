@@ -1,0 +1,15 @@
+{
+  "history": [
+    { "role": "user", "text": "다음 주 토요일 시험이야" },
+    { "role": "assistant", "text": "평일 저녁만 쓸 수 있나요?" }
+  ],
+  "reply": {
+    "text": "초안이에요.",
+    "source": "llm",
+    "fallbackReason": null,
+    "draft": { "id": 7, "items": [{ "kind": "create", "label": "복습 (수학)" }] },
+    "locked": false,
+    "overAsked": false
+  },
+  "applied": { "applied": true, "locked": false, "changed": 1, "batchId": "chat-7" }
+}

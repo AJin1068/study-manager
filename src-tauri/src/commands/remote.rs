@@ -101,7 +101,16 @@ pub fn clear_secret(app: AppHandle, state: State<'_, AppState>, name: SecretName
 }
 
 #[tauri::command]
-pub fn test_connection(app: AppHandle, state: State<'_, AppState>, port: IntegrationPort) -> AppResult<ConnectionTest> {
+pub async fn test_connection(app: AppHandle, state: State<'_, AppState>, port: IntegrationPort) -> AppResult<ConnectionTest> {
+    if port == IntegrationPort::Llm {
+        // The model call blocks; it runs off the UI thread with the database lock released.
+        let llm = std::sync::Arc::clone(&state.llm);
+        let result = tauri::async_runtime::spawn_blocking(move || llm.test_connection())
+            .await
+            .map_err(|_| AppError::Internal("the connection test did not finish".into()))?;
+        announce(&app, &state);
+        return result;
+    }
     // The runtime locks the database only to read configuration; the probe itself runs unlocked.
     let result = state.remote.test_connection(&state.db, port);
     announce(&app, &state);

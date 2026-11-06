@@ -18,6 +18,9 @@ use super::http::{host_of, HostPolicy, HttpTransport, UreqTransport};
 use super::notify::{NotifyClient, NtfyClient, RecordingNotify, ServerTest};
 use super::secrets::{MemorySecretStore, SecretName, SecretStore, SecretStoreKind, SelectedStore};
 use super::supabase::SupabaseRest;
+use crate::llm::anthropic::{self, AnthropicHttp, ThreadSleeper};
+use crate::llm::mock::MockLlm;
+use crate::llm::LlmClient;
 use super::{resolve_mode, Clock, Health, IntegrationMode, IntegrationPort, IntegrationState};
 use crate::error::{AppError, AppResult};
 
@@ -83,6 +86,10 @@ pub struct RemoteRuntime {
     clock: Arc<dyn Clock>,
     sink: Arc<dyn EventSink>,
     transports: TransportFactory,
+    /// The LLM has its own limits (30 second timeout), so it gets its own factory.
+    llm_transports: TransportFactory,
+    /// Mock mode answers from this one instance, so scripted steps and recorded calls persist.
+    mock_llm: Arc<MockLlm>,
     fake: Arc<FakeBackend>,
     health: Mutex<HashMap<IntegrationPort, (Health, Option<i64>)>>,
     supabase: Mutex<Option<AuthSlot>>,
@@ -104,14 +111,53 @@ impl RemoteRuntime {
             fake: Arc::new(FakeBackend::new(Arc::clone(&clock))),
             clock,
             sink,
+            llm_transports: Arc::clone(&transports),
             transports,
+            mock_llm: Arc::new(MockLlm::new()),
             health: Mutex::new(HashMap::new()),
             supabase: Mutex::new(None),
         }
     }
 
+    /// Replaces the transport used for model calls (the app installs the 30 second one; tests
+    /// keep the shared factory).
+    pub fn with_llm_transports(mut self, factory: TransportFactory) -> Self {
+        self.llm_transports = factory;
+        self
+    }
+
     pub fn secrets(&self) -> &Arc<dyn SecretStore> {
         &self.secrets
+    }
+
+    pub fn mock_llm(&self) -> &Arc<MockLlm> {
+        &self.mock_llm
+    }
+
+    /// The LLM adapter for the current settings: the mock when mock mode is chosen, the
+    /// Anthropic adapter (host policy: exactly `api.anthropic.com`, audited) when a key exists,
+    /// otherwise `NotConfigured`. A missing key is never answered with the mock.
+    pub fn llm_client(&self, conn: &Connection, model: &str) -> AppResult<(IntegrationMode, Arc<dyn LlmClient>)> {
+        let setting = config::read_mode(conn, IntegrationPort::Llm)?;
+        let key = self.secrets.get(SecretName::AnthropicApiKey).map_err(|_| AppError::Remote("secret_store_unavailable".into()))?;
+        match resolve_mode(setting, key.is_some()) {
+            IntegrationMode::NotConfigured => Err(AppError::NotConfigured { port: IntegrationPort::Llm.as_str() }),
+            IntegrationMode::Mock => Ok((IntegrationMode::Mock, self.mock_llm.clone())),
+            IntegrationMode::Live => {
+                let key = key.ok_or(AppError::NotConfigured { port: IntegrationPort::Llm.as_str() })?;
+                let inner = (self.llm_transports)(HostPolicy::configured([anthropic::HOST]));
+                let transport: Arc<dyn HttpTransport> =
+                    Arc::new(AuditedTransport::new(inner, Arc::clone(&self.sink), Arc::clone(&self.clock)));
+                let client = AnthropicHttp::new(anthropic::DEFAULT_BASE, key, model, transport, Arc::new(ThreadSleeper));
+                Ok((IntegrationMode::Live, Arc::new(client)))
+            }
+        }
+    }
+
+    /// Records the outcome of an LLM call for the integrations screen.
+    pub fn record_llm_health(&self, ok: bool, code: &str) {
+        let health = if ok { Health::Ok } else { Health::Degraded { code: code.to_string() } };
+        self.record_health(IntegrationPort::Llm, health);
     }
 
     fn secret_flags(&self) -> SecretFlags {

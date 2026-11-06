@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import type { PassStatus, TimerState } from '../api';
-import { availableKinds, endsChallenge, outcomeMessage, passStatusText } from './releaseView';
+import type { PassStatus, ReleaseQuizStatus, TimerState } from '../api';
+import {
+  availableKinds,
+  earlyReleaseNotice,
+  earlyReleaseStartable,
+  endsChallenge,
+  outcomeMessage,
+  passStatusText,
+  quizAnswersComplete,
+} from './releaseView';
 
 const locked: TimerState = {
   phase: 'study',
@@ -64,5 +72,50 @@ describe('release view helpers', () => {
     expect(passStatusText(pass, 0)).toBe('긴급 패스 오늘 1/1회 남음 · 10분 · -5점');
     expect(passStatusText({ ...pass, activeUntilMs: 100 }, 50)).toContain('적용 중');
     expect(passStatusText({ ...pass, activeUntilMs: 100 }, 100)).toContain('남음');
+  });
+});
+
+describe('early release quiz wording', () => {
+  const quiz: ReleaseQuizStatus = {
+    mode: 'quiz',
+    required: 3,
+    drawable: 9,
+    attemptsUsed: 0,
+    maxAttempts: 4,
+    cooldownRemainingMs: 0,
+    cooldownMin: 3,
+  };
+
+  it('says the plan copy for each mode', () => {
+    expect(earlyReleaseNotice(quiz)).toBe(
+      '조기 해제는 위키 문제 3개를 모두 맞혀야 해요. 하루 최대 4번 시도하고, 틀리면 3분 기다려야 해요. 시도를 다 쓰면 오늘은 조기 해제를 쓸 수 없어요(타이핑으로 대신할 수 없어요).',
+    );
+    expect(earlyReleaseNotice({ ...quiz, mode: 'typing' })).toBe('위키 문제가 아직 부족해서 긴 문장 타이핑으로 해제해요.');
+    expect(earlyReleaseNotice({ ...quiz, mode: 'cooldown', cooldownRemainingMs: 61_000 })).toBe('2분 후에 다시 시도할 수 있어요.');
+    expect(earlyReleaseNotice({ ...quiz, mode: 'exhausted', attemptsUsed: 4 })).toContain('긴급 패스나 오늘 건너뛰기는 기존 방식');
+    expect(earlyReleaseNotice(null)).toBeNull();
+  });
+
+  it('only a quiz or the typing fallback can be started', () => {
+    expect(earlyReleaseStartable(quiz)).toBe(true);
+    expect(earlyReleaseStartable({ ...quiz, mode: 'typing' })).toBe(true);
+    expect(earlyReleaseStartable({ ...quiz, mode: 'cooldown' })).toBe(false);
+    expect(earlyReleaseStartable({ ...quiz, mode: 'exhausted' })).toBe(false);
+  });
+
+  it('a failed quiz reports pass or fail and the wait, never a count', () => {
+    const text = outcomeMessage({ outcome: 'quizFailed', retryAfterMs: 180_000, attemptsLeft: 2 });
+    expect(text).toContain('통과하지 못했어요');
+    expect(text).toContain('3분');
+    expect(text).toContain('2번');
+    expect(text).not.toMatch(/맞/);
+    expect(outcomeMessage({ outcome: 'quizFailed', retryAfterMs: 180_000, attemptsLeft: 0 })).toContain('오늘 조기 해제 시도를 모두 썼어요');
+    expect(endsChallenge({ outcome: 'quizFailed', retryAfterMs: 1, attemptsLeft: 1 })).toBe(true);
+  });
+
+  it('needs an answer for every question before submitting', () => {
+    expect(quizAnswersComplete(['a', 'b', 'c'], 3)).toBe(true);
+    expect(quizAnswersComplete(['a', '', 'c'], 3)).toBe(false);
+    expect(quizAnswersComplete(['a', 'b'], 3)).toBe(false);
   });
 });

@@ -677,6 +677,33 @@ struct Ctx<'a> {
     action: Action,
     reason: ReasonCode,
     reason_text: Option<&'a str>,
+    batch_id: Option<&'a str>,
+}
+
+/// Who asks for a change. The chatbot applies a reviewed draft: its history rows carry reason
+/// `chatbot` (creations: action `chatbot_create`) and the draft's batch id instead of a
+/// user-selected reason.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Origin<'a> {
+    User,
+    Chatbot { batch_id: &'a str },
+}
+
+impl<'a> Origin<'a> {
+    fn batch_id(self) -> Option<&'a str> {
+        match self {
+            Origin::User => None,
+            Origin::Chatbot { batch_id } => Some(batch_id),
+        }
+    }
+
+    /// The reason code and text a change records.
+    fn reason(self, code: ReasonCode, text: Option<&str>) -> AppResult<(ReasonCode, Option<String>)> {
+        match self {
+            Origin::User => Ok((code, check_user_reason(code, text)?)),
+            Origin::Chatbot { .. } => Ok((ReasonCode::Chatbot, None)),
+        }
+    }
 }
 
 fn record(
@@ -698,7 +725,7 @@ fn record(
             before_json: before.map(|v| v.to_string()),
             after_json: after.map(|v| v.to_string()),
             outcome,
-            batch_id: None,
+            batch_id: ctx.batch_id,
         },
     )
 }
@@ -749,6 +776,21 @@ pub fn create_plan<Tz: TimeZone>(
     input: CreatePlanInput,
     at_ms: i64,
 ) -> AppResult<PlanChange> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let change = create_plan_in(&tx, tz, input, at_ms, Origin::User)?;
+    tx.commit()?;
+    Ok(change)
+}
+
+/// `create_plan` inside the caller's Immediate transaction; the caller commits (a rejected change
+/// has written its history row) or drops it to undo everything.
+pub fn create_plan_in<Tz: TimeZone>(
+    tx: &Connection,
+    tz: &Tz,
+    input: CreatePlanInput,
+    at_ms: i64,
+    origin: Origin<'_>,
+) -> AppResult<PlanChange> {
     let name = clean_text(&input.name, "name")?;
     let subject = clean_text(&input.subject, "subject")?;
     let start = parse_date(&input.start_date)?;
@@ -772,19 +814,20 @@ pub fn create_plan<Tz: TimeZone>(
         deleted_at_ms: None,
     };
 
-    let ctx = Ctx { at_ms, action: Action::Create, reason: ReasonCode::Created, reason_text: None };
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    if crate::study::lock_held(&tx)? {
-        record(&tx, &ctx, None, None, Some(plan_json(&plan)), Outcome::RejectedLocked)?;
-        tx.commit()?;
+    let (action, reason) = match origin {
+        Origin::User => (Action::Create, ReasonCode::Created),
+        Origin::Chatbot { .. } => (Action::ChatbotCreate, ReasonCode::Chatbot),
+    };
+    let ctx = Ctx { at_ms, action, reason, reason_text: None, batch_id: origin.batch_id() };
+    if crate::study::lock_held(tx)? {
+        record(tx, &ctx, None, None, Some(plan_json(&plan)), Outcome::RejectedLocked)?;
         return Ok(PlanChange::rejected(None));
     }
-    let mut world = load_world(&tx)?;
+    let mut world = load_world(tx)?;
     world.plans.push(plan.clone());
     check_overlap(tz, &world, start, overlap_end(start, plan.repeat_weekdays.is_some()), &[0])?;
-    let id = store::insert_plan(&tx, &plan)?;
-    record(&tx, &ctx, Some(id), None, Some(plan_json(&plan)), Outcome::Applied)?;
-    tx.commit()?;
+    let id = store::insert_plan(tx, &plan)?;
+    record(tx, &ctx, Some(id), None, Some(plan_json(&plan)), Outcome::Applied)?;
     tracing::info!(event = "plan_created", plan_id = id);
     Ok(PlanChange::applied(id))
 }
@@ -795,8 +838,22 @@ pub fn update_plan<Tz: TimeZone>(
     input: UpdatePlanInput,
     at_ms: i64,
 ) -> AppResult<PlanChange> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let change = update_plan_in(&tx, tz, input, at_ms, Origin::User)?;
+    tx.commit()?;
+    Ok(change)
+}
+
+/// `update_plan` inside the caller's Immediate transaction (see `create_plan_in`).
+pub fn update_plan_in<Tz: TimeZone>(
+    tx: &Connection,
+    tz: &Tz,
+    input: UpdatePlanInput,
+    at_ms: i64,
+    origin: Origin<'_>,
+) -> AppResult<PlanChange> {
     let action = update_action(&input)?;
-    let reason_text = check_user_reason(input.reason_code, input.reason_text.as_deref())?;
+    let (reason, reason_text) = origin.reason(input.reason_code, input.reason_text.as_deref())?;
     let date = parse_date(&input.date)?;
     let new_date = input.new_date.as_deref().map(parse_date).transpose()?;
     if let Some(t) = &input.new_time {
@@ -805,64 +862,67 @@ pub fn update_plan<Tz: TimeZone>(
     if let Some(s) = input.new_sets {
         check_sets(s)?;
     }
-    let ctx = Ctx { at_ms, action, reason: input.reason_code, reason_text: reason_text.as_deref() };
+    let ctx = Ctx { at_ms, action, reason, reason_text: reason_text.as_deref(), batch_id: origin.batch_id() };
 
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    if crate::study::lock_held(&tx)? {
+    if crate::study::lock_held(tx)? {
         let attempt = json!({
             "date": input.date, "newDate": input.new_date, "newTime": input.new_time,
             "newSets": input.new_sets, "repeat": input.repeat, "scope": input.scope,
         });
-        record(&tx, &ctx, Some(input.plan_id), None, Some(attempt), Outcome::RejectedLocked)?;
-        tx.commit()?;
+        record(tx, &ctx, Some(input.plan_id), None, Some(attempt), Outcome::RejectedLocked)?;
         return Ok(PlanChange::rejected(Some(input.plan_id)));
     }
 
-    let plan = live_plan(&tx, input.plan_id)?;
+    let plan = live_plan(tx, input.plan_id)?;
     if !is_base_date(&plan, date)? {
         return Err(AppError::Invalid(format!("plan has no occurrence on {}", input.date)));
     }
-    let mut world = load_world(&tx)?;
+    let mut world = load_world(tx)?;
     let affected = match input.scope {
         Scope::Occurrence => {
             let target = new_date.unwrap_or(date);
-            update_occurrence(&tx, &mut world, &plan, &input, target)?
+            update_occurrence(tx, &mut world, &plan, &input, target)?
         }
         Scope::Series => update_series(&mut world, &plan, &input, date, at_ms)?,
     };
     check_overlap(tz, &world, affected.from, affected.to, &affected.touched)?;
-    let id = affected.apply(&tx)?;
-    record(&tx, &ctx, Some(id), Some(affected.before), Some(affected.after), Outcome::Applied)?;
-    tx.commit()?;
+    let id = affected.apply(tx)?;
+    record(tx, &ctx, Some(id), Some(affected.before), Some(affected.after), Outcome::Applied)?;
     tracing::info!(event = "plan_updated", plan_id = id, action = action.as_str());
     Ok(PlanChange::applied(id))
 }
 
 pub fn delete_plan(conn: &mut Connection, input: DeletePlanInput, at_ms: i64) -> AppResult<PlanChange> {
-    let reason_text = check_user_reason(input.reason_code, input.reason_text.as_deref())?;
-    let date = parse_date(&input.date)?;
-    let ctx = Ctx { at_ms, action: Action::Delete, reason: input.reason_code, reason_text: reason_text.as_deref() };
-
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    if crate::study::lock_held(&tx)? {
+    let change = delete_plan_in(&tx, input, at_ms, Origin::User)?;
+    tx.commit()?;
+    Ok(change)
+}
+
+/// `delete_plan` inside the caller's Immediate transaction (see `create_plan_in`).
+pub fn delete_plan_in(tx: &Connection, input: DeletePlanInput, at_ms: i64, origin: Origin<'_>) -> AppResult<PlanChange> {
+    let (reason, reason_text) = origin.reason(input.reason_code, input.reason_text.as_deref())?;
+    let date = parse_date(&input.date)?;
+    let ctx = Ctx { at_ms, action: Action::Delete, reason, reason_text: reason_text.as_deref(), batch_id: origin.batch_id() };
+
+    if crate::study::lock_held(tx)? {
         let attempt = json!({ "date": input.date, "scope": input.scope });
-        record(&tx, &ctx, Some(input.plan_id), None, Some(attempt), Outcome::RejectedLocked)?;
-        tx.commit()?;
+        record(tx, &ctx, Some(input.plan_id), None, Some(attempt), Outcome::RejectedLocked)?;
         return Ok(PlanChange::rejected(Some(input.plan_id)));
     }
 
-    let plan = live_plan(&tx, input.plan_id)?;
+    let plan = live_plan(tx, input.plan_id)?;
     if !is_base_date(&plan, date)? {
         return Err(AppError::Invalid(format!("plan has no occurrence on {}", input.date)));
     }
     match input.scope {
         Scope::Occurrence => {
-            let (cur_date, cur_time, cur_sets) = match current_occurrence(&tx, &plan, &input.date)? {
+            let (cur_date, cur_time, cur_sets) = match current_occurrence(tx, &plan, &input.date)? {
                 Some(cur) => cur,
                 None => return Err(AppError::Invalid("occurrence is already deleted".into())),
             };
             store::put_plan_exception(
-                &tx,
+                tx,
                 &PlanException {
                     plan_id: plan.id,
                     date: input.date.clone(),
@@ -873,7 +933,7 @@ pub fn delete_plan(conn: &mut Connection, input: DeletePlanInput, at_ms: i64) ->
                 },
             )?;
             record(
-                &tx,
+                tx,
                 &ctx,
                 Some(plan.id),
                 Some(occurrence_json(&cur_date, &cur_time, cur_sets)),
@@ -884,25 +944,26 @@ pub fn delete_plan(conn: &mut Connection, input: DeletePlanInput, at_ms: i64) ->
         Scope::Series => {
             // Everything from `date` on goes; the past stays so old runs keep their plan.
             let mut rows = vec![plan.clone()];
-            for later in store::list_live_plans(&tx)? {
+            for later in store::list_live_plans(tx)? {
                 if later.series_id == plan.series_id && later.id != plan.id && first_date(&later)? > date {
                     rows.push(later);
                 }
             }
-            let batch = (rows.len() > 1).then(|| format!("delete-{at_ms}-{}", plan.id));
+            let own_batch = (rows.len() > 1).then(|| format!("delete-{at_ms}-{}", plan.id));
+            let batch = origin.batch_id().map(str::to_string).or(own_batch);
             for row in &rows {
                 if row.id == plan.id && first_date(row)? < date {
-                    store::set_plan_repeat_until(&tx, row.id, Some(&fmt_date(date - Duration::days(1))))?;
+                    store::set_plan_repeat_until(tx, row.id, Some(&fmt_date(date - Duration::days(1))))?;
                 } else {
-                    store::soft_delete_plan(&tx, row.id, at_ms)?;
+                    store::soft_delete_plan(tx, row.id, at_ms)?;
                 }
                 store::append_plan_history(
-                    &tx,
+                    tx,
                     &NewPlanHistory {
                         plan_id: Some(row.id),
                         at_ms,
                         action: Action::Delete,
-                        reason: input.reason_code,
+                        reason,
                         reason_text: reason_text.as_deref(),
                         before_json: Some(plan_json(row).to_string()),
                         after_json: Some(json!({ "deletedFrom": input.date }).to_string()),
@@ -913,9 +974,15 @@ pub fn delete_plan(conn: &mut Connection, input: DeletePlanInput, at_ms: i64) ->
             }
         }
     }
-    tx.commit()?;
     tracing::info!(event = "plan_deleted", plan_id = plan.id);
     Ok(PlanChange::applied(plan.id))
+}
+
+/// Notes a chatbot request that the study lock refused (a draft that could not be applied, a
+/// cancel asked for during a run): the same `rejected_locked` row a refused user edit leaves.
+pub fn record_chat_rejection(conn: &Connection, at_ms: i64, action: Action, plan_id: Option<i64>, attempt: Value) -> AppResult<()> {
+    let ctx = Ctx { at_ms, action, reason: ReasonCode::Chatbot, reason_text: None, batch_id: None };
+    record(conn, &ctx, plan_id, None, Some(attempt), Outcome::RejectedLocked)
 }
 
 fn live_plan(conn: &Connection, id: i64) -> AppResult<Plan> {

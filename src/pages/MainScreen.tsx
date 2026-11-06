@@ -6,6 +6,7 @@ import { asyncStatus } from '../hooks/useAsyncStatus';
 import { useTimerState } from '../hooks/useTimerState';
 import { TimerPanel } from '../components/TimerPanel';
 import { FocusSignalsPanel } from '../components/FocusSignalsPanel';
+import { TopicPanel } from '../components/TopicPanel';
 import { ModeShiftToast } from '../components/ModeShiftToast';
 import { failureNotice, modeChangeNotice, type ModeNotice } from './modeShiftNotice';
 
@@ -60,6 +61,8 @@ export function MainScreen() {
       </section>
 
       <FocusSignalsPanel timer={timer} />
+
+      <TopicPanel />
 
       <section className="card" aria-labelledby="mode-title">
         <h2 id="mode-title">공부 모드</h2>

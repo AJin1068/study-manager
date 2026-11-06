@@ -21,6 +21,16 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/m007_focus.sql"),
     include_str!("migrations/m008_points.sql"),
     include_str!("migrations/m009_remote.sql"),
+    include_str!("migrations/m010_llm_usage.sql"),
+    include_str!("migrations/m011_wiki_core.sql"),
+    include_str!("migrations/m012_quiz.sql"),
+    include_str!("migrations/m013_release_proof.sql"),
+    include_str!("migrations/m014_session_retro.sql"),
+    include_str!("migrations/m015_tab_verdict_cache.sql"),
+    include_str!("migrations/m016_study_context.sql"),
+    include_str!("migrations/m017_topic_assignment.sql"),
+    include_str!("migrations/m018_message_log.sql"),
+    include_str!("migrations/m019_chat_drafts.sql"),
 ];
 
 /// Opens (creating if needed) the database file and applies pending migrations. The lock row is
@@ -148,6 +158,36 @@ mod tests {
         assert!(conn.execute("UPDATE setting_history SET after = 'x'", []).is_err());
         assert!(conn.execute("DELETE FROM setting_history", []).is_err());
         assert!(conn.execute("INSERT INTO setting_history (at_ms, key, after, reason, outcome) VALUES (4, 'k', 'v', 'whatever', 'applied')", []).is_err());
+    }
+
+    #[test]
+    fn m013_marks_old_passes_as_typing_and_keeps_the_append_only_guard() {
+        let conn = Connection::open_in_memory().expect("open");
+        conn.pragma_update(None, "foreign_keys", "ON").expect("fk");
+        conn.pragma_update(None, "recursive_triggers", "ON").expect("triggers");
+        let before = MIGRATIONS.iter().position(|sql| sql.contains("proof_kind")).expect("the proof migration");
+        for sql in &MIGRATIONS[..before] {
+            conn.execute_batch(sql).expect("migration");
+        }
+        conn.pragma_update(None, "user_version", i64::try_from(before).expect("version")).expect("version");
+        conn.execute(
+            "INSERT INTO study_passes (at_ms, date, kind, challenge_len, typing_ms, penalty_points) VALUES (1, '2026-03-09', 'skip_today', 90, 4000, NULL)",
+            [],
+        )
+        .expect("shipped row");
+
+        migrate(&conn).expect("m013");
+
+        let kept: (String, i64, i64) = conn
+            .query_row("SELECT proof_kind, challenge_len, typing_ms FROM study_passes WHERE at_ms = 1", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .expect("kept");
+        assert_eq!(kept, ("typing".to_string(), 90, 4000));
+        assert!(conn.execute("UPDATE study_passes SET proof_kind = 'quiz'", []).is_err(), "append-only trigger survived");
+        assert!(conn.execute("DELETE FROM study_passes", []).is_err());
+        assert!(
+            conn.execute("INSERT INTO study_passes (at_ms, date, kind, challenge_len, typing_ms, proof_kind) VALUES (2, 'd', 'skip_today', 5, 0, 'quiz')", []).is_err(),
+            "the guard trigger is in place"
+        );
     }
 
     /// Shared privacy guard (AGENTS.md section 9): no table or column may be named like data we

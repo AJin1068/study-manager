@@ -1,12 +1,15 @@
 //! Lock state and study-mode commands.
 
+use std::sync::Arc;
+
 use chrono::Local;
 use tauri::{AppHandle, State};
 
 use super::plan::announce_plans_changed;
 use super::{lock_db, AppState};
 use crate::clock::now_ms;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
+use crate::plan_adjust;
 use crate::plan_shift::ModeChange;
 use crate::study::{self, LockState, ModeConfig, ModeSnapshot, StudyLevel};
 
@@ -28,18 +31,21 @@ pub fn get_mode_config(state: State<'_, AppState>) -> AppResult<ModeSnapshot> {
     study::mode_snapshot(&conn, &today_key())
 }
 
+/// The mode change and, around it, the LLM adjustment of the rest of today's plans (rule-based
+/// fallback inside). Runs on the blocking pool because the model call may take seconds.
 #[tauri::command]
-pub fn set_daily_mode(app: AppHandle, state: State<'_, AppState>, level: StudyLevel) -> AppResult<ModeChange> {
-    let change = {
-        let mut conn = lock_db(&state.db)?;
-        study::set_daily_mode(&mut conn, &Local, &today_key(), level, now_ms()?)?
-    };
+pub async fn set_daily_mode(app: AppHandle, state: State<'_, AppState>, level: StudyLevel) -> AppResult<ModeChange> {
+    let (db, llm) = (Arc::clone(&state.db), Arc::clone(&state.llm));
+    let at_ms = now_ms()?;
+    let change = tauri::async_runtime::spawn_blocking(move || plan_adjust::change_daily_mode(&db, &llm, &Local, &today_key(), level, at_ms))
+        .await
+        .map_err(|_| AppError::Internal("the mode change did not finish".into()))??;
     announce_if_moved(&app, &change);
     Ok(change)
 }
 
 #[tauri::command]
-pub fn update_mode_config(
+pub async fn update_mode_config(
     app: AppHandle,
     state: State<'_, AppState>,
     level: StudyLevel,
@@ -48,11 +54,12 @@ pub fn update_mode_config(
     long_break_min: Option<i64>,
     sets_before_long_break: Option<i64>,
 ) -> AppResult<ModeChange> {
-    let change = {
-        let mut conn = lock_db(&state.db)?;
-        let config = ModeConfig { level, study_min, break_min, long_break_min, sets_before_long_break };
-        study::update_mode_config(&mut conn, &Local, &today_key(), config, now_ms()?)?
-    };
+    let (db, llm) = (Arc::clone(&state.db), Arc::clone(&state.llm));
+    let at_ms = now_ms()?;
+    let config = ModeConfig { level, study_min, break_min, long_break_min, sets_before_long_break };
+    let change = tauri::async_runtime::spawn_blocking(move || plan_adjust::change_mode_config(&db, &llm, &Local, &today_key(), config, at_ms))
+        .await
+        .map_err(|_| AppError::Internal("the mode change did not finish".into()))??;
     announce_if_moved(&app, &change);
     Ok(change)
 }

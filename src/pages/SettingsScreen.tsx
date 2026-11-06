@@ -13,6 +13,9 @@ import { ModeConfigEditor } from './ModeConfigEditor';
 import { BlockListPanel } from '../components/BlockListPanel';
 import { CalendarIoPanel } from '../components/CalendarIoPanel';
 import { PresetPanel } from '../components/PresetPanel';
+import { ContextSettingsPanel } from '../components/ContextSettingsPanel';
+import { MessageSettingsPanel } from '../components/MessageSettingsPanel';
+import { QuizSettingsPanel } from '../components/QuizSettingsPanel';
 import { SiteRulesPanel } from '../components/SiteRulesPanel';
 import { ModeShiftToast } from '../components/ModeShiftToast';
 import { IntegrationsScreen } from './IntegrationsScreen';
@@ -180,6 +183,9 @@ export function SettingsScreen() {
       />
 
       <PresetPanel editable={lock.allowed} onAttempted={blockAttempted} />
+      <QuizSettingsPanel />
+      <MessageSettingsPanel />
+      <ContextSettingsPanel />
 
       <CalendarIoPanel editable={lock.allowed} onAttempted={blockAttempted} />
 

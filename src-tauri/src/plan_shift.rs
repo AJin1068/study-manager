@@ -4,7 +4,11 @@
 //! of today's plans. Plans that have not started yet are moved by the accumulated length
 //! difference so the gaps between plans stay as they were. The shift runs inside the caller's
 //! Immediate transaction: the mode write, every moved occurrence, and the history rows commit
-//! together or not at all. No LLM is involved (stage 3 adds that).
+//! together or not at all. The shift itself is rule-based; an `LlmProposal` (computed by
+//! `plan_adjust` before the transaction, never inside it) may replace the rule's new start times
+//! when it passes `validate_layout` and still matches the day the transaction sees. Anything else
+//! falls back to the rule, and the history rows say which one produced them (`mode_shift` or
+//! `llm_adjust`).
 
 use std::collections::HashSet;
 
@@ -76,6 +80,43 @@ pub fn compute_shift(items: &[ShiftItem], now_ms: i64, day_end_ms: i64) -> Shift
     ShiftPlan::Moves(moves)
 }
 
+/// Start times (ms) the LLM proposed for the items of a day, in the order of `items`. Built by
+/// `plan_adjust` from a read-only preview; `shift_after_mode_change_with` applies it only if the
+/// day it sees in the real transaction is identical to `items`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LlmProposal {
+    pub items: Vec<ShiftItem>,
+    pub starts: Vec<i64>,
+}
+
+/// Whether a proposed layout is acceptable: one start per item; frozen items stay where they are;
+/// a pending item starts on a whole minute, not before now, and ends before the day does (its new
+/// length is fixed, so the total set count cannot change); and no two items overlap, frozen ones
+/// included.
+pub fn validate_layout(items: &[ShiftItem], starts: &[i64], now_ms: i64, day_end_ms: i64) -> bool {
+    if items.len() != starts.len() {
+        return false;
+    }
+    let now_floor = ceil_minute(now_ms);
+    let mut spans: Vec<(i64, i64)> = Vec::with_capacity(items.len());
+    for (item, &start) in items.iter().zip(starts) {
+        if item.pending {
+            let end = start + item.new_duration_min * MINUTE_MS;
+            if start % MINUTE_MS != 0 || start < now_floor || end > day_end_ms {
+                return false;
+            }
+            spans.push((start, end));
+        } else {
+            if start != item.old_start_ms {
+                return false;
+            }
+            spans.push((start, start + item.old_duration_min * MINUTE_MS));
+        }
+    }
+    spans.sort_unstable();
+    spans.windows(2).all(|pair| pair[0].1 <= pair[1].0)
+}
+
 // ---- wire types ----
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
@@ -86,6 +127,25 @@ pub struct ShiftSummary {
     pub moved_count: usize,
     /// The new lengths would run past midnight, so no plan was moved.
     pub overflows_midnight: bool,
+    /// Who decided the new start times.
+    pub source: ShiftSource,
+    /// Why the LLM did not decide (a stable code), when it was asked or could have been.
+    pub fallback_code: Option<String>,
+}
+
+#[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ShiftSource {
+    /// The fixed rule: later plans move by the accumulated length difference.
+    Rule,
+    /// The LLM's layout, validated.
+    Llm,
+}
+
+impl ShiftSummary {
+    fn empty(source: ShiftSource, overflows_midnight: bool) -> ShiftSummary {
+        ShiftSummary { batch_id: None, moved_count: 0, overflows_midnight, source, fallback_code: None }
+    }
 }
 
 /// Result of a mode change: the usual outcome plus what happened to today's plans.
@@ -144,23 +204,21 @@ fn state_json(source_date: &str, date: &str, time: &str, ex: Option<&PlanExcepti
     json!({ "sourceDate": source_date, "date": date, "time": time, "exception": exception_json(ex), "mode": mode })
 }
 
-/// Moves today's not-yet-started plans after a mode write and records one `mode_shift` row per
-/// moved plan under one batch id. `old` is the mode lookup from before the write; `tx` already
-/// holds the new mode and must be the caller's Immediate transaction.
-pub fn shift_after_mode_change<Tz: TimeZone>(
-    tx: &Connection,
-    tz: &Tz,
-    today: &str,
-    old: &ModeLookup,
-    trigger: &ModeTrigger,
-    at_ms: i64,
-) -> AppResult<ShiftSummary> {
+/// The day being shifted: items in start order, and for each the occurrence it came from
+/// (`None` for yesterday's plan that spills into today, which is frozen).
+struct Day {
+    items: Vec<ShiftItem>,
+    origin: Vec<Option<Occurrence>>,
+    day_end_ms: i64,
+}
+
+fn collect_day<Tz: TimeZone>(tx: &Connection, tz: &Tz, today: &str, old: &ModeLookup, at_ms: i64) -> AppResult<Day> {
     let date = parse_date(today)?;
     let new = ModeLookup::load(tx)?;
     let plans = store::list_live_plans(tx)?;
     let exceptions = store::list_plan_exceptions(tx)?;
     let day_start = local_to_ms(tz, date, NaiveTime::MIN)?;
-    let day_end = local_to_ms(tz, date + Duration::days(1), NaiveTime::MIN)?;
+    let day_end_ms = local_to_ms(tz, date + Duration::days(1), NaiveTime::MIN)?;
     let started: HashSet<(i64, String)> = store::list_runs_since(tx, &fmt_date(date - Duration::days(1)))?
         .into_iter()
         .map(|run| (run.plan_id, run.date))
@@ -195,18 +253,83 @@ pub fn shift_after_mode_change<Tz: TimeZone>(
         });
         origin.push(Some(o));
     }
+    Ok(Day { items, origin, day_end_ms })
+}
 
-    let moves = match compute_shift(&items, at_ms, day_end) {
-        ShiftPlan::OverflowsMidnight => {
-            return Ok(ShiftSummary { batch_id: None, moved_count: 0, overflows_midnight: true });
+/// What the LLM is asked to place: today's items with their new lengths, and the day's end.
+/// `apply_mode` writes the new mode inside a transaction that is rolled back afterwards, so the
+/// lengths are exactly those the real change will produce. `None` while the lock is held.
+pub fn preview_day<Tz: TimeZone>(
+    conn: &mut Connection,
+    tz: &Tz,
+    today: &str,
+    at_ms: i64,
+    apply_mode: impl FnOnce(&Connection) -> AppResult<()>,
+) -> AppResult<Option<(Vec<ShiftItem>, i64)>> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    if study::lock_held(&tx)? {
+        return Ok(None);
+    }
+    let old = ModeLookup::load(&tx)?;
+    apply_mode(&tx)?;
+    let day = collect_day(&tx, tz, today, &old, at_ms)?;
+    // Dropping the transaction without a commit undoes the trial mode write.
+    drop(tx);
+    Ok(Some((day.items, day.day_end_ms)))
+}
+
+/// Moves today's not-yet-started plans after a mode write and records one history row per moved
+/// plan under one batch id. `old` is the mode lookup from before the write; `tx` already holds the
+/// new mode and must be the caller's Immediate transaction.
+///
+/// Without a `proposal` the rule decides (`mode_shift` rows). A valid `proposal` decides the new
+/// start times instead and the rows are `llm_adjust`. A proposal that is invalid, or computed for
+/// a different day than the one this transaction sees, is ignored and the rule runs;
+/// `fallback_code` says which of the two happened.
+pub fn shift_after_mode_change_with<Tz: TimeZone>(
+    tx: &Connection,
+    tz: &Tz,
+    today: &str,
+    old: &ModeLookup,
+    trigger: &ModeTrigger,
+    at_ms: i64,
+    proposal: Option<&LlmProposal>,
+) -> AppResult<ShiftSummary> {
+    let Day { items, origin, day_end_ms } = collect_day(tx, tz, today, old, at_ms)?;
+
+    let mut source = ShiftSource::Rule;
+    let mut fallback_code = None;
+    let mut moves = None;
+    if let Some(proposal) = proposal {
+        if proposal.items != items {
+            fallback_code = Some("llm_day_changed".to_string());
+        } else if !validate_layout(&items, &proposal.starts, at_ms, day_end_ms) {
+            fallback_code = Some("llm_layout_invalid".to_string());
+        } else {
+            source = ShiftSource::Llm;
+            moves = Some(
+                items.iter().zip(&proposal.starts).enumerate().filter(|(_, (item, start))| item.old_start_ms != **start).map(|(i, (_, start))| (i, *start)).collect::<Vec<_>>(),
+            );
         }
-        ShiftPlan::Moves(moves) => moves,
+    }
+    let moves = match moves {
+        Some(moves) => moves,
+        None => match compute_shift(&items, at_ms, day_end_ms) {
+            ShiftPlan::OverflowsMidnight => {
+                return Ok(ShiftSummary { fallback_code, ..ShiftSummary::empty(ShiftSource::Rule, true) });
+            }
+            ShiftPlan::Moves(moves) => moves,
+        },
     };
     if moves.is_empty() {
-        return Ok(ShiftSummary { batch_id: None, moved_count: 0, overflows_midnight: false });
+        return Ok(ShiftSummary { fallback_code, ..ShiftSummary::empty(source, false) });
     }
 
-    let batch = format!("modeshift-{}", store::next_plan_history_id(tx)?);
+    let (action, reason, prefix) = match source {
+        ShiftSource::Rule => (Action::ModeShift, ReasonCode::ModeShift, "modeshift"),
+        ShiftSource::Llm => (Action::LlmAdjust, ReasonCode::LlmAdjust, "llmadjust"),
+    };
+    let batch = format!("{prefix}-{}", store::next_plan_history_id(tx)?);
     let mode = trigger.to_json()?;
     for &(index, new_start) in &moves {
         let occ = origin
@@ -241,8 +364,8 @@ pub fn shift_after_mode_change<Tz: TimeZone>(
             &NewPlanHistory {
                 plan_id: Some(occ.plan_id),
                 at_ms,
-                action: Action::ModeShift,
-                reason: ReasonCode::ModeShift,
+                action,
+                reason,
                 reason_text: None,
                 before_json: Some(state_json(&occ.source_date, &occ.date, &occ.start_time, existing.as_ref(), &mode).to_string()),
                 after_json: Some(state_json(&occ.source_date, &occ.date, &new_time, after_ex.as_ref(), &mode).to_string()),
@@ -251,8 +374,8 @@ pub fn shift_after_mode_change<Tz: TimeZone>(
             },
         )?;
     }
-    tracing::info!(event = "plans_mode_shifted", batch_id = %batch, moved = moves.len());
-    Ok(ShiftSummary { batch_id: Some(batch), moved_count: moves.len(), overflows_midnight: false })
+    tracing::info!(event = "plans_mode_shifted", batch_id = %batch, moved = moves.len(), source = ?source);
+    Ok(ShiftSummary { batch_id: Some(batch), moved_count: moves.len(), overflows_midnight: false, source, fallback_code })
 }
 
 // ---- undo ----
@@ -308,7 +431,10 @@ pub fn undo_plan_batch<Tz: TimeZone>(
 ) -> AppResult<PlanChange> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let rows = store::list_plan_history_batch(&tx, batch_id)?;
-    let shifts: Vec<_> = rows.iter().filter(|r| r.action == Action::ModeShift.as_str() && r.outcome == "applied").collect();
+    let shifts: Vec<_> = rows
+        .iter()
+        .filter(|r| (r.action == Action::ModeShift.as_str() || r.action == Action::LlmAdjust.as_str()) && r.outcome == "applied")
+        .collect();
     let Some(first) = shifts.first() else {
         return Err(AppError::Invalid("no mode shift has that batch id".into()));
     };
@@ -845,11 +971,37 @@ mod tests {
         let actual = serde_json::to_value([
             applied(
                 "studyMode",
-                ShiftSummary { batch_id: Some("modeshift-3".into()), moved_count: 1, overflows_midnight: false },
+                ShiftSummary {
+                    batch_id: Some("modeshift-3".into()),
+                    moved_count: 1,
+                    overflows_midnight: false,
+                    source: ShiftSource::Rule,
+                    fallback_code: None,
+                },
             ),
             applied(
                 "modeConfig.medium",
-                ShiftSummary { batch_id: None, moved_count: 0, overflows_midnight: true },
+                ShiftSummary { batch_id: None, moved_count: 0, overflows_midnight: true, source: ShiftSource::Rule, fallback_code: None },
+            ),
+            applied(
+                "studyMode",
+                ShiftSummary {
+                    batch_id: Some("llmadjust-9".into()),
+                    moved_count: 2,
+                    overflows_midnight: false,
+                    source: ShiftSource::Llm,
+                    fallback_code: None,
+                },
+            ),
+            applied(
+                "studyMode",
+                ShiftSummary {
+                    batch_id: Some("modeshift-4".into()),
+                    moved_count: 1,
+                    overflows_midnight: false,
+                    source: ShiftSource::Rule,
+                    fallback_code: Some("llm_disabled".into()),
+                },
             ),
             ModeChange::rejected("studyMode".into()),
         ])

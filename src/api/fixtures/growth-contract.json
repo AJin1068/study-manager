@@ -1,0 +1,21 @@
+{
+  "status": {
+    "totalStudyMs": 3600000,
+    "level": 2,
+    "stageLabel": "씨앗",
+    "earnedPoints": 35,
+    "nextLevelAt": 50,
+    "levelProgressPct": 50,
+    "wikiPages": 4,
+    "quizAnswered": 10,
+    "quizCorrect": 7,
+    "quizAccuracyPct": 70,
+    "nextReview": { "subject": "수학", "pageName": "미분", "reason": "low_accuracy" }
+  },
+  "insight": {
+    "weekStart": "2027-01-11",
+    "text": "저녁 복습을 넣어 보세요.",
+    "source": "rule",
+    "fallbackReason": "llm_disabled"
+  }
+}

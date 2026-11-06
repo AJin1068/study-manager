@@ -46,7 +46,13 @@ export interface ShiftSummary {
   movedCount: number;
   /** The new lengths would run past midnight, so no plan was moved. */
   overflowsMidnight: boolean;
+  /** Who chose the new start times: the fixed rule, or the validated LLM layout. */
+  source: ShiftSource;
+  /** Why the LLM did not decide (`llm_disabled`, `llm_layout_invalid`, ...); null when it did or was not needed. */
+  fallbackCode: string | null;
 }
+
+export type ShiftSource = 'rule' | 'llm';
 
 /** `shift` is null when the change was rejected. */
 export type ModeChange = UpdateOutcome & { shift: ShiftSummary | null };
@@ -60,7 +66,9 @@ export function isModeChange(value: unknown): value is ModeChange {
   return (
     (r.batchId === null || typeof r.batchId === 'string') &&
     typeof r.movedCount === 'number' &&
-    typeof r.overflowsMidnight === 'boolean'
+    typeof r.overflowsMidnight === 'boolean' &&
+    (r.source === 'rule' || r.source === 'llm') &&
+    (r.fallbackCode === null || typeof r.fallbackCode === 'string')
   );
 }
 

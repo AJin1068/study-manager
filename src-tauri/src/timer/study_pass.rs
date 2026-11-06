@@ -13,6 +13,12 @@
 //!
 //! Only the database is touched, never the engine thread, so all three work when it is down.
 //! Nothing the user typed reaches this module: only its length and how long typing took.
+//!
+//! How a release was proven is `ReleaseProof`: the typed sentence (every kind), or wiki questions
+//! (`early_release` only; `grant` refuses the other kinds with a quiz and a guard trigger on
+//! `study_passes` repeats the rule). For a quiz row `challenge_len` holds the character count of
+//! the asked prompts and `typing_ms` the time spent answering, so the older NOT NULL / CHECK
+//! columns stay satisfied without rebuilding the append-only table.
 
 use chrono::TimeZone;
 use rusqlite::{params, Connection, TransactionBehavior};
@@ -58,6 +64,64 @@ pub struct Typing {
     pub typing_ms: i64,
 }
 
+/// What the quiz step measured. Never the answers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QuizProof {
+    /// Characters of the asked prompts (stored in `challenge_len`).
+    pub prompt_chars: i64,
+    /// Time from issuing the questions to the submit (stored in `typing_ms`).
+    pub total_ms: i64,
+}
+
+/// The value stored in `study_passes.proof_kind`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProofKind {
+    Typing,
+    Quiz,
+}
+
+impl ProofKind {
+    #[cfg(test)]
+    pub const ALL: [ProofKind; 2] = [ProofKind::Typing, ProofKind::Quiz];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ProofKind::Typing => "typing",
+            ProofKind::Quiz => "quiz",
+        }
+    }
+}
+
+/// How the user earned a release. A quiz proof is valid for `EarlyRelease` only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReleaseProof {
+    Typing(Typing),
+    Quiz(QuizProof),
+}
+
+impl ReleaseProof {
+    pub fn kind(self) -> ProofKind {
+        match self {
+            ReleaseProof::Typing(_) => ProofKind::Typing,
+            ReleaseProof::Quiz(_) => ProofKind::Quiz,
+        }
+    }
+
+    fn challenge_len(self) -> i64 {
+        match self {
+            ReleaseProof::Typing(t) => t.challenge_len,
+            ReleaseProof::Quiz(q) => q.prompt_chars,
+        }
+    }
+
+    fn elapsed_ms(self) -> i64 {
+        match self {
+            ReleaseProof::Typing(t) => t.typing_ms,
+            ReleaseProof::Quiz(q) => q.total_ms,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Grant {
     Granted { expires_at_ms: Option<i64> },
@@ -92,9 +156,11 @@ pub struct PassRecord {
     pub challenge_len: i64,
     pub typing_ms: i64,
     pub penalty_points: Option<i64>,
+    /// `typing` or `quiz`.
+    pub proof_kind: String,
 }
 
-fn date_of<Tz: TimeZone>(tz: &Tz, at_ms: i64) -> AppResult<String> {
+pub(crate) fn date_of<Tz: TimeZone>(tz: &Tz, at_ms: i64) -> AppResult<String> {
     Ok(local_date(tz, at_ms)?.format(DATE_FMT).to_string())
 }
 
@@ -201,8 +267,11 @@ pub fn grant<Tz: TimeZone>(
     tz: &Tz,
     kind: PassKind,
     at_ms: i64,
-    typing: Typing,
+    proof: ReleaseProof,
 ) -> AppResult<Grant> {
+    if proof.kind() == ProofKind::Quiz && kind != PassKind::EarlyRelease {
+        return Err(AppError::Invalid("a quiz proof is valid for early release only".into()));
+    }
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     if let Some(refused) = refusal(&tx, tz, kind, at_ms)? {
         return Ok(refused);
@@ -229,25 +298,27 @@ pub fn grant<Tz: TimeZone>(
         }
     }
     tx.execute(
-        "INSERT INTO study_passes (at_ms, date, kind, run_id, expires_at_ms, challenge_len, typing_ms, penalty_points)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO study_passes (at_ms, date, kind, run_id, expires_at_ms, challenge_len, typing_ms, penalty_points, proof_kind)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             at_ms,
             date_of(tz, at_ms)?,
             kind.as_str(),
             run_id,
             expires_at_ms,
-            typing.challenge_len,
-            typing.typing_ms,
-            penalty_points
+            proof.challenge_len(),
+            proof.elapsed_ms(),
+            penalty_points,
+            proof.kind().as_str()
         ],
     )?;
     tx.commit()?;
     tracing::info!(
         event = "pass_granted",
         kind = kind.as_str(),
-        challenge_len = typing.challenge_len,
-        typing_ms = typing.typing_ms,
+        proof = proof.kind().as_str(),
+        challenge_len = proof.challenge_len(),
+        elapsed_ms = proof.elapsed_ms(),
         at_ms
     );
     Ok(Grant::Granted { expires_at_ms })
@@ -256,7 +327,7 @@ pub fn grant<Tz: TimeZone>(
 /// Newest first.
 pub fn list_passes(conn: &Connection, limit: i64) -> AppResult<Vec<PassRecord>> {
     let mut stmt = conn.prepare(
-        "SELECT id, at_ms, date, kind, run_id, expires_at_ms, challenge_len, typing_ms, penalty_points
+        "SELECT id, at_ms, date, kind, run_id, expires_at_ms, challenge_len, typing_ms, penalty_points, proof_kind
          FROM study_passes ORDER BY id DESC LIMIT ?1",
     )?;
     let rows = stmt.query_map(params![limit], |r| {
@@ -270,6 +341,7 @@ pub fn list_passes(conn: &Connection, limit: i64) -> AppResult<Vec<PassRecord>> 
             challenge_len: r.get(6)?,
             typing_ms: r.get(7)?,
             penalty_points: r.get(8)?,
+            proof_kind: r.get(9)?,
         })
     })?;
     Ok(rows.collect::<Result<_, _>>()?)

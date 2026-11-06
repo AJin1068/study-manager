@@ -15,6 +15,7 @@ export interface NativePort {
 export interface TabInfo {
   id?: number;
   url?: string;
+  title?: string;
 }
 
 export interface NavigationDetails {

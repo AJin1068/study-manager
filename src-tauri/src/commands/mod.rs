@@ -3,18 +3,27 @@
 //! handlers of one area; `lib.rs` lists them in a single `generate_handler!` call.
 
 pub mod browser_link;
+pub mod chat;
+pub mod context;
 pub mod dashboard;
 pub mod downtime;
 pub mod enforce;
 pub mod focus;
+pub mod growth;
+pub mod llm;
+pub mod messages;
 pub mod plan;
 pub mod points;
 pub mod power;
+pub mod quiz;
 pub mod release;
 pub mod remote;
+pub mod retro;
 pub mod settings;
 pub mod study;
 pub mod timer;
+pub mod topic;
+pub mod wiki;
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -48,6 +57,9 @@ pub struct AppState {
     pub signals: Arc<crate::focus::signals::SignalHub>,
     pub remote: Arc<crate::remote::runtime::RemoteRuntime>,
     pub sync: Arc<crate::sync::app::SyncHub>,
+    pub llm: Arc<crate::llm::service::LlmService>,
+    pub wiki: Arc<crate::wiki::service::WikiService>,
+    pub quiz: Arc<crate::quiz::service::QuizService>,
 }
 
 /// Locks the shared connection. A panic in another holder (the timer engine is supervised and

@@ -17,8 +17,9 @@ export function modeChangeNotice(change: ModeChange): ModeNotice {
     };
   }
   if (change.shift.movedCount === 0) return { text: base, undoBatchId: null };
+  const by = change.shift.source === 'llm' ? 'AI가 ' : '';
   return {
-    text: `${base} 오늘 아직 시작하지 않은 계획 ${change.shift.movedCount}개의 시작 시각을 옮겼습니다.`,
+    text: `${base} 오늘 아직 시작하지 않은 계획 ${change.shift.movedCount}개의 시작 시각을 ${by}옮겼습니다.`,
     undoBatchId: change.shift.batchId,
   };
 }

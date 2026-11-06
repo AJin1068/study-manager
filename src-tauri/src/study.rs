@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
 use crate::plan::ModeLookup;
-use crate::plan_shift::{shift_after_mode_change, ModeChange, ModeTrigger};
+use crate::plan_shift::{preview_day, shift_after_mode_change_with, LlmProposal, ModeChange, ModeTrigger, ShiftItem};
 use crate::settings::{Outcome, Reason, UpdateOutcome};
 use crate::store;
 
@@ -96,12 +96,37 @@ fn effective_level(conn: &Connection, date: &str) -> AppResult<(StudyLevel, bool
 
 /// Chooses today's mode and, in the same transaction, shifts today's not-yet-started plans by
 /// the length difference. Rejected while the lock is held, with a rejected_locked history row.
+#[cfg(test)]
 pub fn set_daily_mode<Tz: TimeZone>(
     conn: &mut Connection,
     tz: &Tz,
     date: &str,
     level: StudyLevel,
     at_ms: i64,
+) -> AppResult<ModeChange> {
+    set_daily_mode_with(conn, tz, date, level, at_ms, None)
+}
+
+/// Today's plans as they would stand after `set_daily_mode`, with their new lengths: what the
+/// LLM adjustment is asked to place. Changes nothing. `None` while the lock is held.
+pub fn preview_daily_mode<Tz: TimeZone>(
+    conn: &mut Connection,
+    tz: &Tz,
+    date: &str,
+    level: StudyLevel,
+    at_ms: i64,
+) -> AppResult<Option<(Vec<ShiftItem>, i64)>> {
+    preview_day(conn, tz, date, at_ms, |tx| store::put_daily_mode(tx, date, level, at_ms))
+}
+
+/// `set_daily_mode` where a valid LLM proposal decides the new start times (see `plan_shift`).
+pub fn set_daily_mode_with<Tz: TimeZone>(
+    conn: &mut Connection,
+    tz: &Tz,
+    date: &str,
+    level: StudyLevel,
+    at_ms: i64,
+    proposal: Option<&LlmProposal>,
 ) -> AppResult<ModeChange> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let (current, _) = effective_level(&tx, date)?;
@@ -130,7 +155,7 @@ pub fn set_daily_mode<Tz: TimeZone>(
         Outcome::Applied,
     )?;
     let trigger = ModeTrigger::Daily { date: date.to_string(), before: current, after: level };
-    let shift = shift_after_mode_change(&tx, tz, date, &old, &trigger, at_ms)?;
+    let shift = shift_after_mode_change_with(&tx, tz, date, &old, &trigger, at_ms, proposal)?;
     tx.commit()?;
     Ok(ModeChange { outcome: UpdateOutcome::Applied { key: "studyMode".into() }, shift: Some(shift) })
 }
@@ -182,12 +207,37 @@ fn validate_mode_config(config: &ModeConfig) -> AppResult<()> {
 /// difference (nothing moves unless `today` uses this level). Rejected while the lock is held,
 /// with a rejected_locked row (key `modeConfig.<level>`, before/after as JSON). Invalid input is
 /// an error and records nothing.
+#[cfg(test)]
 pub fn update_mode_config<Tz: TimeZone>(
     conn: &mut Connection,
     tz: &Tz,
     today: &str,
     config: ModeConfig,
     at_ms: i64,
+) -> AppResult<ModeChange> {
+    update_mode_config_with(conn, tz, today, config, at_ms, None)
+}
+
+/// The preview of `update_mode_config` (see `preview_daily_mode`). Invalid input is an error.
+pub fn preview_mode_config<Tz: TimeZone>(
+    conn: &mut Connection,
+    tz: &Tz,
+    today: &str,
+    config: &ModeConfig,
+    at_ms: i64,
+) -> AppResult<Option<(Vec<ShiftItem>, i64)>> {
+    validate_mode_config(config)?;
+    preview_day(conn, tz, today, at_ms, |tx| store::put_mode_config(tx, config))
+}
+
+/// `update_mode_config` where a valid LLM proposal decides the new start times.
+pub fn update_mode_config_with<Tz: TimeZone>(
+    conn: &mut Connection,
+    tz: &Tz,
+    today: &str,
+    config: ModeConfig,
+    at_ms: i64,
+    proposal: Option<&LlmProposal>,
 ) -> AppResult<ModeChange> {
     validate_mode_config(&config)?;
     let key = format!("modeConfig.{}", config.level.as_str());
@@ -210,7 +260,7 @@ pub fn update_mode_config<Tz: TimeZone>(
     store::put_mode_config(&tx, &config)?;
     store::append_history(&tx, at_ms, &key, Some(&before_json), &after_json, Reason::User, Outcome::Applied)?;
     let trigger = ModeTrigger::Config { before, after: config };
-    let shift = shift_after_mode_change(&tx, tz, today, &old, &trigger, at_ms)?;
+    let shift = shift_after_mode_change_with(&tx, tz, today, &old, &trigger, at_ms, proposal)?;
     tx.commit()?;
     Ok(ModeChange { outcome: UpdateOutcome::Applied { key }, shift: Some(shift) })
 }

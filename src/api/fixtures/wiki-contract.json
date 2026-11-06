@@ -1,0 +1,35 @@
+{
+  "subject": { "id": 1, "slug": "math", "name": "Math", "archivedAtMs": null, "createdAtMs": 1773000000000, "pageCount": 2, "folderMissing": false },
+  "page": { "id": 5, "subjectId": 1, "pageName": "Derivative", "relPath": "math/pages/Derivative.md", "contentHash": "00ff", "updatedAtMs": 1773000001000, "quizTotal": 0, "quizCorrect": 0 },
+  "ingest": {
+    "previewId": "p-1",
+    "subjectId": 1,
+    "status": "partial",
+    "processedSteps": 6,
+    "totalSteps": 9,
+    "rejectedSteps": 1,
+    "usedFallback": false,
+    "stoppedBy": null,
+    "proposals": [{ "pageName": "Derivative", "markdown": "# Derivative", "links": ["Integral"], "mode": "append" }],
+    "skipped": [{ "name": "x.bin", "reason": "not_text" }]
+  },
+  "applyReport": {
+    "written": [{ "pageName": "Derivative", "mode": "create", "backedUp": false }],
+    "skipped": [{ "pageName": "Gone", "reason": "not_in_preview" }]
+  },
+  "askOutcomes": [
+    { "status": "notInWiki", "hint": "h" },
+    { "status": "answer", "askId": "a-1", "answer": "x", "citations": ["Derivative"], "droppedCitations": 1 },
+    { "status": "ungrounded", "matches": [{ "pageName": "Derivative", "excerpt": "e" }] },
+    { "status": "unavailable", "code": "llm_overloaded", "matches": [] }
+  ],
+  "llmStatus": {
+    "enabled": true,
+    "judgeEnabled": false,
+    "model": "m",
+    "mode": "mock",
+    "dailyBudgetTokens": 200000,
+    "usedTodayTokens": 40,
+    "byPurpose": [{ "purpose": "wiki_ask", "calls": 2, "tokens": 40 }]
+  }
+}

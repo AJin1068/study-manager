@@ -18,6 +18,12 @@ pub const REASON_FOCUS_WINDOW: &str = "focus_window";
 pub const REASON_START_BONUS: &str = "start_bonus";
 pub const REASON_EMERGENCY_PASS: &str = "emergency_pass";
 pub const REASON_RUN_ABORTED: &str = "run_aborted";
+/// Paid for a right answer to a review question (never for the early-release proof). Ledger rows
+/// are keyed `quiz:attempt:<id>`, so one attempt pays once.
+pub const QUIZ_BONUS_POINTS: i64 = 2;
+/// Right answers per local day that pay the bonus; later ones pay nothing.
+pub const QUIZ_BONUS_DAILY_CAP: i64 = 5;
+pub const REASON_QUIZ_BONUS: &str = "quiz_bonus";
 
 /// Points earned in total needed to reach level `index + 1`. Early levels come fast, later ones
 /// slowly. Level 1 needs nothing.
