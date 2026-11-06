@@ -9,6 +9,7 @@ import { focusCommands } from './focus';
 import { planCommands } from './plan';
 import { pointsCommands } from './points';
 import { releaseCommands } from './release';
+import { remoteCommands } from './remote';
 import { settingsCommands } from './settings';
 import { studyCommands } from './study';
 import { timerCommands } from './timer';
@@ -21,6 +22,7 @@ export * from './focus';
 export * from './plan';
 export * from './points';
 export * from './release';
+export * from './remote';
 export * from './settings';
 export * from './study';
 export * from './timer';
@@ -37,4 +39,5 @@ export const commands = {
   ...focusCommands,
   ...pointsCommands,
   ...dashboardCommands,
+  ...remoteCommands,
 };

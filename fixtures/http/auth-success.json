@@ -1,0 +1,6 @@
+[
+  { "status": 200, "body": {} },
+  { "status": 200, "body": { "access_token": "access-1", "token_type": "bearer", "expires_in": 3600, "refresh_token": "refresh-1", "user": { "id": "8d2e5c1a-0000-4000-8000-000000000001", "email": "person@example.test" } } },
+  { "status": 200, "body": { "access_token": "access-2", "token_type": "bearer", "expires_in": 3600, "refresh_token": "refresh-2", "user": { "id": "8d2e5c1a-0000-4000-8000-000000000001" } } },
+  { "status": 204 }
+]

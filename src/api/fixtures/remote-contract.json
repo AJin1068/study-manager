@@ -1,0 +1,38 @@
+{
+  "view": {
+    "ports": [
+      { "port": "supabase", "setting": "auto", "mode": "live", "configured": true, "health": { "kind": "degraded", "code": "auth_expired" }, "lastOkMs": 1773000000000 },
+      { "port": "notify", "setting": "mock", "mode": "mock", "configured": false, "health": { "kind": "unknown" }, "lastOkMs": null },
+      { "port": "llm", "setting": "auto", "mode": "notConfigured", "configured": false, "health": { "kind": "ok" }, "lastOkMs": null },
+      { "port": "push", "setting": "auto", "mode": "notConfigured", "configured": false, "health": { "kind": "unknown" }, "lastOkMs": null }
+    ],
+    "secretStore": {
+      "kind": "sessionOnly",
+      "degradedCode": "secret_store_session_only",
+      "configured": { "anthropicApiKey": false, "supabaseRefreshToken": false, "ntfyTopic": true }
+    },
+    "auth": { "signedIn": false, "userId": null, "degradedCode": "auth_expired", "cooldownUntilMs": null }
+  },
+  "settings": {
+    "supabaseEndpoint": "https://abc.supabase.co",
+    "supabaseAnonKey": "anon-public-key",
+    "supabaseUserId": "u-1",
+    "notifyChannel": "ntfy",
+    "notifyNtfyServer": "https://ntfy.sh",
+    "notifyTelegramChatId": "",
+    "notifyMissedGraceMin": 3
+  },
+  "connectionTest": { "port": "supabase", "ok": false, "code": "http_error" },
+  "verifyOutcomes": [
+    { "status": "signedIn", "userId": "u-1" },
+    { "status": "rejectedLocked" },
+    { "status": "invalidCode" },
+    { "status": "cooldown", "untilMs": 1773000030000 },
+    { "status": "rateLimited", "retryAfterMs": 42000 }
+  ],
+  "syncStatus": { "active": true, "lastBeatOkMs": 1773000000000, "lastSyncOkMs": 1773000005000, "beatError": null, "syncError": "http_error", "degradedCode": "presence_unreachable" },
+  "ntfySubscription": { "deepLink": "ntfy://ntfy.sh/abc", "qrSvg": "<svg></svg>" },
+  "signOut": { "deviceRemoved": true, "serverSessionEnded": false },
+  "event": { "id": 7, "atMs": 1773000000000, "port": "supabase", "kind": "rpc_heartbeat", "outcome": "ok", "httpStatus": 200, "bytes": 96, "detailCode": null },
+  "egressSummary": { "port": "supabase", "kind": "rpc_heartbeat", "count": 12, "lastAtMs": 1773000000000 }
+}

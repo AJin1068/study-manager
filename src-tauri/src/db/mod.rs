@@ -20,6 +20,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/m006_study_apps.sql"),
     include_str!("migrations/m007_focus.sql"),
     include_str!("migrations/m008_points.sql"),
+    include_str!("migrations/m009_remote.sql"),
 ];
 
 /// Opens (creating if needed) the database file and applies pending migrations. The lock row is
@@ -113,6 +114,40 @@ mod tests {
             )
             .expect("easy row");
         assert_eq!(row, (25, 5, Some(20), Some(4)));
+    }
+
+    #[test]
+    fn m009_keeps_history_rows_and_widens_the_vocabulary_without_losing_the_guard() {
+        let conn = Connection::open_in_memory().expect("open");
+        conn.pragma_update(None, "foreign_keys", "ON").expect("fk");
+        conn.pragma_update(None, "recursive_triggers", "ON").expect("triggers");
+        for sql in &MIGRATIONS[..8] {
+            conn.execute_batch(sql).expect("migration");
+        }
+        conn.pragma_update(None, "user_version", 8).expect("version");
+        conn.execute(
+            "INSERT INTO setting_history (id, at_ms, key, before, after, reason, outcome) VALUES (41, 1, 'autostart', NULL, 'true', 'default', 'applied')",
+            [],
+        )
+        .expect("old row");
+        assert!(
+            conn.execute("INSERT INTO setting_history (at_ms, key, after, reason, outcome) VALUES (2, 'k', 'v', 'secret_set', 'applied')", []).is_err(),
+            "the old vocabulary is closed before m009"
+        );
+
+        migrate(&conn).expect("m009");
+
+        let kept: (i64, String) = conn
+            .query_row("SELECT id, key FROM setting_history WHERE id = 41", [], |r| Ok((r.get(0)?, r.get(1)?)))
+            .expect("kept");
+        assert_eq!(kept, (41, "autostart".to_string()));
+        conn.execute("INSERT INTO setting_history (at_ms, key, after, reason, outcome) VALUES (3, 'k', 'v', 'secret_cleared', 'applied_privacy_tighten')", [])
+            .expect("new vocabulary");
+        let next: i64 = conn.query_row("SELECT MAX(id) FROM setting_history", [], |r| r.get(0)).expect("max");
+        assert!(next > 41, "ids keep increasing after the rebuild");
+        assert!(conn.execute("UPDATE setting_history SET after = 'x'", []).is_err());
+        assert!(conn.execute("DELETE FROM setting_history", []).is_err());
+        assert!(conn.execute("INSERT INTO setting_history (at_ms, key, after, reason, outcome) VALUES (4, 'k', 'v', 'whatever', 'applied')", []).is_err());
     }
 
     /// Shared privacy guard (AGENTS.md section 9): no table or column may be named like data we

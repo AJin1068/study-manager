@@ -19,9 +19,9 @@ use crate::study::{ModeConfig, StudyLevel};
 
 pub const MAX_SETS: i64 = 24;
 /// Overlap is checked this far ahead for repeating plans; later dates are checked when reached.
-const OVERLAP_HORIZON_DAYS: i64 = 366;
+pub(crate) const OVERLAP_HORIZON_DAYS: i64 = 366;
 const MAX_LIST_DAYS: i64 = 400;
-const MAX_TEXT_CHARS: usize = 100;
+pub(crate) const MAX_TEXT_CHARS: usize = 100;
 const DATE_FMT: &str = "%Y-%m-%d";
 const TIME_FMT: &str = "%H:%M";
 const PLAN_KEY: &str = "plan";
@@ -445,7 +445,7 @@ impl ModeLookup {
     }
 }
 
-fn first_date(plan: &Plan) -> AppResult<NaiveDate> {
+pub(crate) fn first_date(plan: &Plan) -> AppResult<NaiveDate> {
     Ok(parse_date(&plan.start_date)?.max(parse_date(&plan.effective_from_date)?))
 }
 
@@ -655,7 +655,7 @@ pub fn plan_stats<Tz: TimeZone>(conn: &Connection, tz: &Tz, month: &str) -> AppR
 
 // ---- changes ----
 
-fn plan_json(plan: &Plan) -> Value {
+pub(crate) fn plan_json(plan: &Plan) -> Value {
     json!({
         "name": plan.name,
         "subject": plan.subject,

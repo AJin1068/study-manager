@@ -3,7 +3,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 
-export type SettingKey = 'autostart' | 'forceQuitAllowed' | 'recheckPlanOnWake' | 'relaunchOnKill' | 'graceWaitSec' | 'emergencyPassDailyLimit';
+export type SettingKey = 'autostart' | 'forceQuitAllowed' | 'recheckPlanOnWake' | 'relaunchOnKill' | 'graceWaitSec' | 'emergencyPassDailyLimit' | 'calendarIoEnabled';
 
 /** Mirrors Rust `SettingValue` (untagged): JSON boolean, integer, or string. */
 export type SettingValue = boolean | number | string;

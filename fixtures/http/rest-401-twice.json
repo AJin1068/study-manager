@@ -1,0 +1,4 @@
+[
+  { "status": 401, "body": { "code": "PGRST301", "message": "JWT expired" } },
+  { "status": 401, "body": { "code": "PGRST301", "message": "JWT expired" } }
+]

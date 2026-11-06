@@ -11,9 +11,11 @@ import { useAsync } from '../hooks/useAsync';
 import { asyncStatus, type AsyncStatus } from '../hooks/useAsyncStatus';
 import { ModeConfigEditor } from './ModeConfigEditor';
 import { BlockListPanel } from '../components/BlockListPanel';
+import { CalendarIoPanel } from '../components/CalendarIoPanel';
 import { PresetPanel } from '../components/PresetPanel';
 import { SiteRulesPanel } from '../components/SiteRulesPanel';
 import { ModeShiftToast } from '../components/ModeShiftToast';
+import { IntegrationsScreen } from './IntegrationsScreen';
 import type { ModeNotice } from './modeShiftNotice';
 
 const LOCK_REASON = '계획된 공부 진행 중이라 잠겨 있습니다. 진행이 끝난 뒤에 바꿀 수 있습니다.';
@@ -179,7 +181,11 @@ export function SettingsScreen() {
 
       <PresetPanel editable={lock.allowed} onAttempted={blockAttempted} />
 
+      <CalendarIoPanel editable={lock.allowed} onAttempted={blockAttempted} />
+
       <SiteRulesPanel editable={lock.allowed} onAttempted={blockAttempted} />
+
+      <IntegrationsScreen editable={lock.allowed} onAttempted={() => { lock.refresh(); history.reload(); }} />
 
       <section className="card" aria-labelledby="sleep-title">
         <h2 id="sleep-title">수면과 꺼진 시간</h2>

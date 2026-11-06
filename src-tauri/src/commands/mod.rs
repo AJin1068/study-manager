@@ -11,6 +11,7 @@ pub mod plan;
 pub mod points;
 pub mod power;
 pub mod release;
+pub mod remote;
 pub mod settings;
 pub mod study;
 pub mod timer;
@@ -45,6 +46,8 @@ pub struct AppState {
     pub focus_probe: Arc<dyn FocusProbe>,
     pub browser_link: Arc<crate::browser_link::LinkHub>,
     pub signals: Arc<crate::focus::signals::SignalHub>,
+    pub remote: Arc<crate::remote::runtime::RemoteRuntime>,
+    pub sync: Arc<crate::sync::app::SyncHub>,
 }
 
 /// Locks the shared connection. A panic in another holder (the timer engine is supervised and

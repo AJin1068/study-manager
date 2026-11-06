@@ -17,8 +17,9 @@ use crate::clock::now_ms;
 use crate::downtime::{self, Interval, HEARTBEAT_INTERVAL_MS};
 use crate::error::AppResult;
 use crate::platform::PowerEvent;
-use crate::timer::engine::{EngineHandle, WakeReason};
 use crate::store;
+use crate::sync::presence::PresenceHandle;
+use crate::timer::engine::{EngineHandle, WakeReason};
 
 /// Event sent to the UI after a sleep interval is recorded. The UI re-checks the plan here
 /// (display only in 1-1; querying the plan comes in 1-2).
@@ -132,13 +133,16 @@ pub fn on_tick(
     Ok(written)
 }
 
-/// Starts the worker. `db` and `session_id` are shared with the command handlers.
+/// Starts the worker. `db` and `session_id` are shared with the command handlers. `presence`
+/// receives every sleep/wake event too: the "PC is on" signal pauses while the system sleeps and
+/// sends one beat right after it wakes.
 pub fn spawn(
     app: AppHandle,
     db: Arc<Mutex<Connection>>,
     session_id: i64,
     events: Receiver<PowerEvent>,
     engine: EngineHandle,
+    presence: PresenceHandle,
 ) {
     thread::spawn(move || {
         let mut tracker = SleepTracker::default();
@@ -158,6 +162,7 @@ pub fn spawn(
 
             match received {
                 Ok(event) => {
+                    presence.power_event(event);
                     let result = with_db(&db, |conn| {
                         on_power_event(conn, &mut tracker, session_id, event, now_ms()?)
                     });
@@ -179,6 +184,9 @@ pub fn spawn(
                                 emit_resumed(&app, piece, true);
                             }
                             if slept {
+                                // The tick found a sleep whose DidWake never arrived: the PC is
+                                // awake now, so the signal resumes as if the wake had been seen.
+                                presence.power_event(PowerEvent::DidWake);
                                 engine.wake(WakeReason::Resumed);
                             }
                         }

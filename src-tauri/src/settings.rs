@@ -41,6 +41,29 @@ pub enum ValueKind {
     Int { min: i64, max: i64 },
     /// Closed set of accepted strings.
     Text { allowed: &'static [&'static str] },
+    /// Open text of a known shape, empty meaning "unset".
+    Free { max_len: usize, shape: FreeShape },
+}
+
+/// What an open-text setting must look like.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FreeShape {
+    /// `https://host` (or `http://` to a loopback host), no credentials, query, or fragment.
+    Endpoint,
+    /// One token without whitespace or control characters (keys, ids).
+    Token,
+}
+
+impl FreeShape {
+    fn accepts(self, text: &str) -> bool {
+        if text.is_empty() {
+            return true;
+        }
+        match self {
+            FreeShape::Token => !text.chars().any(|c| c.is_whitespace() || c.is_control()),
+            FreeShape::Endpoint => crate::remote::http::is_valid_endpoint(text),
+        }
+    }
 }
 
 impl ValueKind {
@@ -56,6 +79,13 @@ impl ValueKind {
             (ValueKind::Text { .. }, SettingValue::Text(v)) => {
                 Err(AppError::Invalid(format!("{v:?} is not an allowed value")))
             }
+            (ValueKind::Free { max_len, shape }, SettingValue::Text(v)) if v.len() <= max_len && shape.accepts(v) => {
+                Ok(())
+            }
+            // The rejected text may be a key, so it is never echoed into the error.
+            (ValueKind::Free { .. }, SettingValue::Text(_)) => {
+                Err(AppError::Invalid("the text is too long or has the wrong shape".into()))
+            }
             _ => Err(AppError::Invalid("setting value has the wrong type".into())),
         }
     }
@@ -68,7 +98,7 @@ impl ValueKind {
                 raw.parse::<i64>()
                     .map_err(|_| AppError::Invalid(format!("stored integer setting is malformed: {raw}")))?,
             ),
-            ValueKind::Text { .. } => SettingValue::Text(raw.to_string()),
+            ValueKind::Text { .. } | ValueKind::Free { .. } => SettingValue::Text(raw.to_string()),
         };
         self.validate(&value)?;
         Ok(value)
@@ -83,6 +113,10 @@ pub struct SettingSpec {
     pub kind: ValueKind,
     /// Default in stored form; parsed by `kind`, so a bad default fails the first read loudly.
     pub default: &'static str,
+    /// A change to exactly this stored value narrows what leaves the device, so it stays allowed
+    /// during a planned run (settings lock exception, recorded as `applied_privacy_tighten`).
+    /// Only items that cannot weaken blocking may set it.
+    pub tighten_to: Option<&'static str>,
 }
 
 /// Settings the UI may change. The API name and the stored key are the same.
@@ -96,6 +130,8 @@ pub enum SettingKey {
     RelaunchOnKill,
     GraceWaitSec,
     EmergencyPassDailyLimit,
+    /// Calendar (.ics) import and export. Off by default; read by `plan_import`.
+    CalendarIoEnabled,
 }
 
 impl SettingKey {
@@ -113,18 +149,21 @@ impl SettingKey {
                 category: "general",
                 kind: ValueKind::Bool,
                 default: "true",
+                tighten_to: None,
             },
             SettingKey::ForceQuitAllowed => SettingSpec {
                 name: "forceQuitAllowed",
                 category: "general",
                 kind: ValueKind::Bool,
                 default: "false",
+                tighten_to: None,
             },
             SettingKey::RecheckPlanOnWake => SettingSpec {
                 name: "recheckPlanOnWake",
                 category: "general",
                 kind: ValueKind::Bool,
                 default: "true",
+                tighten_to: None,
             },
             // On by default (D-17): the plan lists "relaunch when force-quit" as a decision.
             SettingKey::RelaunchOnKill => SettingSpec {
@@ -132,6 +171,7 @@ impl SettingKey {
                 category: "general",
                 kind: ValueKind::Bool,
                 default: "true",
+                tighten_to: None,
             },
             // Seconds to wait after the quit request before a forced kill is even considered.
             SettingKey::GraceWaitSec => SettingSpec {
@@ -139,6 +179,7 @@ impl SettingKey {
                 category: "enforcement",
                 kind: ValueKind::Int { min: 1, max: 60 },
                 default: "10",
+                tighten_to: None,
             },
             // Emergency passes the user may spend per local day (plan: 기본 1, 설정 1~2).
             SettingKey::EmergencyPassDailyLimit => SettingSpec {
@@ -146,6 +187,14 @@ impl SettingKey {
                 category: "release",
                 kind: ValueKind::Int { min: 1, max: 2 },
                 default: "1",
+                tighten_to: None,
+            },
+            SettingKey::CalendarIoEnabled => SettingSpec {
+                name: "calendarIoEnabled",
+                category: "plan",
+                kind: ValueKind::Bool,
+                default: "false",
+                tighten_to: None,
             },
         }
     }
@@ -163,6 +212,7 @@ pub const ENFORCEMENT_MODE: SettingSpec = SettingSpec {
     category: "enforcement",
     kind: ValueKind::Text { allowed: &["dryRun", "enforce"] },
     default: "dryRun",
+    tighten_to: None,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -170,6 +220,9 @@ pub enum Reason {
     User,
     Default,
     Reconcile,
+    /// A secret was stored. History keeps only the fact, never the value or a hash.
+    SecretSet,
+    SecretCleared,
 }
 
 impl Reason {
@@ -178,6 +231,8 @@ impl Reason {
             Reason::User => "user",
             Reason::Default => "default",
             Reason::Reconcile => "reconcile",
+            Reason::SecretSet => "secret_set",
+            Reason::SecretCleared => "secret_cleared",
         }
     }
 }
@@ -186,6 +241,8 @@ impl Reason {
 pub enum Outcome {
     Applied,
     RejectedLocked,
+    /// Allowed during a run because it only narrows what leaves the device (section 4.6).
+    AppliedPrivacyTighten,
 }
 
 impl Outcome {
@@ -193,6 +250,7 @@ impl Outcome {
         match self {
             Outcome::Applied => "applied",
             Outcome::RejectedLocked => "rejected_locked",
+            Outcome::AppliedPrivacyTighten => "applied_privacy_tighten",
         }
     }
 }
@@ -301,23 +359,27 @@ pub(crate) fn apply_setting(
     let before = store::get_setting(&tx, name)?;
     let after = value.to_stored();
 
+    let mut outcome = Outcome::Applied;
     if study::lock_held(&tx)? {
-        store::append_history(
-            &tx,
-            at_ms,
-            name,
-            before.as_deref(),
-            &after,
-            Reason::User,
-            Outcome::RejectedLocked,
-        )?;
-        tx.commit()?;
-        return Ok(UpdateOutcome::RejectedLocked { key: name.to_string() });
+        if spec.tighten_to != Some(after.as_str()) {
+            store::append_history(
+                &tx,
+                at_ms,
+                name,
+                before.as_deref(),
+                &after,
+                Reason::User,
+                Outcome::RejectedLocked,
+            )?;
+            tx.commit()?;
+            return Ok(UpdateOutcome::RejectedLocked { key: name.to_string() });
+        }
+        outcome = Outcome::AppliedPrivacyTighten;
     }
 
     side_effect()?;
     store::put_setting(&tx, name, spec.category, &after, at_ms)?;
-    store::append_history(&tx, at_ms, name, before.as_deref(), &after, Reason::User, Outcome::Applied)?;
+    store::append_history(&tx, at_ms, name, before.as_deref(), &after, Reason::User, outcome)?;
     tx.commit()?;
     Ok(UpdateOutcome::Applied { key: name.to_string() })
 }
@@ -528,6 +590,7 @@ pub(crate) mod tests {
         category: "enforcement",
         kind: ValueKind::Int { min: 1, max: 60 },
         default: "10",
+        tighten_to: None,
     };
     const MODE: SettingSpec = ENFORCEMENT_MODE;
 

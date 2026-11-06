@@ -1,0 +1,25 @@
+{
+  "preview": {
+    "items": [
+      {
+        "name": "수학",
+        "subject": "수학",
+        "startDate": "2026-03-02",
+        "startTime": "20:00",
+        "sets": 3,
+        "repeat": { "weekdays": 5, "until": "2026-12-31" },
+        "excludedDates": 1
+      }
+    ],
+    "skipped": [{ "reason": "allDay", "count": 2 }],
+    "skippedTotal": 2
+  },
+  "applyResult": {
+    "change": { "outcome": { "outcome": "applied", "key": "plan" }, "planId": 7 },
+    "batchId": "ics-1767225600000-7",
+    "imported": 3,
+    "skipped": [{ "reason": "overlap", "count": 1 }],
+    "skippedTotal": 1
+  },
+  "export": { "content": "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n", "eventCount": 0 }
+}

@@ -8,6 +8,7 @@ use super::{lock_db, AppState, DEFAULT_LIMIT};
 use crate::clock::now_ms;
 use crate::error::AppResult;
 use crate::timer::engine::WakeReason;
+use crate::plan_import::{self, IcsApplyResult, IcsExport, IcsPreview};
 use crate::plan_shift;
 use crate::plan::{
     self, CreatePlanInput, DeletePlanInput, Occurrence, PlanChange, PlanHistoryEntry, PlanStats, UpdatePlanInput,
@@ -93,4 +94,48 @@ pub fn get_plan_history(
 pub fn get_plan_stats(state: State<'_, AppState>, month: String) -> AppResult<PlanStats> {
     let conn = lock_db(&state.db)?;
     plan::plan_stats(&conn, &Local, &month)
+}
+
+// ---- calendar file import / export (off until the setting is on) ----
+
+#[tauri::command]
+pub fn get_calendar_io_enabled(state: State<'_, AppState>) -> AppResult<bool> {
+    let conn = lock_db(&state.db)?;
+    plan_import::calendar_io_enabled(&conn)
+}
+
+/// The `.ics` text for the UI to save through the user's own save dialog.
+#[tauri::command]
+pub fn export_plans_ics(state: State<'_, AppState>) -> AppResult<IcsExport> {
+    let conn = lock_db(&state.db)?;
+    plan_import::export_ics(&conn, now_ms()?)
+}
+
+/// What `apply_ics_import` would create from this file text. Changes nothing.
+#[tauri::command]
+pub fn preview_ics_import(state: State<'_, AppState>, content: String) -> AppResult<IcsPreview> {
+    let conn = lock_db(&state.db)?;
+    plan_import::preview_ics_import(&conn, &Local, &content, now_ms()?)
+}
+
+#[tauri::command]
+pub fn apply_ics_import(app: AppHandle, state: State<'_, AppState>, content: String) -> AppResult<IcsApplyResult> {
+    let result = {
+        let mut conn = lock_db(&state.db)?;
+        plan_import::apply_ics_import(&mut conn, &Local, &content, now_ms()?)?
+    };
+    if result.imported > 0 {
+        announce_plans_changed(&app);
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn undo_ics_import(app: AppHandle, state: State<'_, AppState>, batch_id: String) -> AppResult<PlanChange> {
+    let change = {
+        let mut conn = lock_db(&state.db)?;
+        plan_import::undo_ics_import(&mut conn, &batch_id, now_ms()?)?
+    };
+    notify(&app, &change);
+    Ok(change)
 }

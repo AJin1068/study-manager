@@ -1,0 +1,5 @@
+[
+  { "status": 503, "body": "upstream unavailable" },
+  { "error": "connect_failed" },
+  { "status": 200, "body": "not json" }
+]

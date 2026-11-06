@@ -1,0 +1,79 @@
+{
+  "comment": "Notification wire contract shared by the Edge Function (supabase/functions/_shared/channels.ts) and the desktop NotifyClient (src-tauri/src/remote/notify.rs). Nothing here names a subject or a plan: the text appears on a lock screen. The Telegram token below is a placeholder, not a credential.",
+  "messages": {
+    "test": "테스트 알림이에요. 잘 보이나요?",
+    "missedTemplate": "{time}인데 아직 안 앉았어! 신호가 없어요."
+  },
+  "ntfy": {
+    "defaultServer": "https://ntfy.sh",
+    "title": "Study Manager",
+    "requests": [
+      {
+        "name": "default server, test message",
+        "server": "https://ntfy.sh",
+        "topic": "abcdefghijklmnopqrstuvwx",
+        "message": "테스트 알림이에요. 잘 보이나요?",
+        "expect": {
+          "method": "POST",
+          "url": "https://ntfy.sh/abcdefghijklmnopqrstuvwx",
+          "headers": { "title": "Study Manager" },
+          "contentType": "text/plain; charset=utf-8",
+          "body": "테스트 알림이에요. 잘 보이나요?"
+        }
+      },
+      {
+        "name": "own server with a trailing slash",
+        "server": "https://ntfy.example.org/",
+        "topic": "abcdefghijklmnopqrstuvwx",
+        "message": "20:05인데 아직 안 앉았어! 신호가 없어요.",
+        "expect": {
+          "method": "POST",
+          "url": "https://ntfy.example.org/abcdefghijklmnopqrstuvwx",
+          "headers": { "title": "Study Manager" },
+          "contentType": "text/plain; charset=utf-8",
+          "body": "20:05인데 아직 안 앉았어! 신호가 없어요."
+        }
+      }
+    ]
+  },
+  "telegram": {
+    "api": "https://api.telegram.org",
+    "requests": [
+      {
+        "name": "missed plan",
+        "token": "100000:PLACEHOLDER_NOT_A_TOKEN",
+        "chatId": "424242",
+        "message": "20:05인데 아직 안 앉았어! 신호가 없어요.",
+        "expect": {
+          "method": "POST",
+          "url": "https://api.telegram.org/bot100000:PLACEHOLDER_NOT_A_TOKEN/sendMessage",
+          "headers": {},
+          "contentType": "application/json",
+          "body": { "chat_id": "424242", "text": "20:05인데 아직 안 앉았어! 신호가 없어요." }
+        }
+      }
+    ]
+  },
+  "serverTest": {
+    "comment": "Telegram has no token on the desktop, so the test button asks the Edge Function to send the test message to the signed-in user's own channel.",
+    "route": "/functions/v1/missed-plan",
+    "requestBody": { "action": "test" },
+    "responseBody": { "ok": true }
+  },
+  "unsafeNtfyServers": [
+    "http://ntfy.sh",
+    "https://localhost",
+    "https://127.0.0.1",
+    "https://10.0.0.5",
+    "https://192.168.0.7",
+    "https://169.254.169.254",
+    "https://[::1]",
+    "https://user:pw@ntfy.sh",
+    "https://ntfy.sh:8443",
+    "https://intranet",
+    "https://ntfy.sh/with/path?x=1",
+    "ftp://ntfy.sh",
+    "not a url"
+  ],
+  "safeNtfyServers": ["https://ntfy.sh", "https://ntfy.sh/", "https://ntfy.example.org"]
+}

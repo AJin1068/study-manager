@@ -1,6 +1,8 @@
 //! Repository layer: all SQL lives here. Domain modules call these functions instead of
 //! writing SQL, so the storage backend can be swapped later without touching callers.
 
+pub mod remote;
+
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::downtime::{DowntimeKind, DowntimeRecord, Interval};

@@ -195,6 +195,106 @@ export function isPlanStats(value: unknown): value is PlanStats {
   );
 }
 
+export type IcsSkipReason = 'allDay' | 'timezone' | 'unsupportedRule' | 'invalid' | 'past' | 'overlap';
+
+export interface IcsSkipCount {
+  reason: IcsSkipReason;
+  count: number;
+}
+
+export interface IcsPreviewItem {
+  name: string;
+  subject: string;
+  startDate: string;
+  startTime: string;
+  sets: number;
+  repeat: Repeat | null;
+  /** Occurrences the file removed with EXDATE. */
+  excludedDates: number;
+}
+
+export interface IcsPreview {
+  items: IcsPreviewItem[];
+  skipped: IcsSkipCount[];
+  skippedTotal: number;
+}
+
+export interface IcsApplyResult {
+  change: PlanChange;
+  /** Undo handle; null when nothing was imported. */
+  batchId: string | null;
+  imported: number;
+  skipped: IcsSkipCount[];
+  skippedTotal: number;
+}
+
+export interface IcsExport {
+  content: string;
+  eventCount: number;
+}
+
+const ICS_SKIP_REASONS: readonly string[] = ['allDay', 'timezone', 'unsupportedRule', 'invalid', 'past', 'overlap'];
+
+function isIcsSkipCounts(value: unknown): value is IcsSkipCount[] {
+  return (
+    Array.isArray(value) &&
+    value.every((entry: unknown) => {
+      if (typeof entry !== 'object' || entry === null) return false;
+      const e = entry as Record<string, unknown>;
+      return typeof e.reason === 'string' && ICS_SKIP_REASONS.includes(e.reason) && typeof e.count === 'number';
+    })
+  );
+}
+
+function isRepeat(value: unknown): value is Repeat {
+  if (typeof value !== 'object' || value === null) return false;
+  const r = value as Record<string, unknown>;
+  return typeof r.weekdays === 'number' && nullableString(r.until);
+}
+
+function isIcsPreviewItem(value: unknown): value is IcsPreviewItem {
+  if (typeof value !== 'object' || value === null) return false;
+  const r = value as Record<string, unknown>;
+  return (
+    typeof r.name === 'string' &&
+    typeof r.subject === 'string' &&
+    typeof r.startDate === 'string' &&
+    typeof r.startTime === 'string' &&
+    typeof r.sets === 'number' &&
+    typeof r.excludedDates === 'number' &&
+    (r.repeat === null || isRepeat(r.repeat))
+  );
+}
+
+export function isIcsPreview(value: unknown): value is IcsPreview {
+  if (typeof value !== 'object' || value === null) return false;
+  const r = value as Record<string, unknown>;
+  return (
+    Array.isArray(r.items) &&
+    r.items.every(isIcsPreviewItem) &&
+    isIcsSkipCounts(r.skipped) &&
+    typeof r.skippedTotal === 'number'
+  );
+}
+
+export function isIcsApplyResult(value: unknown): value is IcsApplyResult {
+  if (typeof value !== 'object' || value === null) return false;
+  const r = value as Record<string, unknown>;
+  return (
+    isPlanChange(r.change) &&
+    nullableString(r.batchId) &&
+    typeof r.imported === 'number' &&
+    isIcsSkipCounts(r.skipped) &&
+    typeof r.skippedTotal === 'number'
+  );
+}
+
+export function isIcsExport(value: unknown): value is IcsExport {
+  if (typeof value !== 'object' || value === null) return false;
+  const r = value as Record<string, unknown>;
+  return typeof r.content === 'string' && typeof r.eventCount === 'number';
+}
+
 export const planCommands = {
   createPlan: (input: CreatePlanInput) => invoke<PlanChange>('create_plan', { input }),
   updatePlan: (input: UpdatePlanInput) => invoke<PlanChange>('update_plan', { input }),
@@ -209,6 +309,15 @@ export const planCommands = {
     invoke<PlanHistoryEntry[]>('get_plan_history', { planId: planId ?? null, limit: limit ?? null }),
   /** `month` is a local `YYYY-MM`. */
   getPlanStats: (month: string) => invoke<PlanStats>('get_plan_stats', { month }),
+  /** Calendar import/export is off until the `calendarIoEnabled` setting is on. */
+  getCalendarIoEnabled: () => invoke<boolean>('get_calendar_io_enabled'),
+  /** The `.ics` text of every live plan; the UI saves it through the user's own save action. */
+  exportPlansIcs: () => invoke<IcsExport>('export_plans_ics'),
+  /** What `applyIcsImport` would create from this file text; changes nothing. */
+  previewIcsImport: (content: string) => invoke<IcsPreview>('preview_ics_import', { content }),
+  applyIcsImport: (content: string) => invoke<IcsApplyResult>('apply_ics_import', { content }),
+  /** Reverts one import batch (`IcsApplyResult.batchId`). */
+  undoIcsImport: (batchId: string) => invoke<PlanChange>('undo_ics_import', { batchId }),
 };
 
 /** Fired after an applied plan change; refetch occurrences and history. */

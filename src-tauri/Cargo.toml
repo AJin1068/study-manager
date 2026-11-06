@@ -26,6 +26,9 @@ thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 url = "2"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+uuid = { version = "1", features = ["v4"] }
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -38,3 +41,16 @@ objc2-foundation = { version = "0.3", features = ["NSNotification", "NSProcessIn
 
 [dev-dependencies]
 chrono-tz = "0.10"
+
+# The native backends must be named: without one, keyring silently falls back to a mock store.
+# remote::secrets runs a write/read/delete self-check at startup for exactly that reason.
+[target.'cfg(target_os = "macos")'.dependencies.keyring]
+version = "3"
+features = ["apple-native"]
+
+[target.'cfg(target_os = "windows")'.dependencies.keyring]
+version = "3"
+features = ["windows-native"]
+
+[target.'cfg(not(any(target_os = "macos", target_os = "windows")))'.dependencies.keyring]
+version = "3"

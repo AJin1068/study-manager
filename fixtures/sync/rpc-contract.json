@@ -1,0 +1,23 @@
+{
+  "comment": "Server RPCs shared by the SQL migration, the Rust FakeBackend and the real adapter. Failures that must be counted or reported are returned as codes, never RAISEd, so a rollback cannot erase the record.",
+  "rpcs": [
+    {
+      "name": "replace_plan_snapshot",
+      "params": ["p_device_id", "p_snapshot_hash", "p_generated_at_ms", "p_horizon_days", "p_occurrences"],
+      "returns": ["ok", "unchanged", "device_not_owned", "invalid_input"],
+      "roles": ["authenticated"]
+    },
+    {
+      "name": "heartbeat",
+      "params": ["p_device_id", "p_app_version", "p_studying"],
+      "returns": ["ok", "device_not_owned"],
+      "roles": ["authenticated"]
+    },
+    {
+      "name": "claim_alert",
+      "params": ["p_user_id", "p_occurrence_key", "p_kind"],
+      "returns": ["claimed", "duplicate"],
+      "roles": ["service_role"]
+    }
+  ]
+}

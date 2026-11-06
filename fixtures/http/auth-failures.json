@@ -1,0 +1,8 @@
+[
+  { "status": 400, "body": { "error_code": "otp_expired", "msg": "Token has expired or is invalid" } },
+  { "status": 400, "body": { "error_code": "refresh_token_not_found", "msg": "Invalid Refresh Token" } },
+  { "status": 429, "headers": { "retry-after": "42" }, "body": { "error_code": "over_email_send_rate_limit" } },
+  { "status": 503, "body": "upstream unavailable" },
+  { "error": "timeout" },
+  { "status": 200, "body": "not json" }
+]

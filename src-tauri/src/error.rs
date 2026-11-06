@@ -11,6 +11,13 @@ pub enum AppError {
     Invalid(String),
     #[error("internal state error: {0}")]
     Internal(String),
+    /// The port has no usable configuration (or is in an unimplemented mode). The UI shows an
+    /// input card for it; local features keep working.
+    #[error("not configured: {port}")]
+    NotConfigured { port: &'static str },
+    /// A server-link failure with a stable code; never carries URLs, paths, bodies, or tokens.
+    #[error("remote error: {0}")]
+    Remote(String),
 }
 
 impl serde::Serialize for AppError {

@@ -1,0 +1,12 @@
+{
+  "comment": "Table x operation -> who may do it. 'owner' = the row's user_id equals auth.uid(); 'none' = no client policy exists (writes go through RPCs or the service role). Anonymous callers are denied everywhere. Read by the Rust FakeBackend and by the static SQL test; it documents the policy set but does not prove it (V2-8).",
+  "tables": {
+    "devices":             { "select": "owner", "insert": "owner", "update": "owner", "delete": "owner" },
+    "plan_snapshots":      { "select": "owner", "insert": "none",  "update": "none",  "delete": "none"  },
+    "plan_occurrences":    { "select": "owner", "insert": "none",  "update": "none",  "delete": "none"  },
+    "plan_history_mirror": { "select": "owner", "insert": "owner", "update": "none",  "delete": "none"  },
+    "presence":            { "select": "owner", "insert": "none",  "update": "none",  "delete": "none"  },
+    "notify_channels":     { "select": "owner", "insert": "owner", "update": "owner", "delete": "owner" },
+    "alert_log":           { "select": "owner", "insert": "none",  "update": "none",  "delete": "none"  }
+  }
+}

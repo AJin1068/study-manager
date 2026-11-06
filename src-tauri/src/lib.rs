@@ -11,15 +11,19 @@ mod enforce;
 mod error;
 mod focus;
 mod plan;
+mod plan_ics;
+mod plan_import;
 mod plan_shift;
 mod platform;
 mod points;
 mod power;
 mod presets;
+pub mod remote;
 mod settings;
 mod site_rules;
 mod store;
 mod study;
+mod sync;
 #[cfg(test)]
 mod testutil;
 mod timer;
@@ -53,6 +57,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // The highest heartbeat ever stored is the floor for the engine's clock: a clock set back
     // while the app was closed must not rewind a run.
     let high_water = Arc::new(timer::HighWater::new(store::max_heartbeat(&conn)?));
+    remote::config::ensure_device_id(&conn, now)?;
 
     let (sender, events) = mpsc::channel();
     let power = match platform::power_event_source().start(sender) {
@@ -68,6 +73,18 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let process = platform::process_control();
     let focus_probe = platform::focus_probe();
     let signals = Arc::new(focus::signals::SignalHub::new(Box::<focus::signals::SystemRandom>::default()));
+    // Keychain self-check runs once here; an unusable keychain degrades to session-only secrets
+    // and is shown in the integrations screen.
+    let secrets = remote::secrets::select_secret_store(Arc::new(remote::secrets::KeyringSecretStore));
+    let remote = Arc::new(remote::runtime::RemoteRuntime::new(
+        secrets,
+        Arc::new(remote::SystemClock),
+        Arc::new(remote::audit::DbSink::new(Arc::clone(&db))),
+        remote::runtime::ureq_factory(),
+    ));
+    // Mirror and presence workers: idle (nothing sent) until a server is configured and the user
+    // is signed in. Sleep/wake events reach the presence worker through power::spawn below.
+    let sync = sync::app::start(Arc::clone(&db), Arc::clone(&remote), Arc::new(remote::SystemClock));
     let (engine, wakes) = timer::engine::channel();
     let health = Arc::new(timer::engine::EngineHealth::default());
     app.manage(AppState {
@@ -83,6 +100,8 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         focus_probe: Arc::clone(&focus_probe),
         browser_link: Arc::clone(&browser_link),
         signals: Arc::clone(&signals),
+        remote,
+        sync: Arc::clone(&sync),
     });
     tray::install(&handle)?;
     install_quit_gate(&handle);
@@ -102,7 +121,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     signals.set_status(focus::signals::install_shortcut(&handle, Arc::clone(&db), Arc::clone(&high_water)))?;
     focus::signals::spawn(handle.clone(), Arc::clone(&db), Arc::clone(&high_water), signals, Arc::clone(&notifier));
     enforce::spawn(handle.clone(), Arc::clone(&db), high_water, process, notifier);
-    power::spawn(handle, db, session_id, events, engine);
+    power::spawn(handle, db, session_id, events, engine, sync.presence.clone());
     Ok(())
 }
 
@@ -210,6 +229,11 @@ pub fn run() {
             commands::plan::list_occurrences,
             commands::plan::get_plan_history,
             commands::plan::get_plan_stats,
+            commands::plan::get_calendar_io_enabled,
+            commands::plan::export_plans_ics,
+            commands::plan::preview_ics_import,
+            commands::plan::apply_ics_import,
+            commands::plan::undo_ics_import,
             commands::timer::get_timer_state,
             commands::release::begin_release,
             commands::release::submit_release,
@@ -246,6 +270,22 @@ pub fn run() {
             commands::dashboard::get_dashboard_today,
             commands::dashboard::get_dashboard_week,
             commands::dashboard::get_weakness,
+            commands::remote::get_integration_states,
+            commands::remote::set_integration_mode,
+            commands::remote::get_remote_settings,
+            commands::remote::update_remote_setting,
+            commands::remote::save_secret,
+            commands::remote::clear_secret,
+            commands::remote::test_connection,
+            commands::remote::list_remote_events,
+            commands::remote::get_egress_summary,
+            commands::remote::auth_request_otp,
+            commands::remote::auth_verify_otp,
+            commands::remote::auth_sign_out,
+            commands::remote::get_sync_status,
+            commands::remote::generate_ntfy_topic,
+            commands::remote::get_ntfy_subscription,
+            commands::remote::test_notification,
         ])
         .build(tauri::generate_context!())
         .unwrap_or_else(|err| {
