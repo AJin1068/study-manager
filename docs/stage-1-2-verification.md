@@ -22,20 +22,36 @@
 
 ## CI
 
-- `.github/workflows/ci.yml`(macos-latest, windows-latest 매트릭스)는 정의만 있고 원격 실행은 **검증 안 됨**. 사람: 원격에 푸시한 뒤 두 잡 통과를 확인.
+- `.github/workflows/ci.yml`(macos-latest, windows-latest 매트릭스)는 정의만 있고 원격 실행은 **검증 안 됨**. [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 사람: 원격에 푸시한 뒤 두 잡 통과를 확인.
 
 ## 검증 안 됨 (명시적 잔여 항목)
 
 | 항목 | 이유 | 사람이 확인하는 방법 |
 |---|---|---|
-| Windows 빌드·테스트 | `cargo check --target x86_64-pc-windows-msvc`가 번들 SQLite C 빌드에서 `stdlib.h`를 못 찾아 실패(호스트 헤더 부재, 코드 결함 아님) | Windows PC에서 `cargo check/clippy/test`, 또는 원격 푸시 후 CI |
-| 원격 CI 실행 | 원격 저장소 없음 | 푸시 후 두 잡 확인 |
-| 알림 권한 팝업·실제 표시 (macOS 첫 요청, Windows 앱 ID) | GUI 권한 없음 | 앱 실행 후 휴식 종료 1분 전 알림 확인 |
-| 메뉴바 제목 가시성·폭, Windows 툴팁 갱신, 다크모드 가독성 | GUI 확인 필요 | 앱 실행 후 육안 확인 |
-| 캘린더·히스토리 화면, 모드 변경 토스트와 되돌리기 버튼 클릭 | 클릭 단위 UI 테스트 라이브러리 없음, GUI 권한 없음 | 계획 생성→모드 변경→되돌리기 수동 수행 |
-| 실제 절전·깨어남 후 계획 재확인 (`pmset sleepnow`) | 실기기 절전 필요. 단위 테스트는 가짜 시계·이벤트 | 계획 진행 중 절전 후 깨워 타이머 상태 확인 |
-| 로그인 시점 실제 자동 시작 후 계획 자동 개시 | 로그인·재부팅 필요 | 재로그인 후 계획 시각에 잠금 시작 확인 |
-| 비상 해제(abort_run) 화면 UX | GUI 확인 필요 | 잠금 중 해제 문장 입력 수행 |
+| Windows 빌드·테스트 | [판정 2026-11-07: 검증됨(Windows)] `cargo check --target x86_64-pc-windows-msvc`가 번들 SQLite C 빌드에서 `stdlib.h`를 못 찾아 실패(호스트 헤더 부재, 코드 결함 아님) | Windows PC에서 `cargo check/clippy/test`, 또는 원격 푸시 후 CI |
+| 원격 CI 실행 | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 원격 저장소 없음 | 푸시 후 두 잡 확인 |
+| 알림 권한 팝업·실제 표시 (macOS 첫 요청, Windows 앱 ID) | [판정 2026-11-07: 맥에서 확인 필요] GUI 권한 없음 | 앱 실행 후 휴식 종료 1분 전 알림 확인 |
+| 메뉴바 제목 가시성·폭, Windows 툴팁 갱신, 다크모드 가독성 | [판정 2026-11-07: 맥에서 확인 필요] GUI 확인 필요 | 앱 실행 후 육안 확인 |
+| 캘린더·히스토리 화면, 모드 변경 토스트와 되돌리기 버튼 클릭 | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 클릭 단위 UI 테스트 라이브러리 없음, GUI 권한 없음 | 계획 생성→모드 변경→되돌리기 수동 수행 |
+| 실제 절전·깨어남 후 계획 재확인 (`pmset sleepnow`) | [판정 2026-11-07: 맥에서 확인 필요] 실기기 절전 필요. 단위 테스트는 가짜 시계·이벤트 | 계획 진행 중 절전 후 깨워 타이머 상태 확인 |
+| 로그인 시점 실제 자동 시작 후 계획 자동 개시 | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 로그인·재부팅 필요 | 재로그인 후 계획 시각에 잠금 시작 확인 |
+| 비상 해제(abort_run) 화면 UX | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] GUI 확인 필요 | 잠금 중 해제 문장 입력 수행 |
+
+### Windows PC 검증 결과 (2026-11-07)
+
+환경: Windows 11 x64, rustc 1.99.1 (x86_64-pc-windows-msvc), node 26.13, pnpm 10.34.9.
+
+| ID | 판정 | 명령 | 결과(종료코드·개수) | 비고 |
+|---|---|---|---|---|
+| 1-2-CI 원격 CI 실행(본문) | 사람 확인(MANUAL-CHECKLIST) | 해당 없음 | 해당 없음 | 원격 GitHub Actions는 이 PC에서 실행할 수 없다 |
+| 1-2-V1 Windows 빌드·테스트 | 검증됨(Windows) | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (src-tauri); `pnpm tsc --noEmit`, `pnpm lint`, `pnpm test` | 모두 종료 0. `cargo test`: lib 1047 + llm_wire 4 + remote_wire 7 + doc 3 통과, 실패 0(`privacy_schema_guard` 포함); vitest 72 파일 511개 통과 | 이전 결과(SQLite 헤더 부재)는 네이티브 Windows로 대체됨. 수정 커밋 74cab52(.gitattributes, vitest 정적 테스트), cd88e14 |
+| 1-2-V2 원격 CI 실행(표) | 사람 확인(MANUAL-CHECKLIST) | 해당 없음 | 해당 없음 | 원격 저장소 푸시 후 두 잡 확인 |
+| 1-2-V3 알림 권한·표시 | 맥에서 확인 필요 | 해당 없음 | 해당 없음 | macOS 첫 요청 팝업. Windows 앱 ID 알림은 GUI 육안 확인 필요 |
+| 1-2-V4 메뉴바 제목·툴팁·다크모드 | 맥에서 확인 필요 | 해당 없음 | 해당 없음 | 메뉴바는 macOS 전용. Windows 툴팁은 GUI 확인 |
+| 1-2-V5 캘린더·히스토리·토스트 클릭 | 사람 확인(MANUAL-CHECKLIST) | 해당 없음 | 해당 없음 | GUI 클릭 필요 |
+| 1-2-V6 실제 절전·깨어남 | 맥에서 확인 필요 | 해당 없음 | 해당 없음 | `pmset sleepnow` 실기기 |
+| 1-2-V7 로그인 시점 자동 시작 | 사람 확인(MANUAL-CHECKLIST) | 해당 없음 | 해당 없음 | 로그인·재부팅 필요 |
+| 1-2-V8 비상 해제 화면 UX | 사람 확인(MANUAL-CHECKLIST) | 해당 없음 | 해당 없음 | GUI 육안 확인 |
 
 ## 알려진 위험 / 수용된 잔여 위험
 
