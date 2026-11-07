@@ -13,7 +13,7 @@
   | 5단계 폰 앱 | 6c78004, 029a32c |
 - 외부 계정이 필요한 부분(Supabase, 텔레그램/ntfy, Anthropic API 키, Android SDK)은 인터페이스 + mock으로 구현되어 있다. 설정에 키를 넣으면 실제로 동작하는 구조.
 - 아이폰 Screen Time은 인터페이스와 '미지원' 결과까지만.
-- **아직 안 한 것: 사람 검증.** 각 단계의 `docs/stage-*-verification.md`에 "검증 안 됨" 항목과 한 줄 확인 절차가 있다. 1단계 전체는 `docs/stage-1-5-verification.md`의 "1단계 검증 안 됨 총괄표"(34개).
+- **아직 안 한 것: 사람 검증.** 각 단계의 `docs/stage-*-verification.md`에 "검증 안 됨" 항목과 한 줄 확인 절차가 있다. 1단계 전체는 `docs/stage-1-5-verification.md`의 "1단계 검증 안 됨 총괄표"(47개). 사람·macOS 확인 항목은 `docs/MANUAL-CHECKLIST.md`에 모았고, Windows PC 검증 결과(2026-11-07)는 각 단계 문서(`docs/stage-*-verification.md`)의 "Windows PC 검증 결과" 절에 있다.
 
 ## 새 PC 준비
 1. `git clone https://github.com/AJin1068/study-manager.git`
