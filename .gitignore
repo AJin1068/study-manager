@@ -8,3 +8,7 @@ phone/src-tauri/gen/
 *.log
 # gjc runtime state (session logs, ultragoal ledger). Runtime-owned, never source.
 .gjc/
+
+# Android/Gradle outputs and tool lock leftovers
+phone/plugins/blocker/android/build/
+*.lock.removing.owner

@@ -22,7 +22,11 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
-    sourceSets["test"].resources.srcDir("../../../../fixtures/phone")
+    sourceSets {
+        getByName("test") {
+            resources.srcDirs("../../../../fixtures/phone")
+        }
+    }
 }
 
 dependencies {

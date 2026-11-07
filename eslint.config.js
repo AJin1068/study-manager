@@ -4,7 +4,7 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist', 'extension/dist', 'web/dist', 'node_modules', 'src-tauri'] },
+  { ignores: ['dist', 'extension/dist', 'web/dist', 'node_modules', 'src-tauri', 'phone/src-tauri', 'phone/plugins/blocker/android/build'] },
   {
     files: ['**/*.{ts,tsx}'],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],

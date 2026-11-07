@@ -24,9 +24,31 @@ jobs:
 
       - uses: android-actions/setup-android@v3
 
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      # gen/android is generated, not committed: init it, then connect the Kotlin blocker plugin.
+      - name: Generate the Android project and wire the blocker plugin
+        working-directory: phone/src-tauri
+        run: |
+          pnpm --dir ../.. exec tauri android init --ci
+          node ../scripts/wire-blocker.mjs
+
       - name: Build release APK
-        working-directory: phone
-        run: ./gradlew --no-daemon assembleRelease
+        working-directory: phone/src-tauri
+        run: pnpm --dir ../.. exec tauri android build --apk
 
       - name: Sign APK
         env:
@@ -37,7 +59,7 @@ jobs:
           printf '%s' "$ANDROID_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/release.jks"
           "$ANDROID_HOME"/build-tools/*/apksigner sign \
             --ks "$RUNNER_TEMP/release.jks" --ks-pass env:ANDROID_KEYSTORE_PASSWORD \
-            --out phone/study-manager-phone.apk phone/app/build/outputs/apk/release/app-release-unsigned.apk
+            --out phone/study-manager-phone.apk phone/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
           rm -f "$RUNNER_TEMP/release.jks"
 
       - uses: actions/upload-artifact@v4
