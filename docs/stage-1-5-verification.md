@@ -73,7 +73,7 @@
 
 | # | 단위 | 항목 | 이유 | 사람이 확인하는 한 줄 절차 |
 |---|---|---|---|---|
-| 1 | 1-1 | Windows 빌드·테스트(`cargo check/clippy/test`, `tauri build`) | [판정 2026-11-07: 검증됨(Windows)] 로컬 Windows 빌드 불가(번들 SQLite C 헤더 없음), 장비 없음 | Windows PC에서 `cargo check/clippy/test`와 `pnpm tauri build`, 또는 원격 푸시 후 CI 확인 |
+| 1 | 1-1 | Windows 빌드·테스트(`cargo check/clippy/test`, `tauri build`) | [판정 2026-11-07: 검증됨(Windows) — 아래 결과 표로 해소; 이전 기록:] 로컬 Windows 빌드 불가(번들 SQLite C 헤더 없음), 장비 없음 | Windows PC에서 `cargo check/clippy/test`와 `pnpm tauri build`, 또는 원격 푸시 후 CI 확인 |
 | 2 | 1-1 | Windows 절전·깨어남 감지 | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] Windows 전원 이벤트 `Unsupported` | Windows PC에서 절전 후 깨워 `downtime_records`에 `sleep` 행이 생기는지 확인 |
 | 3 | 1-1 | 데스크톱 GUI 실행, 트레이·메뉴바 | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 에이전트에게 손쉬운 사용 권한 없음 | 앱을 실행해 트레이(메뉴바) 아이콘과 메뉴 항목을 눈으로 확인 |
 | 4 | 1-1 | 실제 절전·깨어남 이벤트(`pmset sleepnow`) | [판정 2026-11-07: 맥에서 확인 필요] 실기기 절전 필요 | `pmset sleepnow` 후 깨워 `downtime_records`의 `sleep` 행과 `resumed` 표시 확인 |

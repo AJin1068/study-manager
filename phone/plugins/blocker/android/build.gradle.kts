@@ -1,6 +1,6 @@
-// Library module of the blocker plugin. Source only: never built in this repository's environment
-// (no Android SDK) - see docs/stage-5-verification.md V5-4. The Tauri Android project of the phone
-// app includes this module and provides `:tauri-android`.
+// Library module of the blocker plugin. Compiled and unit-tested on Windows (docs/stage-5-verification.md
+// V5-4) via `phone/scripts/wire-blocker.mjs`, which includes it in the generated Tauri Android project;
+// that project provides `:tauri-android`. APK packaging is still unverified (V5-1).
 plugins {
     id("com.android.library")
     id("org.jetbrains.kotlin.android")

@@ -28,7 +28,7 @@
 
 | 항목 | 이유 | 사람이 확인하는 방법 |
 |---|---|---|
-| Windows 빌드·테스트 | [판정 2026-11-07: 검증됨(Windows)] `cargo check --target x86_64-pc-windows-msvc`가 번들 SQLite C 빌드에서 `stdlib.h`를 못 찾아 실패(호스트 헤더 부재, 코드 결함 아님) | Windows PC에서 `cargo check/clippy/test`, 또는 원격 푸시 후 CI |
+| Windows 빌드·테스트 | [판정 2026-11-07: 검증됨(Windows) — 아래 「Windows PC 검증 결과」 표의 네이티브 빌드·시험 결과로 해소; 이전 기록:] `cargo check --target x86_64-pc-windows-msvc`가 번들 SQLite C 빌드에서 `stdlib.h`를 못 찾아 실패(호스트 헤더 부재, 코드 결함 아님) | Windows PC에서 `cargo check/clippy/test`, 또는 원격 푸시 후 CI |
 | 원격 CI 실행 | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 원격 저장소 없음 | 푸시 후 두 잡 확인 |
 | 알림 권한 팝업·실제 표시 (macOS 첫 요청, Windows 앱 ID) | [판정 2026-11-07: 맥에서 확인 필요] GUI 권한 없음 | 앱 실행 후 휴식 종료 1분 전 알림 확인 |
 | 메뉴바 제목 가시성·폭, Windows 툴팁 갱신, 다크모드 가독성 | [판정 2026-11-07: 맥에서 확인 필요] GUI 확인 필요 | 앱 실행 후 육안 확인 |

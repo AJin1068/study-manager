@@ -32,7 +32,7 @@
 
 | 항목 | 이유 | 관련 AC |
 |---|---|---|
-| Windows 빌드 (`cargo check`, `clippy`, `test`, `tauri build`) | [판정 2026-11-07: 검증됨(Windows)] 로컬 `cargo check --target x86_64-pc-windows-msvc`는 번들된 SQLite C 빌드에서 `stdlib.h`를 찾지 못해 실패한다(호스트에 Windows C 헤더 없음, 코드 결함이 아님). CI 매트릭스(`windows-latest`)에서만 검증 가능. | AC10 |
+| Windows 빌드 (`cargo check`, `clippy`, `test`, `tauri build`) | [판정 2026-11-07: 검증됨(Windows) — 아래 「Windows PC 검증 결과」 표의 네이티브 빌드·시험 결과로 해소; 이전 기록:] 로컬 `cargo check --target x86_64-pc-windows-msvc`는 번들된 SQLite C 빌드에서 `stdlib.h`를 찾지 못해 실패한다(호스트에 Windows C 헤더 없음, 코드 결함이 아님). CI 매트릭스(`windows-latest`)에서만 검증 가능. | AC10 |
 | Windows 절전·깨어남 감지 | [판정 2026-11-07: 미구현] Windows 전원 이벤트는 1단계-1에서 `Unsupported`. 실기기 검증은 S7a에서. | AC5 |
 | 데스크톱 GUI 실행과 트레이·메뉴바 확인 | [판정 2026-11-07: 맥에서 확인 필요] 에이전트에게 macOS 손쉬운 사용(Accessibility) 권한이 없다 (`osascript` -1719). 사용자가 직접 확인해야 한다. | AC1 |
 | 실제 절전·깨어남 이벤트 (`pmset sleepnow`) | [판정 2026-11-07: 맥에서 확인 필요] 실기기 절전이 필요. 단위 테스트는 가짜 이벤트만 다룬다. | AC5 |

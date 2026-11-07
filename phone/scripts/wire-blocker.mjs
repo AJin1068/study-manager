@@ -28,7 +28,15 @@ if (!s.includes("include ':blocker'")) {
 
 let a = readFileSync(appGradle, 'utf8');
 if (!a.includes('project(":blocker")')) {
-  a = a.replace('dependencies {\n', `dependencies {\n${depLine}`);
+  // Tolerates CRLF from the generator; an unknown template must fail loudly, never ship without the plugin.
+  a = a.replace(/dependencies \{\r?\n/, (m) => m + depLine);
   writeFileSync(appGradle, a);
+}
+const wired =
+  readFileSync(settings, 'utf8').includes("include ':blocker'") &&
+  readFileSync(appGradle, 'utf8').includes('project(":blocker")');
+if (!wired) {
+  console.error('could not wire the blocker plugin: unexpected gen/android template');
+  process.exit(1);
 }
 console.log('blocker plugin wired into', gen);
