@@ -1,6 +1,6 @@
 # 5단계 검증 기록
 
-5단계(폰 앱) 전체(S5.0~S5.9)의 검증 문서다. 에이전트 환경에는 Android SDK·NDK·기기, Docker·Supabase CLI·실제 프로젝트, 폰 카메라, GUI, Windows, GitHub 원격이 없다. 그래서 Kotlin은 한 번도 컴파일·실행되지 않았고, 서버 SQL·pgTAP도 실행되지 않았으며, 폰 쪽은 호스트에서 도는 Rust·TS 로직(임대 상태기계, 브리지 계약, 모의 차단기)만 시험되었다. 5단계 완료 기준(공부 시간에 폰이 PC와 함께 잠김)은 V5-10을 사람이 확인하기 전까지 충족된 것으로 표기하지 않는다. 구조 결정은 `docs/decision-phone-architecture.md`.
+5단계(폰 앱) 전체(S5.0~S5.9)의 검증 문서다. (2026-11-07 갱신: 아래 첫 문단은 Windows 검증 이전의 상태다. 이후 Windows PC에서 Kotlin 컴파일·단위 시험, 안드로이드 타깃 Rust 컴파일, 스텁 PG의 SQL 시험을 실행했다 — 「Windows PC 검증 결과」 참고.) 에이전트 환경에는 Android SDK·NDK·기기, Docker·Supabase CLI·실제 프로젝트, 폰 카메라, GUI, Windows, GitHub 원격이 없다. 그래서 Kotlin은 한 번도 컴파일·실행되지 않았고, 서버 SQL·pgTAP도 실행되지 않았으며, 폰 쪽은 호스트에서 도는 Rust·TS 로직(임대 상태기계, 브리지 계약, 모의 차단기)만 시험되었다. 5단계 완료 기준(공부 시간에 폰이 PC와 함께 잠김)은 V5-10을 사람이 확인하기 전까지 충족된 것으로 표기하지 않는다. 구조 결정은 `docs/decision-phone-architecture.md`.
 
 ## 스토리 상태
 
