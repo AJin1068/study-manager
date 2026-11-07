@@ -1,8 +1,8 @@
 //! Local IPC between the app and the native-messaging host (a separate process Chrome starts),
-//! plus the per-install token and the host manifest. Unix domain sockets on macOS; Windows named
-//! pipes are not implemented yet and report `Unsupported` (verified on a real device in a later
-//! stage). Nothing here touches a browser profile or the user's home on its own: the manifest
-//! functions take the target directory from the caller.
+//! plus the per-install token and the host manifest. Unix domain sockets on macOS, a per-user
+//! named pipe on Windows (`windows_ipc.rs`). Nothing here touches a browser profile or the
+//! user's home on its own: the registration functions take their target from the caller, so
+//! tests never write into a real browser profile or the real registry key.
 
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -13,8 +13,8 @@ use super::PlatformError;
 /// File names inside the app data directory.
 #[cfg(unix)]
 const SOCKET_FILE: &str = "browser-link.sock";
-const TOKEN_FILE: &str = "browser-link.token";
-const TOKEN_BYTES: usize = 32;
+pub(super) const TOKEN_FILE: &str = "browser-link.token";
+pub(super) const TOKEN_BYTES: usize = 32;
 /// macOS `sun_path` holds 104 bytes including the terminator.
 #[cfg(unix)]
 const MAX_SOCKET_PATH: usize = 100;
@@ -39,7 +39,11 @@ pub fn bind_listener(dir: &Path) -> Result<Box<dyn LinkListener>, PlatformError>
     {
         unix::bind(dir).map_err(|e| PlatformError::Ipc(e.to_string()))
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        super::windows_ipc::bind(dir).map_err(|e| PlatformError::Ipc(e.to_string()))
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = dir;
         Err(PlatformError::Unsupported("browser link IPC"))
@@ -52,7 +56,11 @@ pub fn connect(dir: &Path) -> io::Result<Box<dyn LinkStream>> {
     {
         unix::connect(dir)
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        super::windows_ipc::connect(dir)
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = dir;
         Err(io::Error::new(
@@ -68,7 +76,11 @@ pub fn ensure_token(dir: &Path) -> Result<String, PlatformError> {
     {
         unix::ensure_token(dir).map_err(|e| PlatformError::Ipc(e.to_string()))
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        super::windows_ipc::ensure_token(dir).map_err(|e| PlatformError::Ipc(e.to_string()))
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = dir;
         Err(PlatformError::Unsupported("browser link token"))
@@ -89,7 +101,7 @@ pub fn read_token(dir: &Path) -> io::Result<String> {
     }
 }
 
-fn is_valid_token(token: &str) -> bool {
+pub(super) fn is_valid_token(token: &str) -> bool {
     token.len() == TOKEN_BYTES * 2 && token.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
@@ -135,48 +147,143 @@ pub fn host_manifest_json(host_path: &Path, extension_ids: &[&str]) -> String {
     .to_string()
 }
 
-/// Chrome's per-user manifest directory under `home`. Other Chromium browsers have their own
-/// directories; they are added once each path is confirmed on a machine that has the browser.
-pub fn chrome_manifest_dir(home: &Path) -> Result<PathBuf, PlatformError> {
+/// Where a host registration lives: the manifest file's directory, and on Windows also the HKCU
+/// registry key (relative to HKCU) whose default value Chrome reads to find the manifest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostTarget {
+    pub manifest_dir: PathBuf,
+    /// Always `None` off Windows. Only the Windows functions read it.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    registry_key: Option<String>,
+}
+
+impl HostTarget {
+    /// A file-only target: the macOS manifest directory, or a test directory that must not touch
+    /// a browser profile or the registry.
+    #[cfg(any(target_os = "macos", test))]
+    pub fn in_dir(dir: impl Into<PathBuf>) -> Self {
+        Self {
+            manifest_dir: dir.into(),
+            registry_key: None,
+        }
+    }
+
+    /// A target with an explicit registry key; tests use a throwaway key, never Chrome's.
+    #[cfg(all(windows, test))]
+    fn with_registry_key(dir: impl Into<PathBuf>, key: String) -> Self {
+        Self {
+            manifest_dir: dir.into(),
+            registry_key: Some(key),
+        }
+    }
+
+    fn manifest_file(&self) -> PathBuf {
+        self.manifest_dir.join(format!("{HOST_NAME}.json"))
+    }
+}
+
+/// Chrome's registration target. macOS: the per-user manifest directory under `home`. Windows:
+/// a manifest in the app data directory plus the HKCU key Chrome follows to it. Other Chromium
+/// browsers have their own locations; they are added once each is confirmed on a machine that
+/// has the browser.
+pub fn chrome_host_target(home: &Path, app_data_dir: &Path) -> Result<HostTarget, PlatformError> {
     #[cfg(target_os = "macos")]
     {
-        Ok(home.join("Library/Application Support/Google/Chrome/NativeMessagingHosts"))
+        let _ = app_data_dir;
+        Ok(HostTarget::in_dir(home.join(
+            "Library/Application Support/Google/Chrome/NativeMessagingHosts",
+        )))
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
     {
         let _ = home;
+        Ok(HostTarget {
+            manifest_dir: app_data_dir.join("native-messaging"),
+            registry_key: Some(format!(
+                r"Software\Google\Chrome\NativeMessagingHosts\{HOST_NAME}"
+            )),
+        })
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = (home, app_data_dir);
         Err(PlatformError::Unsupported("native host registration"))
     }
 }
 
-/// Writes the host manifest into `manifest_dir`. The caller chooses the directory so tests and
-/// tools never write into a real browser profile by accident.
+/// Writes the host manifest, then (Windows) points the registry key at it. The caller chooses the
+/// target so tests and tools never write into a real browser profile or Chrome's key by accident.
 pub fn register_host(
-    manifest_dir: &Path,
+    target: &HostTarget,
     host_path: &Path,
     extension_ids: &[&str],
 ) -> Result<(), PlatformError> {
     let write = || -> io::Result<()> {
-        std::fs::create_dir_all(manifest_dir)?;
-        let file = manifest_dir.join(format!("{HOST_NAME}.json"));
-        let tmp = manifest_dir.join(format!("{HOST_NAME}.json.tmp"));
+        std::fs::create_dir_all(&target.manifest_dir)?;
+        let file = target.manifest_file();
+        let tmp = target.manifest_dir.join(format!("{HOST_NAME}.json.tmp"));
         std::fs::write(&tmp, host_manifest_json(host_path, extension_ids))?;
-        std::fs::rename(tmp, file)
+        std::fs::rename(tmp, &file)?;
+        #[cfg(windows)]
+        if let Some(key) = &target.registry_key {
+            super::windows_ipc::registry_set_default(key, &file.to_string_lossy())?;
+        }
+        Ok(())
     };
     write().map_err(|e| PlatformError::Ipc(e.to_string()))
 }
 
-/// Whether a host manifest file is present in `manifest_dir`.
-pub fn is_host_registered(manifest_dir: &Path) -> bool {
-    manifest_dir.join(format!("{HOST_NAME}.json")).is_file()
+/// Whether the manifest file is present and, on Windows, the registry key points at it.
+pub fn is_host_registered(target: &HostTarget) -> bool {
+    let file = target.manifest_file();
+    if !file.is_file() {
+        return false;
+    }
+    #[cfg(windows)]
+    if let Some(key) = &target.registry_key {
+        return super::windows_ipc::registry_get_default(key).as_deref()
+            == Some(&*file.to_string_lossy());
+    }
+    true
 }
 
-/// Removes the manifest; an absent file is already unregistered.
-pub fn unregister_host(manifest_dir: &Path) -> Result<(), PlatformError> {
-    match std::fs::remove_file(manifest_dir.join(format!("{HOST_NAME}.json"))) {
+/// Removes the registry key and the manifest; anything already absent is already unregistered.
+pub fn unregister_host(target: &HostTarget) -> Result<(), PlatformError> {
+    #[cfg(windows)]
+    if let Some(key) = &target.registry_key {
+        super::windows_ipc::registry_delete(key).map_err(|e| PlatformError::Ipc(e.to_string()))?;
+    }
+    match std::fs::remove_file(target.manifest_file()) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(PlatformError::Ipc(e.to_string())),
+    }
+}
+
+/// A connected stream pair for relay tests: Unix socket pair, or a real named pipe on Windows.
+#[cfg(test)]
+pub fn test_stream_pair() -> (Box<dyn LinkStream>, Box<dyn LinkStream>) {
+    #[cfg(unix)]
+    {
+        let (a, b) = std::os::unix::net::UnixStream::pair().expect("pair");
+        (Box::new(a), Box::new(b))
+    }
+    #[cfg(windows)]
+    {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "sm-pair-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::SeqCst)
+        ));
+        let listener = bind_listener(&dir).expect("bind");
+        let dialer = std::thread::spawn({
+            let dir = dir.clone();
+            move || connect(&dir).expect("connect")
+        });
+        let server = listener.accept_stream().expect("accept");
+        (server, dialer.join().expect("dial"))
     }
 }
 
@@ -289,18 +396,89 @@ mod tests {
     #[test]
     fn register_and_unregister_use_the_given_directory_only() {
         let dir = temp_dir("manifest");
-        let target = dir.join("NativeMessagingHosts");
+        let target = HostTarget::in_dir(dir.join("NativeMessagingHosts"));
         register_host(
             &target,
             Path::new("/x/host"),
             &["abcdefghijklmnopabcdefghijklmnop"],
         )
         .expect("register");
-        assert!(target.join(format!("{HOST_NAME}.json")).exists());
+        assert!(
+            target
+                .manifest_dir
+                .join(format!("{HOST_NAME}.json"))
+                .exists()
+        );
+        assert!(is_host_registered(&target));
         unregister_host(&target).expect("unregister");
-        assert!(!target.join(format!("{HOST_NAME}.json")).exists());
+        assert!(
+            !target
+                .manifest_dir
+                .join(format!("{HOST_NAME}.json"))
+                .exists()
+        );
         unregister_host(&target).expect("absent manifest is fine");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Removes the throwaway registry tree even when an assertion fails.
+    #[cfg(windows)]
+    struct KeyGuard(String);
+
+    #[cfg(windows)]
+    impl Drop for KeyGuard {
+        fn drop(&mut self) {
+            let _ = super::super::windows_ipc::registry_delete(&self.0);
+            // Also drop the shared parent when it is empty (delete_subkey fails if not).
+            let _ = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+                .delete_subkey(r"Software\StudyManagerTest");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_registration_writes_the_file_and_a_throwaway_registry_key() {
+        let dir = temp_dir("winreg");
+        let root = format!(r"Software\StudyManagerTest\{}", std::process::id());
+        let _guard = KeyGuard(root.clone());
+        let key = format!(r"{root}\NativeMessagingHosts\{HOST_NAME}");
+        let target = HostTarget::with_registry_key(dir.join("native-messaging"), key.clone());
+        let host = Path::new(r"C:\Program Files\Study Manager\study-manager.exe");
+        assert!(!is_host_registered(&target));
+        register_host(&target, host, &["abcdefghijklmnopabcdefghijklmnop"]).expect("register");
+        assert!(is_host_registered(&target));
+        let file = target.manifest_dir.join(format!("{HOST_NAME}.json"));
+        assert_eq!(
+            super::super::windows_ipc::registry_get_default(&key).as_deref(),
+            Some(&*file.to_string_lossy())
+        );
+        let manifest: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&file).expect("file")).expect("json");
+        assert_eq!(manifest["path"], host.to_string_lossy().as_ref());
+        // A manifest without the registry value (or the reverse) is not a working registration.
+        super::super::windows_ipc::registry_delete(&key).expect("delete key");
+        assert!(!is_host_registered(&target));
+        register_host(&target, host, &["abcdefghijklmnopabcdefghijklmnop"]).expect("again");
+        unregister_host(&target).expect("unregister");
+        assert!(!is_host_registered(&target));
+        assert!(!file.exists());
+        unregister_host(&target).expect("absent is fine");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_chrome_target_points_at_the_chrome_key_and_app_data_manifest() {
+        let target = chrome_host_target(Path::new(r"C:\Users\me"), Path::new(r"C:\data\app"))
+            .expect("target");
+        assert_eq!(
+            target.manifest_dir,
+            Path::new(r"C:\data\app\native-messaging")
+        );
+        assert_eq!(
+            target.registry_key.as_deref(),
+            Some(r"Software\Google\Chrome\NativeMessagingHosts\com.studymanager.app.browser")
+        );
     }
 
     #[test]
@@ -327,7 +505,18 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    #[cfg(unix)]
+    #[cfg(windows)]
+    #[test]
+    fn token_is_created_once_and_reread_on_windows() {
+        let dir = temp_dir("token");
+        let first = ensure_token(&dir).expect("create");
+        assert!(is_valid_token(&first));
+        assert_eq!(ensure_token(&dir).expect("reuse"), first);
+        assert_eq!(read_token(&dir).expect("read"), first);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(any(unix, windows))]
     #[test]
     fn socket_round_trip_and_missing_app() {
         let dir = temp_dir("sock");

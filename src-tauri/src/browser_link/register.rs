@@ -17,12 +17,12 @@ pub const HOST_HISTORY_KEY: &str = "browserHost";
 
 pub fn set_registered(
     conn: &mut Connection,
-    manifest_dir: &Path,
+    target: &platform::HostTarget,
     host_path: &Path,
     register: bool,
     at_ms: i64,
 ) -> AppResult<UpdateOutcome> {
-    let before = if platform::is_host_registered(manifest_dir) {
+    let before = if platform::is_host_registered(target) {
         "registered"
     } else {
         "unregistered"
@@ -49,9 +49,9 @@ pub fn set_registered(
         });
     }
     if register {
-        platform::register_host(manifest_dir, host_path, ALLOWED_EXTENSION_IDS)?;
+        platform::register_host(target, host_path, ALLOWED_EXTENSION_IDS)?;
     } else {
-        platform::unregister_host(manifest_dir)?;
+        platform::unregister_host(target)?;
     }
     store::append_history(
         &tx,
@@ -83,12 +83,12 @@ mod tests {
 
     #[test]
     fn register_then_unregister_follows_the_lock_for_removal_only() {
-        let dir = scratch_dir("register");
+        let dir = platform::HostTarget::in_dir(scratch_dir("register"));
         let host = Path::new("/tmp/study-manager-host");
         let mut conn = open_in_memory().expect("db");
         set_registered(&mut conn, &dir, host, true, 1).expect("register");
         assert!(platform::is_host_registered(&dir));
-        let file = std::fs::read_dir(&dir)
+        let file = std::fs::read_dir(&dir.manifest_dir)
             .expect("dir")
             .next()
             .expect("one file")
@@ -125,6 +125,6 @@ mod tests {
             UpdateOutcome::Applied { .. }
         ));
         assert!(!platform::is_host_registered(&dir));
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&dir.manifest_dir);
     }
 }

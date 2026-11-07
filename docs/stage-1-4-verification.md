@@ -66,7 +66,7 @@
 |---|---|---|
 | Chrome / macOS | `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.studymanager.app.browser.json` | [판정 2026-11-07: 맥에서 확인 필요] 매니페스트 내용과 쓰기/삭제는 임시 디렉터리 테스트로 확인. 실제 Chrome이 읽는지는 **검증 안 됨** (홈 디렉터리에 설치하지 않음) |
 | Edge, Brave 등 다른 Chromium / macOS | 코드에 경로 없음 | [판정 2026-11-07: 미구현] **검증 안 됨** (미구현) |
-| Chrome / Windows | `HKCU\Software\Google\Chrome\NativeMessagingHosts\…` | [판정 2026-11-07: 미구현] **검증 안 됨** (미구현, `Unsupported`) |
+| Chrome / Windows | `HKCU\Software\Google\Chrome\NativeMessagingHosts\…` | [판정 2026-11-07: 구현됨, 사람 확인] 구현됨(매니페스트는 앱 데이터 폴더, 레지스트리 기본값이 그 경로). 던져 버리는 키로 등록·해제·불일치 판정을 `cargo test`에서 확인. 실제 Chrome 키는 사람이 확인 |
 | Firefox, Safari | 해당 없음 | 후속 단계 |
 
 ## 프리셋 식별자 (모두 이 PC에서 확인하지 못함)
@@ -100,7 +100,7 @@
 | 프리셋 앱 식별자 정확성 | [판정 2026-11-07: 맥에서 확인 필요] 이 PC에 해당 앱 없음 | 위 표의 앱을 설치한 PC에서 번들 ID를 `mdls`로 확인하고 카탈로그 수정(`PRESET_VERSION` 올림) |
 | 첫 실행 화면과 설정 화면 UX | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 클릭 단위 UI 테스트 없음, GUI 권한 없음 | 새 데이터 디렉터리로 앱 실행 → 첫 실행 카테고리 선택 화면, 쇼핑·웹툰이 꺼진 기본값, 설정에서 토글 |
 | 공부 중 설정 잠금(UI 쪽) | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 클릭 단위 UI 테스트 없음 | 공부 중 설정에서 프리셋/사이트/호스트 등록 해제 시도 → 거절 메시지와 기록 확인 (Rust 쪽 거절은 테스트함) |
-| Windows 전체 (named pipe, 레지스트리 등록, 프로세스 경로 매칭, 빌드) | [판정 2026-11-07: 부분] 로컬 Windows 빌드 불가(번들 SQLite C 헤더), 장비 없음 | Windows PC에서 `cargo check/clippy/test`, 수동 시나리오 |
+| Windows 전체 (named pipe, 레지스트리 등록, 프로세스 경로 매칭, 빌드) | [판정 2026-11-07: 부분] 빌드와 pipe·레지스트리는 이 PC에서 시험함. 실제 Chrome 연결은 사람 확인 | Windows PC에서 `cargo check/clippy/test`, 수동 시나리오 |
 | 일주일 실사용 오탐/미탐 | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 시간 필요 | 시험 모드로 일주일 사용 후 `block_events` 검토 |
 
 ### Windows PC 검증 결과 (2026-11-07)
@@ -110,7 +110,7 @@
 | ID | 판정 | 명령 | 결과(종료코드·개수) | 비고 |
 |---|---|---|---|---|
 | V1 Chrome 압축해제 확장 로드 | 사람 확인(MANUAL-CHECKLIST) | `pnpm build:extension` | 종료 0 (빌드만) | 브라우저에 로드하지 않음. 확장 ID 확인은 사람 |
-| V2 네이티브 메시징 등록·연결 | 맥에서 확인 필요 | 해당 없음 | 해당 없음 | macOS 경로 기준. Windows는 named pipe·레지스트리 등록 미구현(`Unsupported`)이라 V10 참조 |
+| V2 네이티브 메시징 등록·연결 | 맥에서 확인 필요 | 해당 없음 | 해당 없음 | macOS 경로 기준. Windows는 named pipe·레지스트리 등록 구현됨(실제 Chrome 연결은 MANUAL-CHECKLIST 4절), V10 참조 |
 | V3 차단 리다이렉트·서비스 워커 수명 | 사람 확인(MANUAL-CHECKLIST) | 해당 없음 | 해당 없음 | 실제 브라우저 필요 |
 | V4 확장 비활성화/삭제 시 끊김 | 사람 확인(MANUAL-CHECKLIST) | 해당 없음 | 해당 없음 | 앱 쪽 기록은 `cargo test`(Rust 가짜 링크)에 포함 |
 | V5 시크릿 모드 | 사람 확인(MANUAL-CHECKLIST) | 해당 없음 | 해당 없음 | |
@@ -118,11 +118,11 @@
 | V7 프리셋 앱 번들 ID | 맥에서 확인 필요 | 해당 없음 | 해당 없음 | `mdls`는 macOS 전용. Windows는 실행 파일 전체 경로 매칭이라 프리셋 앱 미동작 |
 | V8 첫 실행·설정 UX | 사람 확인(MANUAL-CHECKLIST) | 해당 없음 | 해당 없음 | GUI 미조작. 릴리스 exe 스모크 실행은 기존 디버그 인스턴스의 단일 인스턴스 잠금 때문에 판단 불가 |
 | V9 공부 중 설정 잠금(UI) | 사람 확인(MANUAL-CHECKLIST) | 해당 없음 | 해당 없음 | Rust 쪽 거절은 `cargo test`에 포함 |
-| V10 Windows 전체 | 부분 | `cargo fmt --check` / `cargo clippy --all-targets -- -D warnings` / `cargo test` (src-tauri, 네이티브 x86_64-pc-windows-msvc) / `pnpm tauri build --bundles nsis` | 종료 0 / 종료 0 / lib 1047 + llm_wire 4 + remote_wire 7 + doc-tests 3 통과, 실패 0 / 종료 0 (설치 파일 5.03 MiB, 실행 안 함) | 이전 "로컬 Windows 빌드 불가" 결과는 대체됨. `cfg(unix)` 테스트(소켓·심볼릭 링크)는 Windows에서 컴파일되지 않음. named pipe·레지스트리 등록·프로세스 경로 프리셋은 미구현이라 연결 자체는 검증 불가(a22bb03은 clippy dead_code만 수정) |
+| V10 Windows 전체 | 부분 | `cargo fmt --check` / `cargo clippy --all-targets -- -D warnings` / `cargo test` (src-tauri, 네이티브 x86_64-pc-windows-msvc) / `pnpm tauri build --bundles nsis` | 종료 0 / 종료 0 / lib 1047 + llm_wire 4 + remote_wire 7 + doc-tests 3 통과, 실패 0 / 종료 0 (설치 파일 5.03 MiB, 실행 안 함) | 이전 "로컬 Windows 빌드 불가" 결과는 대체됨. [2026-11-07 갱신] named pipe(`windows_ipc.rs`)·레지스트리 등록·릴레이 시험은 이제 Windows에서도 실행된다(소켓 쌍 대신 플랫폼 시험 스트림 쌍). `cfg(unix)` 심볼릭 링크 시험만 Windows에서 컴파일되지 않음. 실제 Chrome 연결은 사람 확인 |
 | V11 일주일 실사용 | 사람 확인(MANUAL-CHECKLIST) | 해당 없음 | 해당 없음 | |
 | R1 Chrome/macOS 등록 | 맥에서 확인 필요 | 해당 없음 | 해당 없음 | |
 | R2 Edge, Brave/macOS | 미구현 | 해당 없음 | 해당 없음 | |
-| R3 Chrome/Windows 레지스트리 | 미구현 | 해당 없음 | 해당 없음 | `Unsupported`. 구현 후 사람 확인 필요 |
+| R3 Chrome/Windows 레지스트리 | 사람 확인(MANUAL-CHECKLIST) | `cargo test` (던져 버리는 `HKCU\Software\StudyManagerTest\<pid>` 키) | 통과, 시험 뒤 키 없음 | 실제 Chrome 키(`HKCU\Software\Google\Chrome\NativeMessagingHosts`)는 설정 화면의 「브라우저 연결 등록」으로 사람이 확인 |
 
 ## 알려진 잔여 위험 (수용·추적)
 

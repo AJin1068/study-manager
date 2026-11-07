@@ -187,15 +187,14 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
     #[test]
     fn missing_token_counts_as_app_not_running() {
         let (tx, rx) = channel();
-        let (a, _b) = std::os::unix::net::UnixStream::pair().expect("pair");
+        let (a, _b) = platform::test_stream_pair();
         let code = relay(
             io::empty(),
             ChanWriter(tx),
-            Ok(Box::new(a)),
+            Ok(a),
             Err(io::Error::new(io::ErrorKind::NotFound, "no token")),
             "x",
         );
@@ -203,19 +202,16 @@ mod tests {
         assert!(rx.recv_timeout(Duration::from_secs(1)).is_ok());
     }
 
-    #[cfg(unix)]
     #[test]
     fn relays_both_directions_with_auth_first() {
-        use std::os::unix::net::UnixStream;
-
-        let (host_side, mut app_side) = UnixStream::pair().expect("pair");
-        let (stdin_host, mut stdin_chrome) = UnixStream::pair().expect("pair");
+        let (host_side, mut app_side) = platform::test_stream_pair();
+        let (stdin_host, mut stdin_chrome) = platform::test_stream_pair();
         let (tx, rx) = channel();
         let relay_thread = thread::spawn(move || {
             relay(
                 stdin_host,
                 ChanWriter(tx),
-                Ok(Box::new(host_side)),
+                Ok(host_side),
                 Ok("a".repeat(64)),
                 "abcdefghijklmnopabcdefghijklmnop",
             )
@@ -248,22 +244,20 @@ mod tests {
     }
 
     /// Spike measurement (stage 4-S0): host relay round trip, app echo included, over real
-    /// Unix sockets. Not a browser measurement: Chrome's own stdio and service-worker costs are
+    /// sockets or pipes. Not a browser measurement: Chrome's own stdio and service-worker costs are
     /// outside it.
-    #[cfg(unix)]
     #[test]
     fn relay_round_trip_latency_is_small() {
-        use std::os::unix::net::UnixStream;
         use std::time::Instant;
 
-        let (host_side, mut app_side) = UnixStream::pair().expect("pair");
-        let (stdin_host, mut stdin_chrome) = UnixStream::pair().expect("pair");
+        let (host_side, mut app_side) = platform::test_stream_pair();
+        let (stdin_host, mut stdin_chrome) = platform::test_stream_pair();
         let (tx, rx) = channel();
         let relay_thread = thread::spawn(move || {
             relay(
                 stdin_host,
                 ChanWriter(tx),
-                Ok(Box::new(host_side)),
+                Ok(host_side),
                 Ok("a".repeat(64)),
                 "x",
             )

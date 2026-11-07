@@ -105,7 +105,7 @@
 | 30 | 1-4 | 프리셋 앱 번들 ID와 사이트 도메인 정확성 | [판정 2026-11-07: 맥에서 확인 필요] 이 PC에 해당 앱 없음, 일부 도메인은 작성자 추정 | 앱이 설치된 PC에서 `mdls -name kMDItemCFBundleIdentifier`로 확인하고 카탈로그 수정(`PRESET_VERSION` 올림) |
 | 31 | 1-4 | 첫 실행 화면과 설정 화면 UX | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 클릭 단위 UI 테스트 없음 | 새 데이터 디렉터리로 실행해 카테고리 선택 화면과 쇼핑·웹툰이 꺼진 기본값 확인 |
 | 32 | 1-4 | 공부 중 설정 잠금(UI 쪽: 프리셋·사이트·호스트 등록 해제) | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 클릭 단위 UI 테스트 없음 | 공부 중 설정에서 변경을 시도해 거절 메시지와 기록 확인 |
-| 33 | 1-4 | Windows 전체(named pipe, 레지스트리 등록, 프로세스 경로 매칭) | [판정 2026-11-07: 부분] 빌드 불가, 장비 없음 | Windows PC에서 `cargo check/clippy/test`와 수동 시나리오 |
+| 33 | 1-4 | Windows 전체(named pipe, 레지스트리 등록, 프로세스 경로 매칭) | [판정 2026-11-07: 부분] pipe·레지스트리·프로세스 제어는 이 PC에서 시험함, 실제 Chrome·데스크톱 앱 시나리오는 사람 확인 | Windows PC에서 `cargo check/clippy/test`와 수동 시나리오 |
 | 34 | 1-4 | 확장 ID가 실제 Chrome에서 같은 값으로 나오는지 | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 실제 Chrome 필요 | 항목 24에서 본 ID와 `ALLOWED_EXTENSION_IDS`가 같은지 비교 |
 | 35 | 1-4→5 | 브라우저 차단의 일주일 실사용 오탐·미탐 | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 시간 필요 | 일주일 사용 뒤 `block_events` 사이트 행을 검토 |
 | 36 | 1-5 | 권한: 맨 앞 앱·입력 유휴 조회가 실제 앱에서 권한 팝업 없이 되는지, 창 제목 권한 안내 화면(`window_title_access`) 표시 | [판정 2026-11-07: 맥에서 확인 필요] 코드상 권한 불필요로 구현했으나 실제 팝업·시스템 설정 동작은 실행 못 함 | 처음 실행해 팝업이 뜨는지 보고, 안내 화면이 허용/거부 상태를 맞게 표시하는지 확인 |
@@ -151,7 +151,7 @@
 | 22 | 사람 확인(MANUAL-CHECKLIST) | 해당 명령 없음 (미수행) | 미수행 | GUI 클릭 필요 |
 | 23 | 사람 확인(MANUAL-CHECKLIST) | 해당 명령 없음 (미수행) | 미수행 | 알림 육안 확인 필요 |
 | 24 | 사람 확인(MANUAL-CHECKLIST) | `pnpm build:extension` (로드는 미수행) | 종료 0 (빌드만) | Chrome+확장 필요. 이 PC에서는 `pnpm build:extension` 종료 0만 확인 |
-| 25 | 사람 확인(MANUAL-CHECKLIST) | 해당 명령 없음 (미수행) | 미수행 | Chrome 필요. Windows에서는 named pipe IPC 미구현(#33)이라 연결 불가 |
+| 25 | 사람 확인(MANUAL-CHECKLIST) | 해당 명령 없음 (미수행) | 미수행 | Chrome 필요. Windows named pipe IPC·레지스트리 등록은 구현됨(#33). 연결 자체는 Chrome에서 사람이 확인 |
 | 26 | 사람 확인(MANUAL-CHECKLIST) | 해당 명령 없음 (미수행) | 미수행 | Chrome 필요 |
 | 27 | 사람 확인(MANUAL-CHECKLIST) | 해당 명령 없음 (미수행) | 미수행 | Chrome 필요 |
 | 28 | 사람 확인(MANUAL-CHECKLIST) | 해당 명령 없음 (미수행) | 미수행 | Chrome 필요 |
@@ -159,7 +159,7 @@
 | 30 | 맥에서 확인 필요 | 해당 명령 없음 (미수행) | 미수행 | `mdls`는 macOS 전용 |
 | 31 | 사람 확인(MANUAL-CHECKLIST) | 해당 명령 없음 (미수행) | 미수행 | GUI 확인 필요 |
 | 32 | 사람 확인(MANUAL-CHECKLIST) | 해당 명령 없음 (미수행) | 미수행 | GUI 클릭 필요 |
-| 33 | 부분 | `cargo clippy --all-targets -- -D warnings`/`cargo test` (src-tauri, Windows) | 종료 0. lib 1047 통과. named pipe IPC 미구현 | 네이티브 Windows cargo clippy/test 통과. named pipe 브라우저 IPC는 미구현(`bind_listener/connect`가 Unsupported 반환)이라 브라우저 연결은 동작 불가, 레지스트리 등록·프로세스 경로 매칭 수동 확인 미수행 |
+| 33 | 부분 | `cargo clippy --all-targets -- -D warnings`/`cargo test` (src-tauri, Windows) | 종료 0. lib 1047 통과. [2026-11-07 갱신] lib 1080 통과, clippy 통과 | named pipe(소유자 SID 전용 DACL, 겹침 I/O)·HKCU 등록·프로세스 제어·작업 스케줄러를 구현하고 실제로 시험함. Chrome이 호스트를 띄우는 연결과 프로세스 경로 프리셋의 실제 앱 매칭은 사람 확인 |
 | 34 | 사람 확인(MANUAL-CHECKLIST) | 해당 명령 없음 (미수행) | 미수행 | Chrome 필요 |
 | 35 | 사람 확인(MANUAL-CHECKLIST) | 해당 명령 없음 (미수행) | 미수행 | 일주일 실사용 필요 |
 | 36 | 맥에서 확인 필요 | 해당 명령 없음 (미수행) | 미수행 | macOS 권한 팝업·시스템 설정 동작 |

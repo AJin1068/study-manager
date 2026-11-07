@@ -89,20 +89,24 @@ pub struct HostRegistration {
     pub registered: bool,
 }
 
-fn manifest_dir(app: &AppHandle) -> AppResult<std::path::PathBuf> {
+fn host_target(app: &AppHandle) -> AppResult<platform::HostTarget> {
     let home = app
         .path()
         .home_dir()
         .map_err(|err| AppError::Internal(err.to_string()))?;
-    Ok(platform::chrome_manifest_dir(&home)?)
+    let data = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| AppError::Internal(err.to_string()))?;
+    Ok(platform::chrome_host_target(&home, &data)?)
 }
 
 #[tauri::command]
 pub fn get_browser_host_registration(app: AppHandle) -> HostRegistration {
-    match manifest_dir(&app) {
-        Ok(dir) => HostRegistration {
+    match host_target(&app) {
+        Ok(target) => HostRegistration {
             supported: true,
-            registered: platform::is_host_registered(&dir),
+            registered: platform::is_host_registered(&target),
         },
         Err(_) => HostRegistration {
             supported: false,
@@ -118,10 +122,10 @@ pub fn set_browser_host_registered(
     state: State<'_, AppState>,
     registered: bool,
 ) -> AppResult<UpdateOutcome> {
-    let dir = manifest_dir(&app)?;
+    let target = host_target(&app)?;
     let host = std::env::current_exe().map_err(|err| AppError::Internal(err.to_string()))?;
     let mut conn = lock_db(&state.db)?;
-    register::set_registered(&mut conn, &dir, &host, registered, now_ms()?)
+    register::set_registered(&mut conn, &target, &host, registered, now_ms()?)
 }
 
 /// Study time of a run and the part of it without a connected extension.

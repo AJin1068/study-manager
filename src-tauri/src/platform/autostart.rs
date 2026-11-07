@@ -1,13 +1,14 @@
 //! Login-item control. macOS uses our own LaunchAgent (`launch_agent.rs`) so the entry can carry
-//! relaunch-on-kill supervision; Windows uses tauri-plugin-autostart (HKCU Run key).
+//! relaunch-on-kill supervision; Windows uses tauri-plugin-autostart (HKCU Run key) while
+//! relaunch is off and a Task Scheduler pair (`task_scheduler.rs`) while it is on, never both.
 //!
 //! Permissions: macOS may show a "background item added" notice on first enable; Windows
-//! writes HKCU Run. Neither needs elevated rights.
+//! writes HKCU Run or per-user scheduled tasks (interactive token, least privilege). Neither
+//! needs elevated rights.
 //!
-//! Windows relaunch supervision stays `Unsupported`: a Run-key entry is started by the shell,
-//! not by Task Scheduler, and Task Scheduler's restart-on-failure only restarts tasks it started
-//! itself. Doing it would need a separate scheduled task that owns the process (and a way to stop
-//! it on a normal quit); that is not designed yet and cannot be verified without a Windows device.
+//! Windows supervision applies from the next task-started launch: a copy started by hand or by
+//! the Run key is not owned by the scheduler, though the watchdog task still brings the app back
+//! if that copy is killed.
 
 use std::sync::Arc;
 
@@ -39,7 +40,32 @@ pub fn autostart_backend<R: Runtime>(
             &app.config().identifier,
         )))
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        use super::task_scheduler::{
+            LOGON_TASK, RealRunner, SupervisedAutostart, TaskSupervisor, WATCHDOG_TASK,
+            current_user,
+        };
+        let exe = std::env::current_exe()
+            .map_err(|e| PlatformError::Autostart(e.to_string()))?
+            .display()
+            .to_string();
+        let user = current_user()
+            .ok_or_else(|| PlatformError::Autostart("current user name is unknown".into()))?;
+        let tasks = TaskSupervisor::new(
+            Box::new(RealRunner),
+            LOGON_TASK,
+            WATCHDOG_TASK,
+            std::env::temp_dir(),
+        );
+        Ok(Arc::new(SupervisedAutostart::new(
+            PluginAutostart::new(app.clone()),
+            tasks,
+            exe,
+            user,
+        )))
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         Ok(Arc::new(PluginAutostart::new(app.clone())))
     }
@@ -58,15 +84,15 @@ impl<R: Runtime> PluginAutostart<R> {
 }
 
 #[cfg(not(target_os = "macos"))]
-impl<R: Runtime> AutostartBackend for PluginAutostart<R> {
-    fn is_enabled(&self) -> Result<bool, PlatformError> {
+impl<R: Runtime> PluginAutostart<R> {
+    fn plugin_is_enabled(&self) -> Result<bool, PlatformError> {
         self.app
             .autolaunch()
             .is_enabled()
             .map_err(|e| PlatformError::Autostart(e.to_string()))
     }
 
-    fn set_enabled(&self, enabled: bool) -> Result<(), PlatformError> {
+    fn plugin_set_enabled(&self, enabled: bool) -> Result<(), PlatformError> {
         let manager = self.app.autolaunch();
         let result = if enabled {
             manager.enable()
@@ -74,5 +100,27 @@ impl<R: Runtime> AutostartBackend for PluginAutostart<R> {
             manager.disable()
         };
         result.map_err(|e| PlatformError::Autostart(e.to_string()))
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+impl<R: Runtime> AutostartBackend for PluginAutostart<R> {
+    fn is_enabled(&self) -> Result<bool, PlatformError> {
+        self.plugin_is_enabled()
+    }
+
+    fn set_enabled(&self, enabled: bool) -> Result<(), PlatformError> {
+        self.plugin_set_enabled(enabled)
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl<R: Runtime> super::task_scheduler::RunEntry for PluginAutostart<R> {
+    fn is_enabled(&self) -> Result<bool, PlatformError> {
+        self.plugin_is_enabled()
+    }
+
+    fn set_enabled(&self, enabled: bool) -> Result<(), PlatformError> {
+        self.plugin_set_enabled(enabled)
     }
 }

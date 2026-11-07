@@ -16,7 +16,7 @@
 - [ ] 앱 실행 중 다시 실행하면 기존 창이 앞으로 온다 (#7). 첫 실행 중 두 번째 실행에서 프로세스가 1개인지도 본다
 - [ ] 공부 중 설정 화면에서 값을 바꿔 보면 거절 문구가 나오고 `setting_history`에 `rejected_locked` 행이 생긴다 (#8, 1-1 V9)
 - [ ] 휴식 종료 1분 전 알림이 뜬다 / 시험 모드의 차단 알림과 `would_terminate` 로그 (#10, #23)
-- [ ] 트레이 제목·툴팁이 라이트·다크 모드에서 읽힌다 (#11)
+- [ ] 트레이 툴팁(Windows는 제목 글자가 없고 툴팁만 쓴다. `set_tray_title`은 의도적으로 Unsupported)이 공부 중 바뀌고 라이트·다크 작업 표시줄에서 읽힌다 (#11). 시작 로그에 종료 게이트·백그라운드 보호 관련 경고가 없다
 - [ ] 계획 생성 → 모드 변경 → 되돌리기 토스트, 캘린더·히스토리 화면 (#12)
 - [ ] 새 데이터 폴더로 실행: 카테고리 선택 화면, 쇼핑·웹툰이 꺼진 기본값 (#31). 공부 중 프리셋·사이트·호스트 해제 시도가 거절된다 (#32)
 - [ ] 집중 신호 카드·세트 요약·레벨 표시 (#43), 대시보드 오늘/이번 주/약점 라이트·다크 (#44)
@@ -28,24 +28,25 @@
 ## 2. 공부 run 실동작 (Windows)
 
 - [ ] 공부 중 비상 해제 문장 입력을 끝까지 수행하고 해제 경로 전부(건너뛰기·긴급 패스)를 눌러 본다 (#15, #22)
-- [ ] 시험 모드를 끄고 더미 앱을 차단 목록에 넣어 공부 구간에서 정상 종료 → 강제 종료 순서로 닫힌다 (#16). 이 PC에서 Windows 센서·종료 코드는 컴파일/단위 시험만 통과 (#17, #37 부분)
-- [ ] 공부 앱/딴짓 앱을 번갈아 켜서 `focus_events`에 이탈·복귀가 쌓인다 (#37 실동작)
+- [ ] 시험 모드를 끄고 더미 앱을 차단 목록에 넣어 공부 구간에서 정상 종료 → 강제 종료 순서로 닫힌다 (#16). Windows 종료 코드(`EnumWindows`·`WM_CLOSE`·`TerminateProcess`)는 이 PC에서 임시 폼 창 앱으로 실제 종료·강제 종료까지 시험했다. 사람은 진짜 앱(메모장 아닌 일반 데스크톱 앱)으로 정상 종료 → 유예 후 강제 종료 순서를 본다 (#17, #37). 작업 관리자·자기 자신·관리자 권한 앱은 거절되고(`os_refused` 로그) 앱이 죽지 않는다
+- [ ] 공부 앱/딴짓 앱을 번갈아 켜서 `focus_events`에 이탈·복귀가 쌓인다 (#37 실동작). 유휴 기준 시간 이상 아무것도 안 만지면 idle/away 기록이 생기고, 잠금 화면에서는 앞 앱이 없는 것으로 처리되며, 관리자 권한 앱이 앞에 있어도 폴링이 멈추지 않는다
 - [ ] 전역 단축키 `Ctrl+Alt+Shift+D`가 `self_report` 행을 1개 만들고 다른 앱과 충돌하지 않는다 (#38). 공부 중 15~40분 사이 체크인 알림과 2분 내 응답 기록 (#39 Windows분)
 - [ ] 문제가 3개 이상인 상태에서 조기 해제를 4번 열어 쿨다운·소진 안내, 이후 긴급 패스는 타이핑 (V3-5)
 - [ ] 차단 앱을 열면 복습 카드가 뜨되 앱은 그대로 종료, 세션 끝에 3문제, 말투 5단계 문구 (V3-6)
 
 ## 3. 절전·재로그인·자동 실행 (Windows)
 
-- [ ] 절전 후 깨우면 `downtime_records`에 `sleep` 행, 계획 진행 중이었다면 타이머·잠금이 맞다 (#2, #13)
+- [ ] 절전 후 깨우면 `downtime_records`에 `sleep` 행, 계획 진행 중이었다면 타이머·잠금이 맞다 (#2, #13). `powercfg /a` 결과(S3 또는 Modern Standby)를 적어 둔다. 덮개를 닫아도 전원 이벤트(`PBT_APMSUSPEND`)가 안 오는 기기면 하트비트 간격으로 기록된 것이므로 `sleep` 행의 출처가 다르다는 점만 확인하고, 설정 화면에 「전원 이벤트 미지원」 경고가 없어야 한다
 - [ ] 자동 실행(Run 키)을 켜고 재로그인하면 앱이 떠 있고 계획 시각에 잠금이 시작된다 (#6, #14)
+- [ ] 재실행 감시(작업 스케줄러): 자동 실행과 「강제 종료 시 재실행」을 켠 뒤 `schtasks /Query /TN StudyManagerRelaunch`와 `StudyManagerWatchdog` 두 작업이 있고 HKCU Run 항목은 없다. **작업을 통해** 앱을 시작(`schtasks /Run /TN StudyManagerRelaunch` 또는 재로그인)한 뒤 `taskkill /F /IM study-manager.exe` 하면 약 1~2분 안에 다시 떠오르고 `forced_quit` 행이 생긴다. 트레이 종료·공부 밖 정상 종료 후에는 다시 뜨지 않고, 다음에 앱을 직접 켜면 감시가 다시 켜진다. 옵션을 끄면 작업 두 개가 사라지고 Run 항목이 돌아온다. 재로그인 후 앱 프로세스는 정확히 1개. 워치독이 매분 돌아도 창이 튀어나오지 않는다(`--supervised`는 창을 올리지 않는다)
 - [ ] 잠금 중 로그아웃 후 재실행하면 `forced_quit` 행 (#19)
 - [ ] 전체 화면 비디오·다중 모니터·화면 보호기에서 `idle_ms`/`away_ms` 오탐 (#41)
 
-## 4. Chrome 확장 (이 PC에서는 Windows named-pipe IPC가 미구현이라 **연결 단계는 구현 후**, 아래 중 Chrome 단독 단계만 지금 가능)
+## 4. Chrome 확장 (Windows: HKCU 등록 + named pipe 구현됨, 실제 Chrome 연결은 사람이 확인)
 
 - [ ] `chrome://extensions`에서 `extension/dist`를 압축해제 로드, 확장 ID가 `manoifclikefdhhomeklmdjbeknmloem`인지 (#24, #34)
-- [ ] (macOS 또는 구현 후) 「브라우저 연결 등록」 → 연결됨 + `extension_connected` 행 (#25)
-- [ ] (동일) 공부 중 reddit.com이 `blocked.html`로 바뀌고 30초 유휴 뒤에도 연결 유지 (#26), 확장 끄면 경고·`extension_disconnected` (#27), 시크릿 모드 허용 전후 (#28)
+- [ ] 「브라우저 연결 등록」 → `reg query "HKCU\Software\Google\Chrome\NativeMessagingHosts\com.studymanager.app.browser"`의 기본값이 `%APPDATA%\com.studymanager.app\native-messaging\com.studymanager.app.browser.json`이고, 그 파일의 `path`가 설치된 exe, `allowed_origins`가 확장 ID. Chrome에서 연결됨 + `extension_connected` 행 (#25). 앱을 관리자 권한으로 띄우고 Chrome은 일반 권한이어도 연결된다. 공부 중에는 등록 해제가 거절되고, 해제하면 키와 파일이 모두 사라진다
+- [ ] 공부 중 reddit.com이 `blocked.html`로 바뀌고 30초 유휴 뒤에도 연결 유지 (#26), 확장 끄면 경고·`extension_disconnected` (#27), 시크릿 모드 허용 전후 (#28)
 - [ ] LLM 탭 판단: `llm.judge_enabled`와 동의를 켜고 목록에 없는 영상 열기 — 두 번째 이벤트부터 판단 (V3-7, 위와 동일 전제)
 
 ## 5. 서버 배포·실계정
@@ -103,6 +104,7 @@
 
 ## 11. 맥에서 확인 필요 (macOS 전용, 이 Windows PC에서는 실행하지 않았다)
 
+- [ ] Windows 플랫폼 계층 변경으로 공유 파일(`platform/mod.rs`, `browser_ipc.rs`(`HostTarget` 시그니처 변경), `focus.rs`, `browser_link/register.rs`, `lib.rs`)을 고쳤다. 맥에서 `cargo fmt --check`/`clippy --all-targets -D warnings`/`cargo test`가 통과하고 「브라우저 연결 등록」이 여전히 매니페스트를 `~/Library/Application Support/Google/Chrome/NativeMessagingHosts`에 쓰는지, App Nap 보호가 그대로인지
 - [ ] #4 `pmset sleepnow` 후 깨워 `sleep` 행과 `resumed` / 1-1 V4, 1-2 V6
 - [ ] #5 공부 중 Cmd+Q·트레이 종료가 거절되고 `appExit rejected_locked`, 공부 밖에서는 종료 / 1-1 V6
 - [ ] #18 잠금 중 `osascript -e 'tell application "Study Manager" to quit'` 후 프로세스 생존
@@ -118,4 +120,4 @@
 
 ## 참고: 미구현으로 기록된 항목 (사람 단계가 아니라 개발 항목)
 
-Windows named-pipe 브라우저 IPC(#33 연결 부분), Edge·Brave 매니페스트 경로(#29), 성장 그림·캐릭터 자산(#46), PDF 텍스트 추출(V3-3), Realtime 웹소켓(V4-5b), 폰 화면 켜짐 횟수·포그라운드 서비스(V5-6).
+Edge·Brave 매니페스트 경로(#29), 성장 그림·캐릭터 자산(#46), PDF 텍스트 추출(V3-3), Realtime 웹소켓(V4-5b), 폰 화면 켜짐 횟수·포그라운드 서비스(V5-6).

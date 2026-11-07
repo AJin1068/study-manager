@@ -39,7 +39,7 @@
 | ID | 판정 | 명령 | 결과(종료코드·개수) | 비고 |
 |---|---|---|---|---|
 | 1-3-V1 실제 더미 앱 정상·강제 종료 | 사람 확인(MANUAL-CHECKLIST) | 해당 없음 | 해당 없음 | 가짜 `ProcessControl` 테스트만 `cargo test`에서 통과. 실제 프로세스 종료는 실행하지 않았다 |
-| 1-3-V2 Windows 전체(프로세스 제어·종료 우회·재실행) | 부분 | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (src-tauri) | 모두 종료 0. `cargo test`: lib 1047 + llm_wire 4 + remote_wire 7 + doc 3 통과, 실패 0 | 컴파일·단위 테스트만 확인(이전 "Windows 빌드 불가"는 대체됨). Windows 재실행 감시는 `Unsupported`로 미구현. 실제 프로세스 제어·종료 우회 수동 시나리오는 미실행 |
+| 1-3-V2 Windows 전체(프로세스 제어·종료 우회·재실행) | 부분 | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (src-tauri) | 모두 종료 0. `cargo test`: lib 1047 + llm_wire 4 + remote_wire 7 + doc 3 통과, 실패 0 | [2026-11-07 갱신: 프로세스 제어(`EnumWindows`·`WM_CLOSE`·`TerminateProcess`)와 재실행 감시(작업 스케줄러 두 작업)를 구현. 임시 폼 창 앱으로 정상 종료·강제 종료(종료 코드 1)와 오래된 식별자 거절을 `cargo test`에서 실제 실행했고, 작업 스케줄러 감시 메커니즘을 이 PC에서 실제 작업으로 확인(반복 트리거 시작·`IgnoreNew` 단일 유지·`taskkill` 후 재시작; 「작업 실패 시 재시작」 옵션은 종료 코드에 반응하지 않아 쓰지 않음). 앱 전체를 작업으로 띄워 `forced_quit`까지 이어지는 시나리오와 실제 데스크톱 앱 종료 순서는 사람 확인(MANUAL-CHECKLIST 2·3절)] |
 | 1-3-V3 `applicationShouldTerminate:` 주입 | 맥에서 확인 필요 | 해당 없음 | 해당 없음 | macOS 전용 |
 | 1-3-V4 로그아웃/재시작/종료 Apple Event | 맥에서 확인 필요 | 해당 없음 | 해당 없음 | macOS 실기기 |
 | 1-3-V5 Cmd+Q 중복 호출 | 맥에서 확인 필요 | 해당 없음 | 해당 없음 | macOS 전용 |
@@ -50,7 +50,7 @@
 ## 알려진 잔여 위험 (수용·추적)
 
 - 주입 실패 시 Apple Event 종료는 잠금을 우회하지만 `clean_exit`가 설정되지 않아 다음 실행에서 `forced_quit`로 기록된다.
-- Windows 로그오프 거부는 사용자를 가둘 수 있어 구현하지 않았다. Windows 재실행 감시는 `Unsupported`.
+- Windows 로그오프 거부는 사용자를 가둘 수 있어 구현하지 않았다. Windows 종료 게이트 설치(`install_quit_gate`)는 정의된 `Ok` 무동작이다(탈출 경로는 `RunEvent::ExitRequested` 하나뿐이고 이미 게이트됨). Windows 재실행 감시는 작업 스케줄러 두 작업(로그온 시작 + 1분 감시)과 정상 종료 표시 파일로 구현했고, 감시는 다음 작업 시작부터 적용된다(직접 켠 복사본도 죽으면 감시가 1분 안에 되살린다).
 - macOS 자동 실행은 플러그인 대신 자체 LaunchAgent 작성기로 바꿨다. 자동 실행이 꺼져 있으면 재실행 감시도 없다.
 - 시험 모드가 기본값이며 실행 모드 전환은 설정에서 명시적으로만 한다.
 

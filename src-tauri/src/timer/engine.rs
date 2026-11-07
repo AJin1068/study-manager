@@ -272,7 +272,7 @@ pub fn spawn(
     phone: PublisherHandle,
 ) {
     thread::spawn(move || {
-        // Held for the thread's life so macOS does not throttle the timer while the window is hidden.
+        // Held for the thread's life so the OS does not throttle the timer while the window is hidden.
         let _activity = match platform::begin_activity("study timer") {
             Ok(guard) => Some(guard),
             Err(err) => {

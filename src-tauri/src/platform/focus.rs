@@ -1,7 +1,7 @@
 //! Focus sensors: which app is in front and how long the user has not touched keyboard or mouse.
 //! Only the app identity and a count of idle seconds leave this module. A window caption is read
 //! only through `front_window_title`, which the opt-in study context calls; no key or pointer
-//! event content is observed (macOS reports a single idle number).
+//! event content is observed (macOS and Windows report a single idle number).
 
 use serde::Serialize;
 
@@ -12,12 +12,12 @@ use super::{AppIdentity, PlatformError};
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum TitleAccess {
-    // Only the macOS probe reports Granted/Denied; every other target reports Unsupported.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    // macOS and Windows report Granted; only macOS reports Denied; other targets Unsupported.
+    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
     Granted,
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Denied,
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    #[cfg_attr(any(target_os = "macos", target_os = "windows"), allow(dead_code))]
     Unsupported,
 }
 
@@ -37,7 +37,10 @@ pub trait FocusProbe: Send + Sync {
 
 /// Converts the OS idle reading to whole seconds. A negative or non-finite value means the OS
 /// gave no usable answer; it is an error rather than a fabricated zero.
-#[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
+#[cfg_attr(
+    not(any(target_os = "macos", target_os = "windows", test)),
+    allow(dead_code)
+)]
 pub(super) fn whole_idle_seconds(raw: f64) -> Result<u64, PlatformError> {
     if !raw.is_finite() || raw < 0.0 {
         return Err(PlatformError::Process(
@@ -49,20 +52,16 @@ pub(super) fn whole_idle_seconds(raw: f64) -> Result<u64, PlatformError> {
 }
 
 /// Sensors for targets without an implementation: every call says so explicitly.
-#[cfg_attr(target_os = "macos", allow(dead_code))]
+#[cfg_attr(any(target_os = "macos", target_os = "windows"), allow(dead_code))]
 pub struct UnsupportedFocusProbe;
 
 impl FocusProbe for UnsupportedFocusProbe {
     fn frontmost_app(&self) -> Result<Option<AppIdentity>, PlatformError> {
-        Err(PlatformError::Unsupported(
-            "foreground app sensor (Windows pending real-device verification)",
-        ))
+        Err(PlatformError::Unsupported("foreground app sensor"))
     }
 
     fn idle_seconds(&self) -> Result<u64, PlatformError> {
-        Err(PlatformError::Unsupported(
-            "input idle sensor (Windows pending real-device verification)",
-        ))
+        Err(PlatformError::Unsupported("input idle sensor"))
     }
 
     fn window_title_access(&self) -> TitleAccess {

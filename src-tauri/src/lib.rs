@@ -295,7 +295,7 @@ fn install_quit_gate(handle: &tauri::AppHandle) {
         allowed
     });
     if let Err(err) = platform::install_quit_gate(gate) {
-        tracing::warn!(error = %err, "native quit gate unavailable; Apple Event quit is not gated");
+        tracing::warn!(error = %err, "native quit gate unavailable; only the ExitRequested paths are gated");
     }
 }
 
@@ -336,6 +336,13 @@ pub fn run_native_host_if_invoked() -> Option<i32> {
     browser_link::host::run_if_invoked(&args)
 }
 
+/// Windows relaunch supervision: true when the watchdog task started this process after a
+/// deliberate quit, so it must exit before anything boots. Any other start re-arms the watchdog.
+pub fn start_is_suppressed() -> bool {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    platform::supervised_start_suppressed(browser_link::BUNDLE_IDENTIFIER, &args)
+}
+
 pub fn run() {
     // Logs carry only event kinds, timestamps, and counts: no window titles or URLs.
     tracing_subscriber::fmt()
@@ -345,8 +352,11 @@ pub fn run() {
     // Single instance must be registered first: a second process exits here, before setup,
     // so it cannot run session recovery against the live first session.
     let app = tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            tray::show_main_window(app);
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // The Windows watchdog task starts the app every minute; that is not a user action.
+            if !platform::is_supervised_start(&args) {
+                tray::show_main_window(app);
+            }
         }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -570,7 +580,7 @@ pub fn run() {
         if let RunEvent::ExitRequested { api, .. } = event {
             let state = app_handle.state::<AppState>();
             match commands::allow_exit(&state) {
-                Ok(true) => {}
+                Ok(true) => platform::note_clean_exit(browser_link::BUNDLE_IDENTIFIER),
                 Ok(false) => {
                     api.prevent_exit();
                     tracing::info!(event = "exit_blocked", reason = "lock_held");

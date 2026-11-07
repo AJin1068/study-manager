@@ -236,7 +236,9 @@ fn every_rules_edit_is_refused_during_the_run_and_blocking_stays_as_it_was() {
     {
         let mut conn = world.db.lock().expect("db");
         let host = std::path::Path::new("/tmp/study-manager-host");
-        let dir = std::env::temp_dir().join(format!("study-manager-e2e-{}", std::process::id()));
+        let dir = crate::platform::HostTarget::in_dir(
+            std::env::temp_dir().join(format!("study-manager-e2e-{}", std::process::id())),
+        );
         register::set_registered(&mut conn, &dir, host, true, t(12, 0, 3))
             .expect("register before the run");
 
@@ -273,7 +275,7 @@ fn every_rules_edit_is_refused_during_the_run_and_blocking_stays_as_it_was() {
             .filter(|h| h.outcome == "rejected_locked")
             .count();
         assert_eq!(rejected, 4, "each attempt leaves a record");
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&dir.manifest_dir);
     }
     // Same verdicts as before the attempts: reddit still blocked, the video category still on.
     assert_eq!(visit(&world, &PAGES), page_verdicts());

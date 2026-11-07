@@ -46,6 +46,7 @@
   - 한 OS에서만 지원되는 기능은 인터페이스에서 명시적으로 "미지원" 결과를 반환하고, 조용히 무시하지 않는다.
 - OS API 사용 시 권한(macOS 접근성/자동화 권한 등)과 Windows 권한 차이를 해당 모듈 주석이나 문서에 기록한다.
 - 경로는 `std::path`/Tauri path API를 사용하고 `/`나 `\`를 하드코딩하지 않는다.
+- Windows 구현(`platform/windows.rs`·`windows_ipc.rs`·`task_scheduler.rs`, `windows-sys`·`winreg`): 프로세스 제어는 핸들을 잡은 채 `EnumWindows`·`WM_CLOSE`·`TerminateProcess`, 앞 앱·유휴는 `GetForegroundWindow`·`GetLastInputInfo`, 전원 이벤트는 `RegisterSuspendResumeNotification`(Modern Standby에서 안 올 수 있어 하트비트 간격 감지가 보완), 브라우저 링크는 소유자 SID 전용 DACL의 overlapped named pipe + HKCU 네이티브 메시징 키. 종료 게이트 설치는 정의된 `Ok` 무동작(탈출 경로가 `ExitRequested` 하나뿐이고 이미 게이트됨), 백그라운드 보호(`begin_activity`)는 프로세스 전력 제한 옵트아웃. `set_tray_title`은 Windows에서 의도적으로 `Unsupported`(트레이는 툴팁만). 재실행 감시는 작업 스케줄러의 「작업 실패 시 재시작」이 종료 코드에 반응하지 않아(실측) 로그온 작업 + 1분 감시 작업(`--supervised`) + 정상 종료 표시 파일 구조이며, 자동 실행은 Run 항목과 이 작업 쌍 중 정확히 하나만 켠다.
 
 ## 5. 앱 종료 정책
 

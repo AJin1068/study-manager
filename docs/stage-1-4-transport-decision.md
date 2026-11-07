@@ -3,7 +3,7 @@
 **Decision (D-20 confirmed): native messaging + local IPC.** Chrome starts a small host process
 (the app binary itself, recognised by the `chrome-extension://<id>/` argument Chrome passes, handled
 in `main.rs` before Tauri starts). The host relays frames between Chrome stdio and a Unix domain
-socket in the app data directory (Windows named pipe: not implemented, `Unsupported`).
+socket in the app data directory (Windows: an overlapped named pipe named from a hash of the data directory, restricted to the current user's SID; registered through `HKCU\Software\Google\Chrome\NativeMessagingHosts`).
 
 ## Why not a localhost server
 
@@ -36,8 +36,7 @@ No finding contradicts the default, so it stands.
 - [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] Loading an unpacked extension, `connectNative`, and the real manifest in
   `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/` (nothing was installed to the home directory).
 - [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] MV3 service worker lifetime with the port open; incognito behaviour.
-- [판정 2026-11-07: 미구현] A GUI-subsystem Windows binary used as a stdio host, the Windows named-pipe transport, and
-  registry registration.
+- [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] A GUI-subsystem Windows binary used as a stdio host through real Chrome. The named-pipe transport, registry registration, and host mode without the app were exercised on this PC (`cargo test`; the host binary answers `app_not_running`); the Chrome-launched connection is not.
 - [판정 2026-11-07: 미구현] Edge and Brave manifest locations (only Chrome's macOS directory is coded).
 - [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] `ALLOWED_EXTENSION_IDS` now lists the ID pinned by the manifest `key` (`manoifclikefdhhomeklmdjbeknmloem`, derived from the key's SHA-256 outside the test suite); that the real Chrome computes the same ID is not verified.
 
@@ -49,7 +48,7 @@ No finding contradicts the default, so it stands.
 | --- | --- | --- | --- | --- |
 | T1 unpacked extension, `connectNative`, Chrome 매니페스트 | 사람 확인(MANUAL-CHECKLIST) | `pnpm build:extension` | 종료 0 (빌드만) | Chrome에서 로드하지 않음. macOS 매니페스트 경로 확인은 맥에서 확인 필요 |
 | T2 MV3 서비스 워커 수명, 시크릿 | 사람 확인(MANUAL-CHECKLIST) | 해당 없음 | 해당 없음 | 실제 Chrome 필요 |
-| T3 GUI 서브시스템 Windows 바이너리 stdio 호스트, named pipe, 레지스트리 | 미구현 | `cargo test` (src-tauri) | lib 1047 통과, 실패 0 | `browser_ipc.rs`의 `bind_listener/connect`가 non-unix에서 `Unsupported`. `cfg(unix)` 소켓 테스트는 Windows에서 실행되지 않음. 구현 후 사람 확인 필요 |
+| T3 GUI 서브시스템 Windows 바이너리 stdio 호스트, named pipe, 레지스트리 | 부분 | `cargo test` (src-tauri) | lib 1081 통과, 실패 0 | named pipe(`windows_ipc.rs`)·HKCU 등록·호스트 모드(앱이 없을 때 `app_not_running`)는 이 PC에서 실행해 확인. Chrome이 호스트를 띄우는 연결은 사람 확인(MANUAL-CHECKLIST 4절) |
 | T4 Edge·Brave 매니페스트 위치 | 미구현 | 해당 없음 | 해당 없음 | Chrome macOS 디렉터리만 코딩됨 |
 | T5 실제 Chrome의 확장 ID 일치 | 사람 확인(MANUAL-CHECKLIST) | 해당 없음 | 해당 없음 | `chrome://extensions`에서 `manoifclikefdhhomeklmdjbeknmloem` 확인 |
 

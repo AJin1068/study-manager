@@ -33,7 +33,7 @@
 | 항목 | 이유 | 관련 AC |
 |---|---|---|
 | Windows 빌드 (`cargo check`, `clippy`, `test`, `tauri build`) | [판정 2026-11-07: 검증됨(Windows) — 아래 「Windows PC 검증 결과」 표의 네이티브 빌드·시험 결과로 해소; 이전 기록:] 로컬 `cargo check --target x86_64-pc-windows-msvc`는 번들된 SQLite C 빌드에서 `stdlib.h`를 찾지 못해 실패한다(호스트에 Windows C 헤더 없음, 코드 결함이 아님). CI 매트릭스(`windows-latest`)에서만 검증 가능. | AC10 |
-| Windows 절전·깨어남 감지 | [판정 2026-11-07: 미구현] Windows 전원 이벤트는 1단계-1에서 `Unsupported`. 실기기 검증은 S7a에서. | AC5 |
+| Windows 절전·깨어남 감지 | [판정 2026-11-07: 구현됨, 실기기 확인은 사람] Windows 전원 이벤트는 `RegisterSuspendResumeNotification`(콜백)로 구현. 등록 성공과 이벤트 매핑은 `cargo test`, 덮개 닫기·절전 도달은 MANUAL-CHECKLIST 3절. | AC5 |
 | 데스크톱 GUI 실행과 트레이·메뉴바 확인 | [판정 2026-11-07: 맥에서 확인 필요] 에이전트에게 macOS 손쉬운 사용(Accessibility) 권한이 없다 (`osascript` -1719). 사용자가 직접 확인해야 한다. | AC1 |
 | 실제 절전·깨어남 이벤트 (`pmset sleepnow`) | [판정 2026-11-07: 맥에서 확인 필요] 실기기 절전이 필요. 단위 테스트는 가짜 이벤트만 다룬다. | AC5 |
 | 강제 종료(kill) 후 `forced_quit` 행 | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] **검증됨 (macOS)**: 실행 중 앱에 `kill -KILL`, 재실행 후 `downtime_records`에 `forced_quit` 1행, 해당 세션 `clean_exit=0`. 로그인 시점 실행은 별도 확인 대상이 아님. | AC6 |
@@ -48,7 +48,7 @@
 | ID | 판정 | 명령 | 결과(종료코드·개수) | 비고 |
 |---|---|---|---|---|
 | 1-1-V1 Windows 빌드 | 검증됨(Windows) | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (src-tauri); `pnpm tauri build --bundles nsis` | 모두 종료 0. `cargo test`: lib 1047 + llm_wire 4 + remote_wire 7 + doc 3 통과, 실패 0. NSIS 설치 파일 5.03 MiB 생성 | 이전 결과(SQLite 헤더 부재로 `cargo check` 실패)는 네이티브 Windows로 대체됨. 설치 파일은 실행하지 않았고 GUI는 보지 않았다. `cfg(unix)` 테스트는 Windows에서 컴파일되지 않는다. 수정 커밋 a22bb03, cd88e14 |
-| 1-1-V2 Windows 절전·깨어남 | 미구현 | 해당 없음 | 해당 없음 | 코드가 `Unsupported`; 실기기 검증은 S7a |
+| 1-1-V2 Windows 절전·깨어남 | 부분 | `cargo test` (platform::windows) | 등록 성공·매핑 시험 통과 | 이벤트 실도달(특히 Modern Standby)은 실기기 절전 필요: MANUAL-CHECKLIST 3절. 이벤트가 안 오면 하트비트 간격 감지가 기록한다 |
 | 1-1-V3 GUI·트레이·메뉴바 | 맥에서 확인 필요 | 해당 없음 | 해당 없음 | 메뉴바는 macOS 전용. Windows 트레이 GUI는 이 PC에서 보지 않았다 |
 | 1-1-V4 `pmset sleepnow` | 맥에서 확인 필요 | 해당 없음 | 해당 없음 | macOS 전용 |
 | 1-1-V5 강제 종료 `forced_quit` | 사람 확인(MANUAL-CHECKLIST) | 릴리스 exe 스모크 실행 | 불확정 | 기존 디버그 인스턴스가 단일 인스턴스 잠금을 쥐고 있어 첫 실행·`forced_quit` 순서를 관찰하지 못했다. DB 파일 `%APPDATA%\com.studymanager.app\study-manager.sqlite`는 존재 |

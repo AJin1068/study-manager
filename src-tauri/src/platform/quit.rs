@@ -7,7 +7,8 @@
 //!
 //! Windows: `WM_QUERYENDSESSION` handling was investigated only, not implemented. The tray quit
 //! item and `app.exit` already pass the exit gate; a session-ending message cannot be refused
-//! without trapping the user at logoff, so the Windows source reports `Unsupported`.
+//! without trapping the user at logoff, so Windows installs no native quit gate (`install_quit_gate` is
+//! a defined `Ok` no-op there).
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuitReason {
