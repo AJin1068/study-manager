@@ -36,8 +36,13 @@
 | `cargo test` (폰 코어: 55개 시험, 이 에이전트가 실행·통과) | `phone/core` | 55개 통과 |
 | `cargo check` / `cargo test` (폰 Tauri 셸, 호스트 타깃만; 안드로이드 타깃은 시도하지 못함) | `phone/src-tauri` | 종료 0 / 10개 통과 |
 | `pnpm build:web` | 루트 | 종료 0 |
-| Windows 타깃 `cargo check --target x86_64-pc-windows-msvc` | `src-tauri` | 종료 101: 번들 SQLite C 헤더 부재 (검증 안 됨) |
-| `cargo fmt --check` | `src-tauri` | 실행 불가: rustfmt 미설치 (검증 안 됨) |
+| Windows 네이티브(x86_64-pc-windows-msvc, Windows 11 x64, rustc 1.99.1) `cargo test` | `src-tauri` | 종료 0: lib 1047 + llm_wire 4 + remote_wire 7 + doc 3 통과, 실패 0 (2026-11-07). 이전 기록: 「Windows 타깃 `cargo check` 종료 101: 번들 SQLite C 헤더 부재 (검증 안 됨)」 — 네이티브 Windows 빌드에서는 재현되지 않았다. `cfg(unix)` 시험은 컴파일되지 않아 실행되지 않았다 |
+| Windows 네이티브 `cargo clippy --all-targets -- -D warnings` | `src-tauri` | 종료 0 (2026-11-07, 수정 커밋 a22bb03) |
+| `cargo fmt --check` | `src-tauri` | 종료 0 (2026-11-07, Windows, 커밋 cd88e14로 `cargo fmt` 적용 후). 이전 기록: 「실행 불가: rustfmt 미설치 (검증 안 됨)」 |
+| Windows 네이티브 fmt --check / clippy -D warnings / test | `crates/link-protocol` | 종료 0 / 0 / 14 + 통합 6개 통과. `cargo build --target aarch64-linux-android` 종료 0 |
+| Windows 네이티브 fmt --check / clippy -D warnings / test | `phone/core` | 종료 0 / 0 / 55개 통과. `cargo build --target aarch64-linux-android` 종료 0 |
+| Windows 네이티브 fmt --check / clippy -D warnings / test (호스트 타깃) | `phone/src-tauri` | 종료 0 / 0 / 10개 통과 (수정 커밋 f31bed6: `icons/icon.ico` 추가, `app.rs` 시험 clippy 2건) |
+| `pnpm install --frozen-lockfile` / `pnpm tsc --noEmit` / `pnpm lint` / `pnpm test` / `pnpm build:web` / `pnpm build:extension` (Windows, node 26.13, pnpm 10.34.9) | 루트 | 종료 0 / 0 / 0 / 72개 파일 511개 통과 / 0 / 0 (2026-11-07; 수정 커밋 74cab52 `.gitattributes` 이후 — 이전엔 CRLF 때문에 정적 시험 3개 실패) |
 
 `supabase test db`(`rls_s5_phone.sql`, `rls_s5_notify_phone_app.sql`)는 Docker·Supabase CLI가 없어 게이트에 넣지 못했다(V5-2, V5-8).
 
@@ -59,16 +64,33 @@
 
 | ID | 스토리 | 항목 | 안 된 이유 | 사람이 하는 한 줄 절차 |
 |---|---|---|---|---|
-| V5-1 | S5.0, S5.1, S5.3 | Tauri 모바일(옵션 A) 빌드 가능성, `link-protocol`의 Android 타깃 컴파일, **`phone/` 앱 본체의 안드로이드 빌드**(본체 코드는 작성됨: `phone/core`, `phone/src-tauri`, `phone/src`) | Android SDK·NDK·JDK 없음 | JDK 17·SDK 34·NDK r26 설치 후 `cargo build --target aarch64-linux-android`(link-protocol)와 `phone/src-tauri`에서 `pnpm tauri android init`(생성된 `gen/android`에 `phone/plugins/blocker/android`를 플러그인 프로젝트로 연결)와 `pnpm tauri android build`가 APK를 만드는지, `build.rs`의 인라인 플러그인 권한(`blocker:default`)과 `barcode-scanner` 권한이 모바일 빌드에서 해석되는지 확인, 막히면 `decision-phone-architecture.md`의 되돌림 조건 |
-| V5-2 | S5.2 | 실제 QR 스캔, 익명 로그인(`signInAnonymously` 허용 설정), 실제 Postgres에서 phone 마이그레이션과 RLS·RPC 권한(`rls_s5_phone.sql`) | 폰 카메라·실제 프로젝트·Docker 없음 | 프로젝트에서 익명 로그인을 켜고 마이그레이션 적용 후 `supabase test db`가 통과하는지, PC QR을 폰으로 찍어 짝이 맺어지고 PC에서 끊으면 폰 읽기가 거부되는지 확인 |
-| V5-3 | S5.3 | 실기기에서 임대 수신 지연(폴링 ≤15초+푸시)과 폰 비트 끊김 판정 | 실기기·실서버 필요 | 짝지은 폰으로 공부 구간을 시작해 PC 시작부터 폰 잠금까지 걸린 시간과, 비행기 모드 90초 뒤 PC에 간격 경고가 뜨는지 재기 |
-| V5-4 | S5.4 | Kotlin 소스 컴파일, `AllowListTest.kt` 실행 | Android 툴체인 없음(소스 정적 시험만 있음) | `phone/plugins/blocker/android`에서 `./gradlew test assembleDebug` 실행 |
-| V5-5 | S5.4 | 접근성 권한 흐름, 차단 화면, 설정 앱 진입 차단, 서비스 끄기 감지(`service_disabled`), 부팅 후 임대 복구, 배터리 최적화·제조사별 종료 | 기기 필요 | 접근성 허용 후 공부 구간에서 허용 밖 앱이 덮이는지, 서비스를 끄면 PC에 경고가 뜨는지, 재부팅 후 남은 시간만큼 다시 잠기는지, 제조사 배터리 설정에서 서비스가 살아 있는지 확인 |
-| V5-6 | S5.5 | 기기별 화면 켜짐·잠금 해제 횟수 정확도 | 기기 필요 | 공부 구간 중 폰을 10번 집어 든 뒤 PC 대시보드의 횟수와 비교 |
-| V5-7 | S5.6 | `android.yml` 실행, APK 서명·릴리스 업로드, APK 설치(알 수 없는 앱 허용) | GitHub 원격·서명 키·기기 없음 | 저장소 비밀에 서명 키를 넣고 태그를 푸시해 Releases에 APK가 올라오는지, PC 설정의 QR로 폰에서 내려받아 설치되는지 확인 |
-| V5-8 | S5.7 | 실제 ntfy 푸시 도착(`phone_app` 채널), 절전 모드 지연, `rls_s5_notify_phone_app.sql` 실행 | 실기기·실서버·Docker 없음 | 채널을 폰 앱으로 바꾸고 PC를 끈 채 계획 시각 5분 뒤 폰 알림이 오는지 확인, `supabase test db` 실행 |
-| V5-9 | S5.8 외 | 폰 짝짓기 카드·APK 설치 카드·폰 연결 경고·iOS 「Apple 승인 후 지원」 안내의 실제 렌더 | GUI 실행 불가 | 설정 → 폰 카드를 라이트·다크로 열어 문구가 겹치거나 잘리지 않는지, iOS 안내가 보이는지 확인 |
-| V5-10 | 전체 | **5단계 완료 기준**: 공부 시간에 폰이 PC와 함께 잠김(실제 PC+실제 폰+실제 서버, 긴급 패스·서버 단절·짝 해제 포함) | 위 항목이 모두 필요 | V5-1~V5-8을 끝낸 뒤 공부 구간 하나에서 시작 → 폰 잠김 → 긴급 패스 → 풀림 → 와이파이 끊고 임대 만료 → 짝 해제를 순서대로 확인 |
+| V5-1 | S5.0, S5.1, S5.3 | Tauri 모바일(옵션 A) 빌드 가능성, `link-protocol`의 Android 타깃 컴파일, **`phone/` 앱 본체의 안드로이드 빌드**(본체 코드는 작성됨: `phone/core`, `phone/src-tauri`, `phone/src`) | [판정 2026-11-07: 부분] Android SDK·NDK·JDK 없음 | JDK 17·SDK 34·NDK r26 설치 후 `cargo build --target aarch64-linux-android`(link-protocol)와 `phone/src-tauri`에서 `pnpm tauri android init`(생성된 `gen/android`에 `phone/plugins/blocker/android`를 플러그인 프로젝트로 연결)와 `pnpm tauri android build`가 APK를 만드는지, `build.rs`의 인라인 플러그인 권한(`blocker:default`)과 `barcode-scanner` 권한이 모바일 빌드에서 해석되는지 확인, 막히면 `decision-phone-architecture.md`의 되돌림 조건 |
+| V5-2 | S5.2 | 실제 QR 스캔, 익명 로그인(`signInAnonymously` 허용 설정), 실제 Postgres에서 phone 마이그레이션과 RLS·RPC 권한(`rls_s5_phone.sql`) | [판정 2026-11-07: 부분] 폰 카메라·실제 프로젝트·Docker 없음 | 프로젝트에서 익명 로그인을 켜고 마이그레이션 적용 후 `supabase test db`가 통과하는지, PC QR을 폰으로 찍어 짝이 맺어지고 PC에서 끊으면 폰 읽기가 거부되는지 확인 |
+| V5-3 | S5.3 | 실기기에서 임대 수신 지연(폴링 ≤15초+푸시)과 폰 비트 끊김 판정 | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 실기기·실서버 필요 | 짝지은 폰으로 공부 구간을 시작해 PC 시작부터 폰 잠금까지 걸린 시간과, 비행기 모드 90초 뒤 PC에 간격 경고가 뜨는지 재기 |
+| V5-4 | S5.4 | Kotlin 소스 컴파일, `AllowListTest.kt` 실행 | [판정 2026-11-07: 검증됨(Windows)] Android 툴체인 없음(소스 정적 시험만 있음) | `phone/plugins/blocker/android`에서 `./gradlew test assembleDebug` 실행 |
+| V5-5 | S5.4 | 접근성 권한 흐름, 차단 화면, 설정 앱 진입 차단, 서비스 끄기 감지(`service_disabled`), 부팅 후 임대 복구, 배터리 최적화·제조사별 종료 | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 기기 필요 | 접근성 허용 후 공부 구간에서 허용 밖 앱이 덮이는지, 서비스를 끄면 PC에 경고가 뜨는지, 재부팅 후 남은 시간만큼 다시 잠기는지, 제조사 배터리 설정에서 서비스가 살아 있는지 확인 |
+| V5-6 | S5.5 | 기기별 화면 켜짐·잠금 해제 횟수 정확도 | [판정 2026-11-07: 미구현] 기기 필요 | 공부 구간 중 폰을 10번 집어 든 뒤 PC 대시보드의 횟수와 비교 |
+| V5-7 | S5.6 | `android.yml` 실행, APK 서명·릴리스 업로드, APK 설치(알 수 없는 앱 허용) | [판정 2026-11-07: 부분] GitHub 원격·서명 키·기기 없음 | 저장소 비밀에 서명 키를 넣고 태그를 푸시해 Releases에 APK가 올라오는지, PC 설정의 QR로 폰에서 내려받아 설치되는지 확인 |
+| V5-8 | S5.7 | 실제 ntfy 푸시 도착(`phone_app` 채널), 절전 모드 지연, `rls_s5_notify_phone_app.sql` 실행 | [판정 2026-11-07: 부분] 실기기·실서버·Docker 없음 | 채널을 폰 앱으로 바꾸고 PC를 끈 채 계획 시각 5분 뒤 폰 알림이 오는지 확인, `supabase test db` 실행 |
+| V5-9 | S5.8 외 | 폰 짝짓기 카드·APK 설치 카드·폰 연결 경고·iOS 「Apple 승인 후 지원」 안내의 실제 렌더 | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] GUI 실행 불가 | 설정 → 폰 카드를 라이트·다크로 열어 문구가 겹치거나 잘리지 않는지, iOS 안내가 보이는지 확인 |
+| V5-10 | 전체 | **5단계 완료 기준**: 공부 시간에 폰이 PC와 함께 잠김(실제 PC+실제 폰+실제 서버, 긴급 패스·서버 단절·짝 해제 포함) | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 위 항목이 모두 필요 | V5-1~V5-8을 끝낸 뒤 공부 구간 하나에서 시작 → 폰 잠김 → 긴급 패스 → 풀림 → 와이파이 끊고 임대 만료 → 짝 해제를 순서대로 확인 |
+
+### Windows PC 검증 결과 (2026-11-07)
+
+환경: Windows 11 x64, rustc 1.99.1, JDK 17 Temurin, Android SDK 34 / NDK 26.1.10909125, 스텁 PostgreSQL 16.4(실제 Supabase 아님). 5단계 완료 기준(V5-10)은 충족으로 표기하지 않는다.
+
+| ID | 판정 | 명령 | 결과(종료코드·개수) | 비고 |
+|---|---|---|---|---|
+| V5-1 | 부분 | `cargo build --target aarch64-linux-android`(`crates/link-protocol`, `phone/core`), `pnpm tauri android init --ci`, `tauri android build --apk`(`phone/src-tauri`) | 종료 0 / 0 / 0(init) / 실패(APK 패키징). `libstudy_phone_lib.so`(aarch64, 디버그 154 MB) 빌드됨, Kotlin 플러그인 모듈 컴파일됨 | 실패 원인: "Failed to create a symbolic link ... Creation symbolic link is not allowed for this system"(비관리자, Windows 심볼릭 링크 권한). APK 조립·설치·실행은 미확인. 수동: Windows 개발자 모드를 켠 뒤 `phone/src-tauri`에서 `pnpm --dir ../.. exec tauri android init --ci`, `node ../scripts/wire-blocker.mjs`, `tauri android build --apk` 순서로 재시도. 수정 커밋: tauri 2.11.6→2.12.5(Cargo.lock), 플러그인 `build.gradle.kts` sourceSets 블록형, `phone/scripts/wire-blocker.mjs` 추가 |
+| V5-2 | 부분 | `supabase/tests/stub/run.ps1` (스텁 PG 16.4) | 종료 0: 마이그레이션 8개 적용, rls_s5_phone 52/52, rls_s5_anonymous_guard 23/23 통과(전체 172단언), 음성 대조군 실패(요구대로) | SQL 부분만 부분 검증(스텁). 실제 QR 스캔·익명 로그인 설정·`supabase test db`는 사람 |
+| V5-3 | 사람 확인(MANUAL-CHECKLIST) | 실행 안 함 | — | 실기기·실서버 필요 |
+| V5-4 | 검증됨(Windows) | Gradle `:blocker:testDebugUnitTest`(`phone/plugins/blocker/android`, AGP 9.3.1 / Kotlin 2.2.10) | 종료 0: Kotlin 소스 10개 파일 컴파일, `AllowListTest` 2개 시험 실패 0 (`fixtures/phone/blocker-bridge.json` 읽음) | `assembleDebug`는 실행하지 않았다(APK 패키징은 V5-1 참고). 문서의 `./gradlew test assembleDebug` 중 test 부분만 해당 |
+| V5-5 | 사람 확인(MANUAL-CHECKLIST) | 실행 안 함 | — | 접근성 서비스·차단 화면·부팅 복구는 기기 필요 |
+| V5-6 | 미구현 | 실행 안 함 | — | 폰의 화면 켜짐 횟수 계수 코드 없음(알려진 빈틈 ③). 구현 뒤에 기기 정확도 확인 |
+| V5-7 | 부분 | `pnpm test`(vitest 정적 시험, `android.workflow` 포함) | 종료 0, 72개 파일 511개 통과 | `android.yml`은 빌드 단계가 틀려(`phone/gradlew` 없음) 로컬에서 고쳤으나(pnpm/node/rust 설정, `tauri android init --ci`, wire 스크립트, `tauri android build --apk`, 올바른 unsigned APK 경로, `dtolnay/rust-toolchain@v1` 고정) GitHub에서 한 번도 실행되지 않았다. 서명·릴리스 업로드·APK 설치는 사람 |
+| V5-8 | 부분 | `supabase/tests/stub/run.ps1` (스텁 PG 16.4) | 종료 0: rls_s5_notify_phone_app 4/4 통과 | SQL 부분만 부분 검증(스텁, `supabase test db` 미실행). 실제 ntfy 푸시 도착·절전 지연은 사람 |
+| V5-9 | 사람 확인(MANUAL-CHECKLIST) | 실행 안 함 | — | GUI 렌더·라이트/다크 눈 확인 필요 |
+| V5-10 | 사람 확인(MANUAL-CHECKLIST) | 실행 안 함 | — | V5-1~V5-8 완료 뒤 실제 PC+폰+서버 종단 확인 필요 |
 
 ### 이전 단계에서 이월되어 아직 열린 항목 (참조)
 
