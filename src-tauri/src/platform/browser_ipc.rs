@@ -11,6 +11,7 @@ use std::time::Duration;
 use super::PlatformError;
 
 /// File names inside the app data directory.
+#[cfg(unix)]
 const SOCKET_FILE: &str = "browser-link.sock";
 const TOKEN_FILE: &str = "browser-link.token";
 const TOKEN_BYTES: usize = 32;
