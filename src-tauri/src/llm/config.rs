@@ -199,10 +199,7 @@ mod tests {
         )
         .expect("ok");
         assert!(matches!(ok, UpdateOutcome::Applied { .. }));
-        assert_eq!(
-            LlmConfig::load(&conn).expect("load").wiki_dir,
-            good_dir
-        );
+        assert_eq!(LlmConfig::load(&conn).expect("load").wiki_dir, good_dir);
     }
 
     #[test]
