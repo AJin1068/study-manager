@@ -353,7 +353,7 @@ mod tests {
     }
 
     fn app(
-        dir: &PathBuf,
+        dir: &std::path::Path,
         script: Vec<Result<HttpResponse, TransportError>>,
         bridge: Vec<Result<Value, BridgeFailure>>,
     ) -> (PhoneApp, Arc<Script>) {
@@ -362,14 +362,14 @@ mod tests {
     }
 
     fn app_with_clock(
-        dir: &PathBuf,
+        dir: &std::path::Path,
         script: Vec<Result<HttpResponse, TransportError>>,
         bridge: Vec<Result<Value, BridgeFailure>>,
     ) -> (PhoneApp, Arc<Script>, Arc<Clk>) {
         let transport = Arc::new(Script(Mutex::new(script.into()), Mutex::new(Vec::new())));
         let clock = Arc::new(Clk(AtomicI64::new(100)));
         let app = PhoneApp::new(
-            dir.clone(),
+            dir.to_path_buf(),
             transport.clone(),
             clock.clone(),
             Arc::new(ScriptedBridge::new(bridge)),
@@ -397,7 +397,7 @@ mod tests {
     fn pairing_stores_the_identity_and_a_new_process_restores_it_without_signing_up_again() {
         let dir = temp_dir("pair");
         let (first, _) = app(&dir, vec![tokens("r1"), reply(CLAIMED)], vec![]);
-        assert_eq!(first.view().paired, false);
+        assert!(!first.view().paired);
         assert_eq!(first.pair(&qr()), Ack { code: "ok" });
         assert!(first.view().paired);
 
