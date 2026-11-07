@@ -39,20 +39,38 @@ const LOW_QUIZ_PCT: i64 = 60;
 /// Streak from which the insight praises it.
 const STREAK_PRAISE_DAYS: i64 = 3;
 
-pub const INSIGHT_SUBJECT: SettingSpec =
-    SettingSpec { name: "growth.insight_subject", category: CATEGORY, kind: ValueKind::Bool, default: "true", tighten_to: Some("false") };
+pub const INSIGHT_SUBJECT: SettingSpec = SettingSpec {
+    name: "growth.insight_subject",
+    category: CATEGORY,
+    kind: ValueKind::Bool,
+    default: "true",
+    tighten_to: Some("false"),
+};
 
 pub fn insight_subject_enabled(conn: &Connection) -> AppResult<bool> {
     match settings::read_value(conn, &INSIGHT_SUBJECT)? {
         SettingValue::Bool(v) => Ok(v),
-        other => Err(AppError::Internal(format!("{} has the wrong type: {other:?}", INSIGHT_SUBJECT.name))),
+        other => Err(AppError::Internal(format!(
+            "{} has the wrong type: {other:?}",
+            INSIGHT_SUBJECT.name
+        ))),
     }
 }
 
 /// Switching it off narrows what is sent, so it stays allowed during a planned run; switching on
 /// is locked like any setting.
-pub fn set_insight_subject(conn: &mut Connection, on: bool, at_ms: i64) -> AppResult<UpdateOutcome> {
-    settings::apply_setting(conn, &INSIGHT_SUBJECT, &SettingValue::Bool(on), at_ms, || Ok(()))
+pub fn set_insight_subject(
+    conn: &mut Connection,
+    on: bool,
+    at_ms: i64,
+) -> AppResult<UpdateOutcome> {
+    settings::apply_setting(
+        conn,
+        &INSIGHT_SUBJECT,
+        &SettingValue::Bool(on),
+        at_ms,
+        || Ok(()),
+    )
 }
 
 // ---- wire types ----
@@ -111,9 +129,14 @@ fn pct(part: i64, whole: i64) -> Option<i64> {
 
 /// Progress inside the current level, 0-100. The lower bound is the previous threshold.
 pub fn level_progress_pct(level: i64, earned: i64, next_level_at: Option<i64>) -> i64 {
-    let Some(next) = next_level_at else { return 100 };
+    let Some(next) = next_level_at else {
+        return 100;
+    };
     let index = usize::try_from(level - 1).unwrap_or(0);
-    let floor = crate::points::rewards::LEVEL_THRESHOLDS.get(index).copied().unwrap_or(0);
+    let floor = crate::points::rewards::LEVEL_THRESHOLDS
+        .get(index)
+        .copied()
+        .unwrap_or(0);
     pct(earned - floor, next - floor).unwrap_or(0)
 }
 
@@ -122,8 +145,15 @@ pub fn level_progress_pct(level: i64, earned: i64, next_level_at: Option<i64>) -
 pub fn pick_next_review(pages: &[(String, PageStat)], now_ms: i64) -> Option<NextReview> {
     let stats: Vec<PageStat> = pages.iter().map(|(_, p)| p.clone()).collect();
     let pick = recommend::rank(&stats, now_ms).into_iter().next()?;
-    let subject = pages.iter().find(|(_, p)| p.page_id == pick.page_id).map(|(s, _)| s.clone())?;
-    Some(NextReview { subject, page_name: pick.page_name, reason: pick.reason })
+    let subject = pages
+        .iter()
+        .find(|(_, p)| p.page_id == pick.page_id)
+        .map(|(s, _)| s.clone())?;
+    Some(NextReview {
+        subject,
+        page_name: pick.page_name,
+        reason: pick.reason,
+    })
 }
 
 /// The sentence written without a model. Deterministic: first matching rule wins.
@@ -133,16 +163,23 @@ pub fn rule_insight(input: &InsightInput) -> String {
     }
     if input.planned_min > 0 && input.study_min * 100 < input.planned_min * 80 {
         let done = pct(input.study_min, input.planned_min).unwrap_or(0);
-        return format!("이번 주 계획의 {done}%를 했어요. 다음 주는 하루 세트를 하나 줄여서 지킬 수 있는 계획으로 만들어 보세요.");
+        return format!(
+            "이번 주 계획의 {done}%를 했어요. 다음 주는 하루 세트를 하나 줄여서 지킬 수 있는 계획으로 만들어 보세요."
+        );
     }
     if let Some(acc) = input.quiz_accuracy_pct.filter(|a| *a < LOW_QUIZ_PCT) {
         return match &input.weakest_subject {
-            Some(subject) => format!("{subject} 퀴즈 정답률이 {acc}%예요. 위키를 먼저 복습하고 시작해 보세요."),
+            Some(subject) => {
+                format!("{subject} 퀴즈 정답률이 {acc}%예요. 위키를 먼저 복습하고 시작해 보세요.")
+            }
             None => format!("퀴즈 정답률이 {acc}%예요. 위키를 먼저 복습하고 시작해 보세요."),
         };
     }
     if input.streak_days >= STREAK_PRAISE_DAYS {
-        return format!("{}일 연속으로 달성 중이에요. 이 페이스를 다음 주에도 이어 가요.", input.streak_days);
+        return format!(
+            "{}일 연속으로 달성 중이에요. 이 페이스를 다음 주에도 이어 가요.",
+            input.streak_days
+        );
     }
     "이번 주 계획을 잘 지켰어요. 오늘 배운 것을 위키에 한 페이지 정리해 보세요.".to_string()
 }
@@ -158,7 +195,9 @@ struct RawInsight {
 pub fn parse_insight(answer: &str) -> Option<String> {
     let raw: RawInsight = serde_json::from_str(answer.trim()).ok()?;
     let text = raw.insight.trim().to_string();
-    let ok = !text.is_empty() && text.chars().count() <= INSIGHT_MAX_CHARS && !text.chars().any(char::is_control);
+    let ok = !text.is_empty()
+        && text.chars().count() <= INSIGHT_MAX_CHARS
+        && !text.chars().any(char::is_control);
     ok.then_some(text)
 }
 
@@ -175,7 +214,11 @@ fn review_pages(conn: &Connection) -> AppResult<Vec<(String, PageStat)>> {
 }
 
 /// Settles the point ledger first (like the dashboard) so level and progress are current.
-pub fn status<Tz: TimeZone>(conn: &mut Connection, tz: &Tz, now_ms: i64) -> AppResult<GrowthStatus> {
+pub fn status<Tz: TimeZone>(
+    conn: &mut Connection,
+    tz: &Tz,
+    now_ms: i64,
+) -> AppResult<GrowthStatus> {
     let today = dashboard::today(conn, tz, now_ms)?;
     let points = today.points;
     let (answered, correct) = repo::quiz_counts(conn)?;
@@ -196,11 +239,20 @@ pub fn status<Tz: TimeZone>(conn: &mut Connection, tz: &Tz, now_ms: i64) -> AppR
 
 /// This week's numbers for the model. The weakest subject (lowest quiz accuracy with enough
 /// answers) is included only when `include_subject`.
-pub fn insight_input<Tz: TimeZone>(conn: &mut Connection, tz: &Tz, now_ms: i64, include_subject: bool) -> AppResult<InsightInput> {
+pub fn insight_input<Tz: TimeZone>(
+    conn: &mut Connection,
+    tz: &Tz,
+    now_ms: i64,
+    include_subject: bool,
+) -> AppResult<InsightInput> {
     let week = dashboard::week(conn, tz, now_ms)?;
     let today = dashboard::today(conn, tz, now_ms)?;
     let (answered, correct) = repo::quiz_counts(conn)?;
-    let weakest_subject = if include_subject { weakest_subject(conn)? } else { None };
+    let weakest_subject = if include_subject {
+        weakest_subject(conn)?
+    } else {
+        None
+    };
     Ok(InsightInput {
         study_min: week.actual_ms / MINUTE_MS,
         planned_min: week.planned_ms / MINUTE_MS,
@@ -244,7 +296,12 @@ pub struct GrowthService {
 
 impl GrowthService {
     pub fn new(db: Arc<Mutex<Connection>>, llm: Arc<LlmService>, clock: Arc<dyn Clock>) -> Self {
-        Self { db, llm, clock, cache: Mutex::new(None) }
+        Self {
+            db,
+            llm,
+            clock,
+            cache: Mutex::new(None),
+        }
     }
 
     pub fn status(&self) -> AppResult<GrowthStatus> {
@@ -260,10 +317,17 @@ impl GrowthService {
             let mut conn = lock_db(&self.db)?;
             let include = insight_subject_enabled(&conn)?;
             let week_start = dashboard::week(&conn, &Local, now)?.week_start;
-            (insight_input(&mut conn, &Local, now, include)?, include, week_start)
+            (
+                insight_input(&mut conn, &Local, now, include)?,
+                include,
+                week_start,
+            )
         };
         if !refresh {
-            let cache = self.cache.lock().map_err(|_| AppError::Internal("insight cache poisoned".into()))?;
+            let cache = self
+                .cache
+                .lock()
+                .map_err(|_| AppError::Internal("insight cache poisoned".into()))?;
             if let Some((cached, with_subject)) = cache.as_ref() {
                 if cached.week_start == week_start && *with_subject == include_subject {
                     return Ok(cached.clone());
@@ -273,17 +337,35 @@ impl GrowthService {
         // The database is unlocked from here on: the call may take as long as the model needs.
         let insight = self.ask_or_rule(&input, week_start);
         if insight.source == InsightSource::Llm {
-            *self.cache.lock().map_err(|_| AppError::Internal("insight cache poisoned".into()))? = Some((insight.clone(), include_subject));
+            *self
+                .cache
+                .lock()
+                .map_err(|_| AppError::Internal("insight cache poisoned".into()))? =
+                Some((insight.clone(), include_subject));
         }
         Ok(insight)
     }
 
     fn ask_or_rule(&self, input: &InsightInput, week_start: String) -> WeeklyInsight {
-        let request = LlmRequest { purpose: Purpose::Insight, prompt: Prompt::insight(input.clone()), max_tokens: INSIGHT_MAX_TOKENS };
-        let rule = |reason: String| WeeklyInsight { week_start: week_start.clone(), text: rule_insight(input), source: InsightSource::Rule, fallback_reason: Some(reason) };
+        let request = LlmRequest {
+            purpose: Purpose::Insight,
+            prompt: Prompt::insight(input.clone()),
+            max_tokens: INSIGHT_MAX_TOKENS,
+        };
+        let rule = |reason: String| WeeklyInsight {
+            week_start: week_start.clone(),
+            text: rule_insight(input),
+            source: InsightSource::Rule,
+            fallback_reason: Some(reason),
+        };
         match self.llm.complete(&request) {
             Ok(response) => match parse_insight(&response.text) {
-                Some(text) => WeeklyInsight { week_start: week_start.clone(), text, source: InsightSource::Llm, fallback_reason: None },
+                Some(text) => WeeklyInsight {
+                    week_start: week_start.clone(),
+                    text,
+                    source: InsightSource::Llm,
+                    fallback_reason: None,
+                },
                 None => rule("bad_answer".to_string()),
             },
             Err(err) => rule(err.code().to_string()),

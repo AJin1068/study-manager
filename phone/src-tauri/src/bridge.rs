@@ -29,7 +29,9 @@ impl PluginBridge for PluginSlot {
     #[cfg(target_os = "android")]
     fn invoke(&self, command: &str, payload: Value) -> Result<Value, BridgeFailure> {
         let handle = self.handle.get().ok_or(BridgeFailure::Unavailable)?;
-        handle.run_mobile_plugin::<Value>(command, payload).map_err(|_| BridgeFailure::Unavailable)
+        handle
+            .run_mobile_plugin::<Value>(command, payload)
+            .map_err(|_| BridgeFailure::Unavailable)
     }
 
     #[cfg(not(target_os = "android"))]
@@ -47,7 +49,10 @@ mod tests {
     fn an_empty_slot_answers_unavailable_never_ok() {
         let slot = PluginSlot::default();
         for command in ["engage", "release", "status"] {
-            assert_eq!(slot.invoke(command, serde_json::json!({})), Err(BridgeFailure::Unavailable));
+            assert_eq!(
+                slot.invoke(command, serde_json::json!({})),
+                Err(BridgeFailure::Unavailable)
+            );
         }
     }
 }

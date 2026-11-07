@@ -1,7 +1,7 @@
 //! `remote_events`: one append-only row per outbound request. It records that something was sent
 //! (kind, outcome, status, byte count), never what.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 
 use crate::error::AppResult;
@@ -47,7 +47,15 @@ pub fn insert_event(conn: &Connection, event: &NewRemoteEvent<'_>) -> AppResult<
     conn.execute(
         "INSERT INTO remote_events (at_ms, port, kind, outcome, http_status, bytes, detail_code)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![event.at_ms, event.port, event.kind, event.outcome, event.http_status, event.bytes, event.detail_code],
+        params![
+            event.at_ms,
+            event.port,
+            event.kind,
+            event.outcome,
+            event.http_status,
+            event.bytes,
+            event.detail_code
+        ],
     )?;
     Ok(())
 }
@@ -77,7 +85,12 @@ pub fn egress_summary(conn: &Connection) -> AppResult<Vec<EgressSummaryRow>> {
         "SELECT port, kind, COUNT(*), MAX(at_ms) FROM remote_events GROUP BY port, kind ORDER BY MAX(at_ms) DESC",
     )?;
     let rows = stmt.query_map([], |row| {
-        Ok(EgressSummaryRow { port: row.get(0)?, kind: row.get(1)?, count: row.get(2)?, last_at_ms: row.get(3)? })
+        Ok(EgressSummaryRow {
+            port: row.get(0)?,
+            kind: row.get(1)?,
+            count: row.get(2)?,
+            last_at_ms: row.get(3)?,
+        })
     })?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
@@ -86,7 +99,11 @@ pub fn egress_summary(conn: &Connection) -> AppResult<Vec<EgressSummaryRow>> {
 
 pub fn get_cursor(conn: &Connection, name: &str) -> AppResult<i64> {
     Ok(conn
-        .query_row("SELECT last_local_id FROM sync_cursor WHERE name = ?1", params![name], |row| row.get(0))
+        .query_row(
+            "SELECT last_local_id FROM sync_cursor WHERE name = ?1",
+            params![name],
+            |row| row.get(0),
+        )
         .optional()?
         .unwrap_or(0))
 }
@@ -108,7 +125,11 @@ pub fn reset_cursor(conn: &Connection, name: &str) -> AppResult<()> {
 }
 
 /// History rows after `after_id`, oldest first. Includes rejected attempts: the mirror is a copy.
-pub fn list_plan_history_after(conn: &Connection, after_id: i64, limit: i64) -> AppResult<Vec<PlanHistoryEntry>> {
+pub fn list_plan_history_after(
+    conn: &Connection,
+    after_id: i64,
+    limit: i64,
+) -> AppResult<Vec<PlanHistoryEntry>> {
     let mut stmt = conn.prepare(
         "SELECT id, plan_id, at_ms, action, reason_code, reason_text, before_json, after_json, outcome, batch_id
          FROM plan_history WHERE id > ?1 ORDER BY id LIMIT ?2",
@@ -136,14 +157,24 @@ pub fn list_plan_history_after(conn: &Connection, after_id: i64, limit: i64) -> 
 /// the mirror shows has changed.
 pub fn change_marker(conn: &Connection) -> AppResult<(i64, i64, i64)> {
     let max = |table: &str| -> AppResult<i64> {
-        Ok(conn.query_row(&format!("SELECT COALESCE(MAX(id), 0) FROM {table}"), [], |row| row.get(0))?)
+        Ok(conn.query_row(
+            &format!("SELECT COALESCE(MAX(id), 0) FROM {table}"),
+            [],
+            |row| row.get(0),
+        )?)
     };
-    Ok((max("plan_history")?, max("study_passes")?, max("setting_history")?))
+    Ok((
+        max("plan_history")?,
+        max("study_passes")?,
+        max("setting_history")?,
+    ))
 }
 
 /// "Skip today" grants on or after `from_date` as (local date, grant time).
 pub fn list_skip_passes(conn: &Connection, from_date: &str) -> AppResult<Vec<(String, i64)>> {
-    let mut stmt = conn.prepare("SELECT date, at_ms FROM study_passes WHERE kind = 'skip_today' AND date >= ?1 ORDER BY id")?;
+    let mut stmt = conn.prepare(
+        "SELECT date, at_ms FROM study_passes WHERE kind = 'skip_today' AND date >= ?1 ORDER BY id",
+    )?;
     let rows = stmt.query_map(params![from_date], |row| Ok((row.get(0)?, row.get(1)?)))?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
@@ -168,15 +199,31 @@ mod tests {
     fn change_marker_moves_with_each_source() {
         let conn = open_in_memory().expect("db");
         let base = change_marker(&conn).expect("marker");
-        crate::store::append_history(&conn, 1, "k", None, "v", crate::settings::Reason::User, crate::settings::Outcome::Applied)
-            .expect("history");
+        crate::store::append_history(
+            &conn,
+            1,
+            "k",
+            None,
+            "v",
+            crate::settings::Reason::User,
+            crate::settings::Outcome::Applied,
+        )
+        .expect("history");
         let after = change_marker(&conn).expect("marker");
         assert_eq!((after.0, after.1), (base.0, base.1));
         assert!(after.2 > base.2);
     }
 
     fn event(at_ms: i64, kind: &'static str) -> NewRemoteEvent<'static> {
-        NewRemoteEvent { at_ms, port: "supabase", kind, outcome: "ok", http_status: Some(200), bytes: 10, detail_code: None }
+        NewRemoteEvent {
+            at_ms,
+            port: "supabase",
+            kind,
+            outcome: "ok",
+            http_status: Some(200),
+            bytes: 10,
+            detail_code: None,
+        }
     }
 
     #[test]
@@ -185,11 +232,21 @@ mod tests {
         insert_event(&conn, &event(1, "auth_otp")).expect("insert");
         insert_event(&conn, &event(2, "rpc_heartbeat")).expect("insert");
         insert_event(&conn, &event(3, "rpc_heartbeat")).expect("insert");
-        assert!(conn.execute("UPDATE remote_events SET bytes = 0", []).is_err());
+        assert!(
+            conn.execute("UPDATE remote_events SET bytes = 0", [])
+                .is_err()
+        );
         assert!(conn.execute("DELETE FROM remote_events", []).is_err());
         let summary = egress_summary(&conn).expect("summary");
         assert_eq!(summary.len(), 2);
-        assert_eq!((summary[0].kind.as_str(), summary[0].count, summary[0].last_at_ms), ("rpc_heartbeat", 2, 3));
+        assert_eq!(
+            (
+                summary[0].kind.as_str(),
+                summary[0].count,
+                summary[0].last_at_ms
+            ),
+            ("rpc_heartbeat", 2, 3)
+        );
         assert_eq!(list_events(&conn, 10).expect("list")[0].at_ms, 3);
     }
 

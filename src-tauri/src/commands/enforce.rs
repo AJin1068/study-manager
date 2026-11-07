@@ -3,9 +3,11 @@
 use chrono::Local;
 use tauri::State;
 
-use super::{lock_db, AppState};
+use super::{AppState, lock_db};
 use crate::clock::now_ms;
-use crate::enforce::{self, model::BlockEntry, model::EnforceMode, model::EntryKind, EnforcementStatus, RunningApp};
+use crate::enforce::{
+    self, EnforcementStatus, RunningApp, model::BlockEntry, model::EnforceMode, model::EntryKind,
+};
 use crate::error::{AppError, AppResult};
 use crate::settings::UpdateOutcome;
 use crate::store;
@@ -14,11 +16,18 @@ use crate::timer;
 #[tauri::command]
 pub fn list_block_entries(state: State<'_, AppState>) -> AppResult<Vec<BlockEntry>> {
     let conn = lock_db(&state.db)?;
-    Ok(store::list_block_entries(&conn)?.into_iter().filter(|e| e.kind == EntryKind::App.as_str()).collect())
+    Ok(store::list_block_entries(&conn)?
+        .into_iter()
+        .filter(|e| e.kind == EntryKind::App.as_str())
+        .collect())
 }
 
 #[tauri::command]
-pub fn add_block_entry(state: State<'_, AppState>, pattern: String, category: Option<String>) -> AppResult<UpdateOutcome> {
+pub fn add_block_entry(
+    state: State<'_, AppState>,
+    pattern: String,
+    category: Option<String>,
+) -> AppResult<UpdateOutcome> {
     let mut conn = lock_db(&state.db)?;
     enforce::add_entry(&mut conn, &pattern, category.as_deref(), now_ms()?)
 }
@@ -46,23 +55,32 @@ pub fn list_running_apps(state: State<'_, AppState>) -> AppResult<Vec<RunningApp
 /// `mode` is `dryRun` or `enforce`; `confirmation` must equal the sentence from
 /// `get_enforcement_status` for `enforce` and is ignored for `dryRun`. It is never stored.
 #[tauri::command]
-pub fn set_enforcement_mode(state: State<'_, AppState>, mode: String, confirmation: String) -> AppResult<UpdateOutcome> {
-    let mode = EnforceMode::parse(&mode).ok_or_else(|| AppError::Invalid("unknown enforcement mode".into()))?;
+pub fn set_enforcement_mode(
+    state: State<'_, AppState>,
+    mode: String,
+    confirmation: String,
+) -> AppResult<UpdateOutcome> {
+    let mode = EnforceMode::parse(&mode)
+        .ok_or_else(|| AppError::Invalid("unknown enforcement mode".into()))?;
     let mut conn = lock_db(&state.db)?;
     enforce::set_mode(&mut conn, mode, &confirmation, now_ms()?)
 }
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     use super::*;
     use crate::enforce::model::BlockEvent;
 
     #[test]
     fn enforce_wire_shapes_match_the_shared_fixture() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../src/api/fixtures/enforce-contract.json");
-        let expected: Value = serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../src/api/fixtures/enforce-contract.json"
+        );
+        let expected: Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
         let actual = json!({
             "entry": BlockEntry {
                 id: 3,

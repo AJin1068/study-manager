@@ -67,18 +67,34 @@ pub struct NtfyClient {
 
 impl NtfyClient {
     pub fn new(server: &str, topic: &str, transport: Arc<dyn HttpTransport>) -> Self {
-        Self { server: server.trim_end_matches('/').to_string(), topic: topic.to_string(), transport }
+        Self {
+            server: server.trim_end_matches('/').to_string(),
+            topic: topic.to_string(),
+            transport,
+        }
     }
 
     fn send_text(&self, text: &str) -> Result<(), NotifyError> {
-        let request = HttpRequest::new(RequestTag { port: "notify", kind: "ntfy_test" }, Method::Post, format!("{}/{}", self.server, self.topic))
-            .header("title", NTFY_TITLE)
-            .with_body(Body::from_notice(&NoticeText::new(text)));
-        let response = self.transport.send(request).map_err(|err| NotifyError(RemoteError::Transport(err)))?;
+        let request = HttpRequest::new(
+            RequestTag {
+                port: "notify",
+                kind: "ntfy_test",
+            },
+            Method::Post,
+            format!("{}/{}", self.server, self.topic),
+        )
+        .header("title", NTFY_TITLE)
+        .with_body(Body::from_notice(&NoticeText::new(text)));
+        let response = self
+            .transport
+            .send(request)
+            .map_err(|err| NotifyError(RemoteError::Transport(err)))?;
         if response.is_success() {
             Ok(())
         } else {
-            Err(NotifyError(RemoteError::Http { status: response.status }))
+            Err(NotifyError(RemoteError::Http {
+                status: response.status,
+            }))
         }
     }
 }
@@ -102,7 +118,14 @@ impl ServerTest {
 
 impl NotifyClient for ServerTest {
     fn send_test(&self) -> Result<(), NotifyError> {
-        self.rest.function("notify_test", "missed-plan", &NotifyTestRequest { action: "test" }).map(|_| ()).map_err(NotifyError)
+        self.rest
+            .function(
+                "notify_test",
+                "missed-plan",
+                &NotifyTestRequest { action: "test" },
+            )
+            .map(|_| ())
+            .map_err(NotifyError)
     }
 }
 
@@ -111,11 +134,12 @@ mod tests {
     use serde_json::Value;
 
     use super::*;
-    use crate::remote::fake::{FakeBackend, FAKE_ANON_KEY, FAKE_ENDPOINT};
+    use crate::remote::fake::{FAKE_ANON_KEY, FAKE_ENDPOINT, FakeBackend};
     use crate::remote::http::{HostPolicy, HttpResponse, ScriptedTransport, TransportError};
 
     fn contract() -> Value {
-        serde_json::from_str(include_str!("../../../fixtures/notify/contract.json")).expect("contract")
+        serde_json::from_str(include_str!("../../../fixtures/notify/contract.json"))
+            .expect("contract")
     }
 
     #[test]
@@ -134,18 +158,43 @@ mod tests {
         assert!(!cases.is_empty());
         for case in cases {
             let name = case["name"].as_str().expect("name");
-            let transport = Arc::new(ScriptedTransport::new(HostPolicy::configured(["ntfy.sh", "ntfy.example.org"]), vec![Ok(HttpResponse::ok_json(200, "{}"))]));
-            let client = NtfyClient::new(case["server"].as_str().expect("server"), case["topic"].as_str().expect("topic"), transport.clone());
-            client.send_text(case["message"].as_str().expect("message")).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let transport = Arc::new(ScriptedTransport::new(
+                HostPolicy::configured(["ntfy.sh", "ntfy.example.org"]),
+                vec![Ok(HttpResponse::ok_json(200, "{}"))],
+            ));
+            let client = NtfyClient::new(
+                case["server"].as_str().expect("server"),
+                case["topic"].as_str().expect("topic"),
+                transport.clone(),
+            );
+            client
+                .send_text(case["message"].as_str().expect("message"))
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
             let seen = transport.requests();
             let expect = &case["expect"];
             assert_eq!(seen.len(), 1, "{name}");
-            assert_eq!(seen[0].method.as_str(), expect["method"].as_str().expect("method"), "{name}");
+            assert_eq!(
+                seen[0].method.as_str(),
+                expect["method"].as_str().expect("method"),
+                "{name}"
+            );
             assert_eq!(seen[0].url, expect["url"].as_str().expect("url"), "{name}");
-            assert_eq!(seen[0].content_type, expect["contentType"].as_str(), "{name}");
-            assert_eq!(String::from_utf8_lossy(&seen[0].body), expect["body"].as_str().expect("body"), "{name}");
+            assert_eq!(
+                seen[0].content_type,
+                expect["contentType"].as_str(),
+                "{name}"
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&seen[0].body),
+                expect["body"].as_str().expect("body"),
+                "{name}"
+            );
             for (header, value) in expect["headers"].as_object().expect("headers") {
-                let got = seen[0].headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(header)).map(|(_, v)| v.as_str());
+                let got = seen[0]
+                    .headers
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case(header))
+                    .map(|(_, v)| v.as_str());
                 assert_eq!(got, value.as_str(), "{name}: header {header}");
             }
         }
@@ -154,14 +203,23 @@ mod tests {
     #[test]
     fn ntfy_failures_surface_as_stable_codes() {
         let policy = HostPolicy::configured(["ntfy.sh"]);
-        let refused = Arc::new(ScriptedTransport::new(policy.clone(), vec![Ok(HttpResponse::ok_json(403, "no")), Err(TransportError::Timeout)]));
+        let refused = Arc::new(ScriptedTransport::new(
+            policy.clone(),
+            vec![
+                Ok(HttpResponse::ok_json(403, "no")),
+                Err(TransportError::Timeout),
+            ],
+        ));
         let client = NtfyClient::new("https://ntfy.sh", "abcdefghijklmnopqrstuvwx", refused);
         assert_eq!(client.send_test().expect_err("403").code(), "http_error");
         assert_eq!(client.send_test().expect_err("timeout").code(), "timeout");
         // A server other than the configured one is refused before any request exists.
         let strict = Arc::new(ScriptedTransport::new(policy, vec![]));
         let elsewhere = NtfyClient::new("https://other.example", "t", strict.clone());
-        assert_eq!(elsewhere.send_test().expect_err("denied").code(), "host_denied");
+        assert_eq!(
+            elsewhere.send_test().expect_err("denied").code(),
+            "host_denied"
+        );
         assert!(strict.requests().is_empty());
     }
 
@@ -176,13 +234,24 @@ mod tests {
     #[test]
     fn server_test_posts_the_contract_body_to_the_function_route() {
         let contract = contract();
-        let route = contract["serverTest"]["route"].as_str().expect("route").to_string();
+        let route = contract["serverTest"]["route"]
+            .as_str()
+            .expect("route")
+            .to_string();
         let transport = Arc::new(ScriptedTransport::new(
             HostPolicy::configured(["proj.supabase.co"]),
-            vec![Ok(HttpResponse::ok_json(200, &contract["serverTest"]["responseBody"].to_string()))],
+            vec![Ok(HttpResponse::ok_json(
+                200,
+                &contract["serverTest"]["responseBody"].to_string(),
+            ))],
         ));
         let tokens = Arc::new(StaticToken);
-        let rest = Arc::new(SupabaseRest::new("https://proj.supabase.co", "anon-public-key", transport.clone(), tokens));
+        let rest = Arc::new(SupabaseRest::new(
+            "https://proj.supabase.co",
+            "anon-public-key",
+            transport.clone(),
+            tokens,
+        ));
         ServerTest::new(rest).send_test().expect("test");
         let seen = transport.requests();
         assert_eq!(seen[0].url, format!("https://proj.supabase.co{route}"));
@@ -205,7 +274,12 @@ mod tests {
     fn unknown_function_route_on_the_fake_is_an_http_error_not_a_panic() {
         let clock = Arc::new(crate::remote::ManualClock::new(1));
         let backend = Arc::new(FakeBackend::new(clock));
-        let rest = Arc::new(SupabaseRest::new(FAKE_ENDPOINT, FAKE_ANON_KEY, backend, Arc::new(StaticToken)));
+        let rest = Arc::new(SupabaseRest::new(
+            FAKE_ENDPOINT,
+            FAKE_ANON_KEY,
+            backend,
+            Arc::new(StaticToken),
+        ));
         // The fake has no token for "user-token": it answers 401 and the adapter reports it.
         assert!(ServerTest::new(rest).send_test().is_err());
     }

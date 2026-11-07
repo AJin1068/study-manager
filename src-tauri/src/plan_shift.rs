@@ -15,12 +15,12 @@ use std::collections::HashSet;
 use chrono::{Duration, NaiveTime, TimeZone};
 use rusqlite::{Connection, TransactionBehavior};
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::error::{AppError, AppResult};
 use crate::plan::{
-    fmt_date, local_to_ms, occurrences_on, parse_date, plan_duration_min, Action, ExceptionKind, ModeLookup,
-    NewPlanHistory, Occurrence, PlanChange, PlanException, ReasonCode,
+    Action, ExceptionKind, ModeLookup, NewPlanHistory, Occurrence, PlanChange, PlanException,
+    ReasonCode, fmt_date, local_to_ms, occurrences_on, parse_date, plan_duration_min,
 };
 use crate::settings::{Outcome, Reason, UpdateOutcome};
 use crate::store;
@@ -67,7 +67,11 @@ pub fn compute_shift(items: &[ShiftItem], now_ms: i64, day_end_ms: i64) -> Shift
             frozen_end = frozen_end.max(item.old_start_ms + item.old_duration_min * MINUTE_MS);
             continue;
         }
-        let lower = if frozen_end == i64::MIN { now_floor } else { now_floor.max(ceil_minute(frozen_end)) };
+        let lower = if frozen_end == i64::MIN {
+            now_floor
+        } else {
+            now_floor.max(ceil_minute(frozen_end))
+        };
         let start = (item.old_start_ms + displacement).max(lower);
         if start + item.new_duration_min * MINUTE_MS > day_end_ms {
             return ShiftPlan::OverflowsMidnight;
@@ -75,7 +79,8 @@ pub fn compute_shift(items: &[ShiftItem], now_ms: i64, day_end_ms: i64) -> Shift
         if start != item.old_start_ms {
             moves.push((index, start));
         }
-        displacement = start - item.old_start_ms + (item.new_duration_min - item.old_duration_min) * MINUTE_MS;
+        displacement =
+            start - item.old_start_ms + (item.new_duration_min - item.old_duration_min) * MINUTE_MS;
     }
     ShiftPlan::Moves(moves)
 }
@@ -144,7 +149,13 @@ pub enum ShiftSource {
 
 impl ShiftSummary {
     fn empty(source: ShiftSource, overflows_midnight: bool) -> ShiftSummary {
-        ShiftSummary { batch_id: None, moved_count: 0, overflows_midnight, source, fallback_code: None }
+        ShiftSummary {
+            batch_id: None,
+            moved_count: 0,
+            overflows_midnight,
+            source,
+            fallback_code: None,
+        }
     }
 }
 
@@ -160,7 +171,10 @@ pub struct ModeChange {
 
 impl ModeChange {
     pub fn rejected(key: String) -> ModeChange {
-        ModeChange { outcome: UpdateOutcome::RejectedLocked { key }, shift: None }
+        ModeChange {
+            outcome: UpdateOutcome::RejectedLocked { key },
+            shift: None,
+        }
     }
 
     /// Whether plan data changed, so the UI must refetch and the timer must reconcile.
@@ -171,17 +185,29 @@ impl ModeChange {
 
 /// What caused the shift; recorded in every history row so undo can restore it.
 pub enum ModeTrigger {
-    Daily { date: String, before: StudyLevel, after: StudyLevel },
-    Config { before: ModeConfig, after: ModeConfig },
+    Daily {
+        date: String,
+        before: StudyLevel,
+        after: StudyLevel,
+    },
+    Config {
+        before: ModeConfig,
+        after: ModeConfig,
+    },
 }
 
 impl ModeTrigger {
     fn to_json(&self) -> AppResult<Value> {
         let ser = |c: &ModeConfig| {
-            serde_json::to_value(c).map_err(|e| AppError::Internal(format!("mode config serialization failed: {e}")))
+            serde_json::to_value(c)
+                .map_err(|e| AppError::Internal(format!("mode config serialization failed: {e}")))
         };
         Ok(match self {
-            ModeTrigger::Daily { date, before, after } => {
+            ModeTrigger::Daily {
+                date,
+                before,
+                after,
+            } => {
                 json!({ "kind": "daily", "date": date, "before": before.as_str(), "after": after.as_str() })
             }
             ModeTrigger::Config { before, after } => {
@@ -196,11 +222,19 @@ impl ModeTrigger {
 fn exception_json(ex: Option<&PlanException>) -> Value {
     match ex {
         None => Value::Null,
-        Some(e) => json!({ "newDate": e.new_date, "newTime": e.new_time, "setsOverride": e.sets_override }),
+        Some(e) => {
+            json!({ "newDate": e.new_date, "newTime": e.new_time, "setsOverride": e.sets_override })
+        }
     }
 }
 
-fn state_json(source_date: &str, date: &str, time: &str, ex: Option<&PlanException>, mode: &Value) -> Value {
+fn state_json(
+    source_date: &str,
+    date: &str,
+    time: &str,
+    ex: Option<&PlanException>,
+    mode: &Value,
+) -> Value {
     json!({ "sourceDate": source_date, "date": date, "time": time, "exception": exception_json(ex), "mode": mode })
 }
 
@@ -212,17 +246,24 @@ struct Day {
     day_end_ms: i64,
 }
 
-fn collect_day<Tz: TimeZone>(tx: &Connection, tz: &Tz, today: &str, old: &ModeLookup, at_ms: i64) -> AppResult<Day> {
+fn collect_day<Tz: TimeZone>(
+    tx: &Connection,
+    tz: &Tz,
+    today: &str,
+    old: &ModeLookup,
+    at_ms: i64,
+) -> AppResult<Day> {
     let date = parse_date(today)?;
     let new = ModeLookup::load(tx)?;
     let plans = store::list_live_plans(tx)?;
     let exceptions = store::list_plan_exceptions(tx)?;
     let day_start = local_to_ms(tz, date, NaiveTime::MIN)?;
     let day_end_ms = local_to_ms(tz, date + Duration::days(1), NaiveTime::MIN)?;
-    let started: HashSet<(i64, String)> = store::list_runs_since(tx, &fmt_date(date - Duration::days(1)))?
-        .into_iter()
-        .map(|run| (run.plan_id, run.date))
-        .collect();
+    let started: HashSet<(i64, String)> =
+        store::list_runs_since(tx, &fmt_date(date - Duration::days(1)))?
+            .into_iter()
+            .map(|run| (run.plan_id, run.date))
+            .collect();
 
     let mut items = Vec::new();
     let mut origin: Vec<Option<Occurrence>> = Vec::new();
@@ -253,7 +294,11 @@ fn collect_day<Tz: TimeZone>(tx: &Connection, tz: &Tz, today: &str, old: &ModeLo
         });
         origin.push(Some(o));
     }
-    Ok(Day { items, origin, day_end_ms })
+    Ok(Day {
+        items,
+        origin,
+        day_end_ms,
+    })
 }
 
 /// What the LLM is asked to place: today's items with their new lengths, and the day's end.
@@ -295,7 +340,11 @@ pub fn shift_after_mode_change_with<Tz: TimeZone>(
     at_ms: i64,
     proposal: Option<&LlmProposal>,
 ) -> AppResult<ShiftSummary> {
-    let Day { items, origin, day_end_ms } = collect_day(tx, tz, today, old, at_ms)?;
+    let Day {
+        items,
+        origin,
+        day_end_ms,
+    } = collect_day(tx, tz, today, old, at_ms)?;
 
     let mut source = ShiftSource::Rule;
     let mut fallback_code = None;
@@ -308,7 +357,13 @@ pub fn shift_after_mode_change_with<Tz: TimeZone>(
         } else {
             source = ShiftSource::Llm;
             moves = Some(
-                items.iter().zip(&proposal.starts).enumerate().filter(|(_, (item, start))| item.old_start_ms != **start).map(|(i, (_, start))| (i, *start)).collect::<Vec<_>>(),
+                items
+                    .iter()
+                    .zip(&proposal.starts)
+                    .enumerate()
+                    .filter(|(_, (item, start))| item.old_start_ms != **start)
+                    .map(|(i, (_, start))| (i, *start))
+                    .collect::<Vec<_>>(),
             );
         }
     }
@@ -316,13 +371,19 @@ pub fn shift_after_mode_change_with<Tz: TimeZone>(
         Some(moves) => moves,
         None => match compute_shift(&items, at_ms, day_end_ms) {
             ShiftPlan::OverflowsMidnight => {
-                return Ok(ShiftSummary { fallback_code, ..ShiftSummary::empty(ShiftSource::Rule, true) });
+                return Ok(ShiftSummary {
+                    fallback_code,
+                    ..ShiftSummary::empty(ShiftSource::Rule, true)
+                });
             }
             ShiftPlan::Moves(moves) => moves,
         },
     };
     if moves.is_empty() {
-        return Ok(ShiftSummary { fallback_code, ..ShiftSummary::empty(source, false) });
+        return Ok(ShiftSummary {
+            fallback_code,
+            ..ShiftSummary::empty(source, false)
+        });
     }
 
     let (action, reason, prefix) = match source {
@@ -346,7 +407,8 @@ pub fn shift_after_mode_change_with<Tz: TimeZone>(
         let new_time = local.time().format(TIME_FMT).to_string();
         let sets_override = existing.as_ref().and_then(|e| e.sets_override);
 
-        let reverts = occ.source_date == occ.date && new_time == plan.start_time && sets_override.is_none();
+        let reverts =
+            occ.source_date == occ.date && new_time == plan.start_time && sets_override.is_none();
         let after_ex = (!reverts).then(|| PlanException {
             plan_id: occ.plan_id,
             date: occ.source_date.clone(),
@@ -367,15 +429,39 @@ pub fn shift_after_mode_change_with<Tz: TimeZone>(
                 action,
                 reason,
                 reason_text: None,
-                before_json: Some(state_json(&occ.source_date, &occ.date, &occ.start_time, existing.as_ref(), &mode).to_string()),
-                after_json: Some(state_json(&occ.source_date, &occ.date, &new_time, after_ex.as_ref(), &mode).to_string()),
+                before_json: Some(
+                    state_json(
+                        &occ.source_date,
+                        &occ.date,
+                        &occ.start_time,
+                        existing.as_ref(),
+                        &mode,
+                    )
+                    .to_string(),
+                ),
+                after_json: Some(
+                    state_json(
+                        &occ.source_date,
+                        &occ.date,
+                        &new_time,
+                        after_ex.as_ref(),
+                        &mode,
+                    )
+                    .to_string(),
+                ),
                 outcome: Outcome::Applied,
                 batch_id: Some(&batch),
             },
         )?;
     }
     tracing::info!(event = "plans_mode_shifted", batch_id = %batch, moved = moves.len(), source = ?source);
-    Ok(ShiftSummary { batch_id: Some(batch), moved_count: moves.len(), overflows_midnight: false, source, fallback_code })
+    Ok(ShiftSummary {
+        batch_id: Some(batch),
+        moved_count: moves.len(),
+        overflows_midnight: false,
+        source,
+        fallback_code,
+    })
 }
 
 // ---- undo ----
@@ -389,7 +475,8 @@ fn text<'a>(value: &'a Value, key: &str) -> AppResult<&'a str> {
 
 fn parse_json(raw: Option<&str>) -> AppResult<Value> {
     let raw = raw.ok_or_else(|| AppError::Internal("history row has no snapshot".into()))?;
-    serde_json::from_str(raw).map_err(|e| AppError::Internal(format!("history snapshot is malformed: {e}")))
+    serde_json::from_str(raw)
+        .map_err(|e| AppError::Internal(format!("history snapshot is malformed: {e}")))
 }
 
 fn stale() -> AppError {
@@ -397,19 +484,26 @@ fn stale() -> AppError {
 }
 
 fn level_from(value: &Value, key: &str) -> AppResult<StudyLevel> {
-    StudyLevel::parse(text(value, key)?).ok_or_else(|| AppError::Internal("history row has an unknown mode".into()))
+    StudyLevel::parse(text(value, key)?)
+        .ok_or_else(|| AppError::Internal("history row has an unknown mode".into()))
 }
 
 fn config_from(value: &Value, key: &str) -> AppResult<ModeConfig> {
-    let raw = value.get(key).cloned().ok_or_else(|| AppError::Internal("history row is missing a config".into()))?;
-    serde_json::from_value(raw).map_err(|e| AppError::Internal(format!("history config is malformed: {e}")))
+    let raw = value
+        .get(key)
+        .cloned()
+        .ok_or_else(|| AppError::Internal("history row is missing a config".into()))?;
+    serde_json::from_value(raw)
+        .map_err(|e| AppError::Internal(format!("history config is malformed: {e}")))
 }
 
 fn current_config(conn: &Connection, level: StudyLevel) -> AppResult<ModeConfig> {
     store::list_mode_configs(conn)?
         .into_iter()
         .find(|c| c.level == level)
-        .ok_or_else(|| AppError::Internal(format!("mode config row missing for {}", level.as_str())))
+        .ok_or_else(|| {
+            AppError::Internal(format!("mode config row missing for {}", level.as_str()))
+        })
 }
 
 /// One mode-shift row paired with its parsed snapshots.
@@ -433,17 +527,28 @@ pub fn undo_plan_batch<Tz: TimeZone>(
     let rows = store::list_plan_history_batch(&tx, batch_id)?;
     let shifts: Vec<_> = rows
         .iter()
-        .filter(|r| (r.action == Action::ModeShift.as_str() || r.action == Action::LlmAdjust.as_str()) && r.outcome == "applied")
+        .filter(|r| {
+            (r.action == Action::ModeShift.as_str() || r.action == Action::LlmAdjust.as_str())
+                && r.outcome == "applied"
+        })
         .collect();
     let Some(first) = shifts.first() else {
         return Err(AppError::Invalid("no mode shift has that batch id".into()));
     };
-    if rows.iter().any(|r| r.action == Action::Undo.as_str() && r.outcome == "applied") {
-        return Err(AppError::Invalid("that mode shift was already undone".into()));
+    if rows
+        .iter()
+        .any(|r| r.action == Action::Undo.as_str() && r.outcome == "applied")
+    {
+        return Err(AppError::Invalid(
+            "that mode shift was already undone".into(),
+        ));
     }
     let first_plan = first.plan_id;
 
-    let undo_row = |plan_id: Option<i64>, before: Option<String>, after: Option<String>, outcome: Outcome| NewPlanHistory {
+    let undo_row = |plan_id: Option<i64>,
+                    before: Option<String>,
+                    after: Option<String>,
+                    outcome: Outcome| NewPlanHistory {
         plan_id,
         at_ms,
         action: Action::Undo,
@@ -455,7 +560,10 @@ pub fn undo_plan_batch<Tz: TimeZone>(
         batch_id: Some(batch_id),
     };
     if study::lock_held(&tx)? {
-        store::append_plan_history(&tx, &undo_row(first_plan, None, None, Outcome::RejectedLocked))?;
+        store::append_plan_history(
+            &tx,
+            &undo_row(first_plan, None, None, Outcome::RejectedLocked),
+        )?;
         tx.commit()?;
         return Ok(PlanChange::rejected(first_plan));
     }
@@ -463,7 +571,9 @@ pub fn undo_plan_batch<Tz: TimeZone>(
     let mut parsed = Vec::new();
     for row in &shifts {
         parsed.push(ShiftRow {
-            plan_id: row.plan_id.ok_or_else(|| AppError::Internal("mode shift row has no plan".into()))?,
+            plan_id: row
+                .plan_id
+                .ok_or_else(|| AppError::Internal("mode shift row has no plan".into()))?,
             before: parse_json(row.before_json.as_deref())?,
             after: parse_json(row.after_json.as_deref())?,
         });
@@ -476,31 +586,50 @@ pub fn undo_plan_batch<Tz: TimeZone>(
     for row in &parsed {
         let source_date = text(&row.after, "sourceDate")?;
         let date = text(&row.after, "date")?;
-        let plan = store::get_plan(&tx, row.plan_id)?.filter(|p| p.deleted_at_ms.is_none()).ok_or_else(stale)?;
+        let plan = store::get_plan(&tx, row.plan_id)?
+            .filter(|p| p.deleted_at_ms.is_none())
+            .ok_or_else(stale)?;
         let current = store::get_plan_exception(&tx, plan.id, source_date)?;
         if exception_json(current.as_ref()) != row.after["exception"] {
             return Err(stale());
         }
         if started.contains(&(plan.id, date.to_string())) {
-            return Err(AppError::Invalid("a moved plan has already started; undo no longer applies".into()));
+            return Err(AppError::Invalid(
+                "a moved plan has already started; undo no longer applies".into(),
+            ));
         }
         // Both the current and the restored start must still lie ahead, or the plan would be
         // missed the moment it was restored.
         for snapshot in [&row.after, &row.before] {
-            let start = local_to_ms(tz, parse_date(text(snapshot, "date")?)?, crate::plan::parse_time(text(snapshot, "time")?)?)?;
+            let start = local_to_ms(
+                tz,
+                parse_date(text(snapshot, "date")?)?,
+                crate::plan::parse_time(text(snapshot, "time")?)?,
+            )?;
             if start <= at_ms {
-                return Err(AppError::Invalid("a moved plan's time has passed; undo no longer applies".into()));
+                return Err(AppError::Invalid(
+                    "a moved plan's time has passed; undo no longer applies".into(),
+                ));
             }
         }
     }
 
     // The mode is identical in every row of the batch.
-    let lead = parsed.first().ok_or_else(|| AppError::Internal("mode shift batch is empty".into()))?;
+    let lead = parsed
+        .first()
+        .ok_or_else(|| AppError::Internal("mode shift batch is empty".into()))?;
     let lead_plan = lead.plan_id;
     let mode = &lead.after["mode"];
     enum Restore {
-        Daily { date: String, current: StudyLevel, back: StudyLevel },
-        Config { current: ModeConfig, back: ModeConfig },
+        Daily {
+            date: String,
+            current: StudyLevel,
+            back: StudyLevel,
+        },
+        Config {
+            current: ModeConfig,
+            back: ModeConfig,
+        },
     }
     let restore = match text(mode, "kind")? {
         "daily" => {
@@ -509,7 +638,11 @@ pub fn undo_plan_batch<Tz: TimeZone>(
             if current != level_from(mode, "after")? {
                 return Err(stale());
             }
-            Restore::Daily { date, current, back: level_from(mode, "before")? }
+            Restore::Daily {
+                date,
+                current,
+                back: level_from(mode, "before")?,
+            }
         }
         "config" => {
             let back = config_from(mode, "before")?;
@@ -540,21 +673,48 @@ pub fn undo_plan_batch<Tz: TimeZone>(
         }
         store::append_plan_history(
             &tx,
-            &undo_row(Some(row.plan_id), Some(row.after.to_string()), Some(row.before.to_string()), Outcome::Applied),
+            &undo_row(
+                Some(row.plan_id),
+                Some(row.after.to_string()),
+                Some(row.before.to_string()),
+                Outcome::Applied,
+            ),
         )?;
     }
     match restore {
-        Restore::Daily { date, current, back } => {
+        Restore::Daily {
+            date,
+            current,
+            back,
+        } => {
             store::put_daily_mode(&tx, &date, back, at_ms)?;
-            store::append_history(&tx, at_ms, "studyMode", Some(current.as_str()), back.as_str(), Reason::User, Outcome::Applied)?;
+            store::append_history(
+                &tx,
+                at_ms,
+                "studyMode",
+                Some(current.as_str()),
+                back.as_str(),
+                Reason::User,
+                Outcome::Applied,
+            )?;
         }
         Restore::Config { current, back } => {
             store::put_mode_config(&tx, &back)?;
             let ser = |c: &ModeConfig| {
-                serde_json::to_string(c).map_err(|e| AppError::Internal(format!("mode config serialization failed: {e}")))
+                serde_json::to_string(c).map_err(|e| {
+                    AppError::Internal(format!("mode config serialization failed: {e}"))
+                })
             };
             let key = format!("modeConfig.{}", back.level.as_str());
-            store::append_history(&tx, at_ms, &key, Some(&ser(&current)?), &ser(&back)?, Reason::User, Outcome::Applied)?;
+            store::append_history(
+                &tx,
+                at_ms,
+                &key,
+                Some(&ser(&current)?),
+                &ser(&back)?,
+                Reason::User,
+                Outcome::Applied,
+            )?;
         }
     }
     tx.commit()?;
@@ -566,7 +726,7 @@ pub fn undo_plan_batch<Tz: TimeZone>(
 mod tests {
     use super::*;
     use crate::db::open_in_memory;
-    use crate::plan::{create_plan, list_occurrences, plan_history, CreatePlanInput};
+    use crate::plan::{CreatePlanInput, create_plan, list_occurrences, plan_history};
     use crate::study::{set_daily_mode, update_mode_config};
     use crate::timer::model::{NewRun, RunStatus};
     use chrono::Utc;
@@ -575,7 +735,10 @@ mod tests {
     const MIDNIGHT: i64 = 24 * 60;
 
     fn at(h: u32, m: u32) -> i64 {
-        Utc.with_ymd_and_hms(2026, 11, 5, h, m, 0).single().expect("valid time").timestamp_millis()
+        Utc.with_ymd_and_hms(2026, 11, 5, h, m, 0)
+            .single()
+            .expect("valid time")
+            .timestamp_millis()
     }
 
     // ---- pure rule (minutes since local midnight) ----
@@ -614,7 +777,11 @@ mod tests {
             ),
             (
                 "differences accumulate over the plans before",
-                vec![item(540, 100, 130, true), item(700, 100, 120, true), item(900, 60, 60, true)],
+                vec![
+                    item(540, 100, 130, true),
+                    item(700, 100, 120, true),
+                    item(900, 60, 60, true),
+                ],
                 480,
                 moved(&[(1, 730), (2, 950)]),
             ),
@@ -638,7 +805,11 @@ mod tests {
             ),
             (
                 "never pulled before now (defensive clamp), later plans follow the clamp",
-                vec![item(600, 300, 100, true), item(900, 60, 60, true), item(1000, 60, 60, true)],
+                vec![
+                    item(600, 300, 100, true),
+                    item(900, 60, 60, true),
+                    item(1000, 60, 60, true),
+                ],
                 780,
                 moved(&[(0, 780), (1, 880), (2, 980)]),
             ),
@@ -677,7 +848,10 @@ mod tests {
             sets,
             repeat: None,
         };
-        create_plan(conn, &Utc, input, at(0, 1)).expect("create").plan_id.expect("id")
+        create_plan(conn, &Utc, input, at(0, 1))
+            .expect("create")
+            .plan_id
+            .expect("id")
     }
 
     fn starts(conn: &Connection) -> Vec<(i64, String, i64)> {
@@ -690,7 +864,11 @@ mod tests {
 
     /// History rows the shift machinery wrote, newest first (plan creation rows are setup).
     fn shift_history(conn: &Connection) -> Vec<crate::plan::PlanHistoryEntry> {
-        plan_history(conn, None, 50).expect("history").into_iter().filter(|r| r.action != "create").collect()
+        plan_history(conn, None, 50)
+            .expect("history")
+            .into_iter()
+            .filter(|r| r.action != "create")
+            .collect()
     }
 
     fn count(conn: &Connection, sql: &str) -> i64 {
@@ -743,18 +921,42 @@ mod tests {
         let (mut conn, p1, p2) = two_plans();
         let result = change(&mut conn, StudyLevel::Hard, at(8, 0));
         let summary = result.shift.expect("summary");
-        assert_eq!((summary.moved_count, summary.overflows_midnight), (1, false));
+        assert_eq!(
+            (summary.moved_count, summary.overflows_midnight),
+            (1, false)
+        );
         let batch = summary.batch_id.expect("batch id");
 
         // P1 keeps its start (its own length change moves only its end); P2: 14:00 + (190 - 115).
-        assert_eq!(starts(&conn), [(p1, "09:00".into(), 190), (p2, "15:15".into(), 90)]);
+        assert_eq!(
+            starts(&conn),
+            [(p1, "09:00".into(), 190), (p2, "15:15".into(), 90)]
+        );
         let rows = shift_history(&conn);
         assert_eq!(rows.len(), 1);
         let row = &rows[0];
-        assert_eq!((row.action.as_str(), row.reason_code.as_str(), row.outcome.as_str()), ("mode_shift", "mode_shift", "applied"));
-        assert_eq!((row.plan_id, row.batch_id.as_deref()), (Some(p2), Some(batch.as_str())));
-        assert!(row.before_json.as_deref().is_some_and(|j| j.contains("\"time\":\"14:00\"")));
-        assert!(row.after_json.as_deref().is_some_and(|j| j.contains("\"time\":\"15:15\"")));
+        assert_eq!(
+            (
+                row.action.as_str(),
+                row.reason_code.as_str(),
+                row.outcome.as_str()
+            ),
+            ("mode_shift", "mode_shift", "applied")
+        );
+        assert_eq!(
+            (row.plan_id, row.batch_id.as_deref()),
+            (Some(p2), Some(batch.as_str()))
+        );
+        assert!(
+            row.before_json
+                .as_deref()
+                .is_some_and(|j| j.contains("\"time\":\"14:00\""))
+        );
+        assert!(
+            row.after_json
+                .as_deref()
+                .is_some_and(|j| j.contains("\"time\":\"15:15\""))
+        );
         assert_eq!(count(&conn, "SELECT COUNT(*) FROM plan_exceptions"), 1);
     }
 
@@ -770,7 +972,11 @@ mod tests {
         // P1 shrinks 190 -> 115 and P2 90 -> 50, so P2 moves 75 earlier and P3 115 earlier; every gap is kept.
         assert_eq!(
             starts(&conn),
-            [(p1, "09:00".into(), 115), (p2, "11:45".into(), 50), (p3, "14:05".into(), 50)]
+            [
+                (p1, "09:00".into(), 115),
+                (p2, "11:45".into(), 50),
+                (p3, "14:05".into(), 50)
+            ]
         );
     }
 
@@ -791,7 +997,10 @@ mod tests {
         // 09:30: P1 should have started, so it is not "not yet started".
         let result = change(&mut conn, StudyLevel::Hard, at(9, 30));
         assert_eq!(result.shift.expect("summary").moved_count, 0);
-        assert_eq!(starts(&conn), [(p1, "09:00".into(), 190), (p2, "14:00".into(), 90)]);
+        assert_eq!(
+            starts(&conn),
+            [(p1, "09:00".into(), 190), (p2, "14:00".into(), 90)]
+        );
     }
 
     #[test]
@@ -803,8 +1012,15 @@ mod tests {
         let summary = result.shift.expect("summary");
         assert!(summary.overflows_midnight);
         assert_eq!((summary.moved_count, summary.batch_id), (0, None));
-        assert_eq!(starts(&conn)[1], (p2, "22:00".into(), 90), "start untouched");
-        assert_eq!(crate::store::read_daily_mode(&conn, TODAY).expect("mode"), Some(StudyLevel::Hard));
+        assert_eq!(
+            starts(&conn)[1],
+            (p2, "22:00".into(), 90),
+            "start untouched"
+        );
+        assert_eq!(
+            crate::store::read_daily_mode(&conn, TODAY).expect("mode"),
+            Some(StudyLevel::Hard)
+        );
         assert!(shift_history(&conn).is_empty());
         let _ = p1;
     }
@@ -813,16 +1029,32 @@ mod tests {
     fn undo_restores_plans_and_mode_and_appends_history() {
         let (mut conn, p1, p2) = two_plans();
         let before = starts(&conn);
-        let batch = change(&mut conn, StudyLevel::Hard, at(8, 0)).shift.expect("s").batch_id.expect("batch");
+        let batch = change(&mut conn, StudyLevel::Hard, at(8, 0))
+            .shift
+            .expect("s")
+            .batch_id
+            .expect("batch");
 
         let undone = undo_plan_batch(&mut conn, &Utc, &batch, at(8, 5)).expect("undo");
         assert!(undone.is_applied());
         assert_eq!(starts(&conn), before);
-        assert_eq!(crate::store::read_daily_mode(&conn, TODAY).expect("mode"), Some(StudyLevel::Medium));
+        assert_eq!(
+            crate::store::read_daily_mode(&conn, TODAY).expect("mode"),
+            Some(StudyLevel::Medium)
+        );
         assert_eq!(count(&conn, "SELECT COUNT(*) FROM plan_exceptions"), 0);
 
         let rows = shift_history(&conn);
-        let kinds: Vec<_> = rows.iter().map(|r| (r.action.as_str(), r.reason_code.as_str(), r.batch_id.clone())).collect();
+        let kinds: Vec<_> = rows
+            .iter()
+            .map(|r| {
+                (
+                    r.action.as_str(),
+                    r.reason_code.as_str(),
+                    r.batch_id.clone(),
+                )
+            })
+            .collect();
         assert_eq!(
             kinds,
             [
@@ -832,45 +1064,100 @@ mod tests {
             "the original row stays; undo is an added row"
         );
         let settings = crate::settings::read_history(&conn, 1).expect("settings history");
-        assert_eq!((settings[0].key.as_str(), settings[0].after.as_str()), ("studyMode", "medium"));
+        assert_eq!(
+            (settings[0].key.as_str(), settings[0].after.as_str()),
+            ("studyMode", "medium")
+        );
 
         let again = undo_plan_batch(&mut conn, &Utc, &batch, at(8, 6));
-        assert!(matches!(again, Err(AppError::Invalid(_))), "undoing twice is refused");
+        assert!(
+            matches!(again, Err(AppError::Invalid(_))),
+            "undoing twice is refused"
+        );
         let _ = (p1, p2);
     }
 
     #[test]
     fn undo_is_rejected_and_recorded_while_locked() {
         let (mut conn, _p1, p2) = two_plans();
-        let batch = change(&mut conn, StudyLevel::Hard, at(8, 0)).shift.expect("s").batch_id.expect("batch");
+        let batch = change(&mut conn, StudyLevel::Hard, at(8, 0))
+            .shift
+            .expect("s")
+            .batch_id
+            .expect("batch");
         crate::testutil::set_lock_for_test(&conn, true);
         let result = undo_plan_batch(&mut conn, &Utc, &batch, at(8, 5)).expect("attempt");
         assert!(!result.is_applied());
-        assert_eq!(starts(&conn)[1], (p2, "15:15".into(), 90), "plans unchanged");
-        assert_eq!(crate::store::read_daily_mode(&conn, TODAY).expect("mode"), Some(StudyLevel::Hard));
+        assert_eq!(
+            starts(&conn)[1],
+            (p2, "15:15".into(), 90),
+            "plans unchanged"
+        );
+        assert_eq!(
+            crate::store::read_daily_mode(&conn, TODAY).expect("mode"),
+            Some(StudyLevel::Hard)
+        );
         let latest = &shift_history(&conn)[0];
-        assert_eq!((latest.action.as_str(), latest.outcome.as_str()), ("undo", "rejected_locked"));
+        assert_eq!(
+            (latest.action.as_str(), latest.outcome.as_str()),
+            ("undo", "rejected_locked")
+        );
 
         // A rejected attempt does not use up the undo.
         crate::testutil::set_lock_for_test(&conn, false);
-        assert!(undo_plan_batch(&mut conn, &Utc, &batch, at(8, 6)).expect("undo").is_applied());
+        assert!(
+            undo_plan_batch(&mut conn, &Utc, &batch, at(8, 6))
+                .expect("undo")
+                .is_applied()
+        );
     }
 
     #[test]
     fn undo_refuses_once_a_moved_plan_started_or_was_edited() {
         let (mut conn, _p1, p2) = two_plans();
-        let batch = change(&mut conn, StudyLevel::Hard, at(8, 0)).shift.expect("s").batch_id.expect("batch");
-        assert!(undo_plan_batch(&mut conn, &Utc, &batch, at(15, 20)).is_err(), "moved plan's time passed");
+        let batch = change(&mut conn, StudyLevel::Hard, at(8, 0))
+            .shift
+            .expect("s")
+            .batch_id
+            .expect("batch");
+        assert!(
+            undo_plan_batch(&mut conn, &Utc, &batch, at(15, 20)).is_err(),
+            "moved plan's time passed"
+        );
 
-        crate::store::insert_run(&conn, &NewRun { date: TODAY.into(), ..run_for(p2, RunStatus::Active) }).expect("run");
-        assert!(undo_plan_batch(&mut conn, &Utc, &batch, at(8, 5)).is_err(), "moved plan has a run");
+        crate::store::insert_run(
+            &conn,
+            &NewRun {
+                date: TODAY.into(),
+                ..run_for(p2, RunStatus::Active)
+            },
+        )
+        .expect("run");
+        assert!(
+            undo_plan_batch(&mut conn, &Utc, &batch, at(8, 5)).is_err(),
+            "moved plan has a run"
+        );
         assert_eq!(starts(&conn)[1].1, "15:15");
 
         let (mut conn, _p1, p2) = two_plans();
-        let batch = change(&mut conn, StudyLevel::Hard, at(8, 0)).shift.expect("s").batch_id.expect("batch");
-        conn.execute("UPDATE plan_exceptions SET new_time = '16:00' WHERE plan_id = ?1", [p2]).expect("edit");
-        assert!(undo_plan_batch(&mut conn, &Utc, &batch, at(8, 5)).is_err(), "edited since the shift");
-        assert_eq!(crate::store::read_daily_mode(&conn, TODAY).expect("mode"), Some(StudyLevel::Hard));
+        let batch = change(&mut conn, StudyLevel::Hard, at(8, 0))
+            .shift
+            .expect("s")
+            .batch_id
+            .expect("batch");
+        conn.execute(
+            "UPDATE plan_exceptions SET new_time = '16:00' WHERE plan_id = ?1",
+            [p2],
+        )
+        .expect("edit");
+        assert!(
+            undo_plan_batch(&mut conn, &Utc, &batch, at(8, 5)).is_err(),
+            "edited since the shift"
+        );
+        assert_eq!(
+            crate::store::read_daily_mode(&conn, TODAY).expect("mode"),
+            Some(StudyLevel::Hard)
+        );
     }
 
     #[test]
@@ -879,12 +1166,17 @@ mod tests {
         crate::testutil::set_lock_for_test(&conn, true); // study or a break between sets
         let result = change(&mut conn, StudyLevel::Hard, at(8, 0));
         assert_eq!(result, ModeChange::rejected("studyMode".into()));
-        let edit = update_mode_config(&mut conn, &Utc, TODAY, medium_config(60), at(8, 0)).expect("attempt");
+        let edit = update_mode_config(&mut conn, &Utc, TODAY, medium_config(60), at(8, 0))
+            .expect("attempt");
         assert_eq!(edit, ModeChange::rejected("modeConfig.medium".into()));
         assert_eq!(starts(&conn)[1], (p2, "14:00".into(), 50));
         assert_eq!(count(&conn, "SELECT COUNT(*) FROM plan_exceptions"), 0);
         assert!(shift_history(&conn).is_empty());
-        let outcomes: Vec<_> = crate::settings::read_history(&conn, 2).expect("h").into_iter().map(|e| e.outcome).collect();
+        let outcomes: Vec<_> = crate::settings::read_history(&conn, 2)
+            .expect("h")
+            .into_iter()
+            .map(|e| e.outcome)
+            .collect();
         assert_eq!(outcomes, ["rejected_locked", "rejected_locked"]);
     }
 
@@ -897,29 +1189,53 @@ mod tests {
         )
         .expect("trigger");
         assert!(set_daily_mode(&mut conn, &Utc, TODAY, StudyLevel::Hard, at(8, 0)).is_err());
-        assert_eq!(crate::store::read_daily_mode(&conn, TODAY).expect("mode"), None);
+        assert_eq!(
+            crate::store::read_daily_mode(&conn, TODAY).expect("mode"),
+            None
+        );
         assert_eq!(count(&conn, "SELECT COUNT(*) FROM plan_exceptions"), 0);
-        assert!(crate::settings::read_history(&conn, 10).expect("h").is_empty());
-        assert_eq!(starts(&conn), [(p1, "09:00".into(), 115), (p2, "14:00".into(), 50)]);
+        assert!(
+            crate::settings::read_history(&conn, 10)
+                .expect("h")
+                .is_empty()
+        );
+        assert_eq!(
+            starts(&conn),
+            [(p1, "09:00".into(), 115), (p2, "14:00".into(), 50)]
+        );
     }
 
     #[test]
     fn mode_length_edit_uses_the_same_shift_and_never_rejects_for_overlap() {
         let (mut conn, p1, p2) = two_plans();
         // Medium study 50 -> 160: P1 grows 115 -> 335 min and would end past P2's 14:00 start.
-        let result = update_mode_config(&mut conn, &Utc, TODAY, medium_config(160), at(8, 0)).expect("edit");
+        let result =
+            update_mode_config(&mut conn, &Utc, TODAY, medium_config(160), at(8, 0)).expect("edit");
         assert!(matches!(result.outcome, UpdateOutcome::Applied { .. }));
         let summary = result.shift.expect("summary");
         assert_eq!(summary.moved_count, 1);
         // P2: 14:00 + (335 - 115) = 17:40, after P1's new end 14:35 with the original gap.
-        assert_eq!(starts(&conn), [(p1, "09:00".into(), 335), (p2, "17:40".into(), 160)]);
+        assert_eq!(
+            starts(&conn),
+            [(p1, "09:00".into(), 335), (p2, "17:40".into(), 160)]
+        );
 
         // Undo puts the old lengths back too.
         let batch = summary.batch_id.expect("batch");
         undo_plan_batch(&mut conn, &Utc, &batch, at(8, 1)).expect("undo");
-        assert_eq!(starts(&conn), [(p1, "09:00".into(), 115), (p2, "14:00".into(), 50)]);
+        assert_eq!(
+            starts(&conn),
+            [(p1, "09:00".into(), 115), (p2, "14:00".into(), 50)]
+        );
         let configs = crate::store::list_mode_configs(&conn).expect("configs");
-        assert_eq!(configs.iter().find(|c| c.level == StudyLevel::Medium).expect("row").study_min, 50);
+        assert_eq!(
+            configs
+                .iter()
+                .find(|c| c.level == StudyLevel::Medium)
+                .expect("row")
+                .study_min,
+            50
+        );
     }
 
     #[test]
@@ -953,17 +1269,29 @@ mod tests {
             reason_text: None,
         };
         crate::plan::update_plan(&mut conn, &Utc, input, at(7, 0)).expect("update");
-        let batch = change(&mut conn, StudyLevel::Hard, at(8, 0)).shift.expect("s").batch_id.expect("batch");
+        let batch = change(&mut conn, StudyLevel::Hard, at(8, 0))
+            .shift
+            .expect("s")
+            .batch_id
+            .expect("batch");
         // P2 (2 sets) moves by P1's difference (190 - 115).
         assert_eq!(starts(&conn)[1], (p2, "16:15".into(), 190));
         undo_plan_batch(&mut conn, &Utc, &batch, at(8, 1)).expect("undo");
-        assert_eq!(starts(&conn)[1], (p2, "15:00".into(), 115), "sets override and user move survive");
+        assert_eq!(
+            starts(&conn)[1],
+            (p2, "15:00".into(), 115),
+            "sets override and user move survive"
+        );
     }
 
     #[test]
     fn mode_change_serialization_matches_shared_fixture() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../src/api/fixtures/mode-change.json");
-        let expected: Value = serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../src/api/fixtures/mode-change.json"
+        );
+        let expected: Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
         let applied = |key: &str, shift: ShiftSummary| ModeChange {
             outcome: UpdateOutcome::Applied { key: key.into() },
             shift: Some(shift),
@@ -981,7 +1309,13 @@ mod tests {
             ),
             applied(
                 "modeConfig.medium",
-                ShiftSummary { batch_id: None, moved_count: 0, overflows_midnight: true, source: ShiftSource::Rule, fallback_code: None },
+                ShiftSummary {
+                    batch_id: None,
+                    moved_count: 0,
+                    overflows_midnight: true,
+                    source: ShiftSource::Rule,
+                    fallback_code: None,
+                },
             ),
             applied(
                 "studyMode",

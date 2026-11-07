@@ -2,11 +2,11 @@
 
 use tauri::State;
 
-use super::{lock_db, AppState};
+use super::{AppState, lock_db};
 use crate::clock::now_ms;
 use crate::error::AppResult;
 use crate::focus::signals::{self, CheckinPrompt, SelfReportOutcome, SelfReportStatus};
-use crate::focus::{self, model::StudyApp, FocusSetup};
+use crate::focus::{self, FocusSetup, model::StudyApp};
 use crate::settings::UpdateOutcome;
 use crate::store;
 
@@ -29,7 +29,11 @@ pub fn remove_study_app(state: State<'_, AppState>, id: i64) -> AppResult<Update
 }
 
 #[tauri::command]
-pub fn set_study_app_enabled(state: State<'_, AppState>, id: i64, enabled: bool) -> AppResult<UpdateOutcome> {
+pub fn set_study_app_enabled(
+    state: State<'_, AppState>,
+    id: i64,
+    enabled: bool,
+) -> AppResult<UpdateOutcome> {
     let mut conn = lock_db(&state.db)?;
     focus::set_study_app_enabled(&mut conn, id, enabled, now_ms()?)
 }
@@ -63,16 +67,22 @@ pub fn answer_checkin(state: State<'_, AppState>, focused: bool) -> AppResult<Se
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
-    use crate::focus::signals::{CheckinPrompt, IgnoreReason, SelfReportOutcome, SelfReportStatus, SELF_REPORT_SHORTCUT};
-    use crate::focus::{model::StudyApp, FocusSetup};
+    use crate::focus::signals::{
+        CheckinPrompt, IgnoreReason, SELF_REPORT_SHORTCUT, SelfReportOutcome, SelfReportStatus,
+    };
+    use crate::focus::{FocusSetup, model::StudyApp};
     use crate::platform::TitleAccess;
 
     #[test]
     fn focus_wire_shapes_match_the_shared_fixture() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../src/api/fixtures/focus-contract.json");
-        let expected: Value = serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../src/api/fixtures/focus-contract.json"
+        );
+        let expected: Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
         let actual = json!({
             "studyApp": StudyApp {
                 id: 2,

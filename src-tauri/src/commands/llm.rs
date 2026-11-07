@@ -3,10 +3,10 @@
 
 use tauri::{AppHandle, Emitter, State};
 
-use super::{lock_db, AppState};
+use super::{AppState, lock_db};
 use crate::clock::now_ms;
 use crate::error::AppResult;
-use crate::llm::config::{update_setting, LlmConfig, LlmSettingKey};
+use crate::llm::config::{LlmConfig, LlmSettingKey, update_setting};
 use crate::llm::service::LlmStatus;
 use crate::settings::{SettingValue, UpdateOutcome};
 
@@ -19,7 +19,12 @@ pub fn get_llm_settings(state: State<'_, AppState>) -> AppResult<LlmConfig> {
 }
 
 #[tauri::command]
-pub fn update_llm_setting(app: AppHandle, state: State<'_, AppState>, key: LlmSettingKey, value: SettingValue) -> AppResult<UpdateOutcome> {
+pub fn update_llm_setting(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    key: LlmSettingKey,
+    value: SettingValue,
+) -> AppResult<UpdateOutcome> {
     let outcome = {
         let mut conn = lock_db(&state.db)?;
         update_setting(&mut conn, key, value, now_ms()?)?

@@ -18,12 +18,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use super::{AutostartBackend, PlatformError};
 
 fn escape_xml(raw: &str) -> String {
-    raw.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    raw.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// Plist text. `RunAtLoad` always (it is a login item); `KeepAlive` only when `relaunch`.
 /// `ThrottleInterval` bounds a crash loop to one start per 10 seconds.
-pub fn build_plist(label: &str, program_args: &[String], bundle_id: &str, relaunch: bool) -> String {
+pub fn build_plist(
+    label: &str,
+    program_args: &[String],
+    bundle_id: &str,
+    relaunch: bool,
+) -> String {
     let args: String = program_args
         .iter()
         .map(|arg| format!("    <string>{}</string>\n", escape_xml(arg)))
@@ -74,9 +81,17 @@ impl LaunchAgentAutostart {
 
     fn write(&self) -> Result<(), PlatformError> {
         let io = |e: std::io::Error| PlatformError::Autostart(e.to_string());
-        let dir = self.file.parent().ok_or_else(|| PlatformError::Autostart("launch agent path has no parent".into()))?;
+        let dir = self
+            .file
+            .parent()
+            .ok_or_else(|| PlatformError::Autostart("launch agent path has no parent".into()))?;
         fs::create_dir_all(dir).map_err(io)?;
-        let text = build_plist(&self.label, &self.program_args, &self.bundle_id, self.relaunch.load(Ordering::SeqCst));
+        let text = build_plist(
+            &self.label,
+            &self.program_args,
+            &self.bundle_id,
+            self.relaunch.load(Ordering::SeqCst),
+        );
         // Temp file + rename: launchd never sees a half-written plist.
         let tmp = self.file.with_extension("plist.tmp");
         let mut out = fs::File::create(&tmp).map_err(io)?;
@@ -115,13 +130,19 @@ mod tests {
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("sm-launch-agent-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("sm-launch-agent-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         dir
     }
 
     fn backend(dir: &Path) -> LaunchAgentAutostart {
-        LaunchAgentAutostart::new(dir, "Study Manager", vec!["/Apps/Study Manager.app/Contents/MacOS/study-manager".into()], "com.studymanager.app")
+        LaunchAgentAutostart::new(
+            dir,
+            "Study Manager",
+            vec!["/Apps/Study Manager.app/Contents/MacOS/study-manager".into()],
+            "com.studymanager.app",
+        )
     }
 
     fn contents(dir: &Path) -> String {
@@ -132,7 +153,9 @@ mod tests {
     fn plist_with_relaunch_keeps_the_login_item_and_relaunches_only_unsuccessful_exits() {
         let text = build_plist("L", &["/bin/app".into()], "com.x", true);
         assert!(text.contains("<key>RunAtLoad</key>\n  <true/>"));
-        assert!(text.contains("<key>KeepAlive</key>\n  <dict>\n    <key>SuccessfulExit</key>\n    <false/>"));
+        assert!(text.contains(
+            "<key>KeepAlive</key>\n  <dict>\n    <key>SuccessfulExit</key>\n    <false/>"
+        ));
         assert!(text.contains("<key>ThrottleInterval</key>\n  <integer>10</integer>"));
         assert!(text.contains("<key>Label</key>\n  <string>L</string>"));
         assert!(text.contains("<string>/bin/app</string>"));
@@ -172,17 +195,28 @@ mod tests {
     fn relaunch_toggle_rewrites_an_existing_plist_and_survives_re_enable() {
         let dir = temp_dir("toggle");
         let agent = backend(&dir);
-        agent.set_relaunch(true).expect("flag before the file exists");
-        assert!(!agent.is_enabled().expect("read"), "relaunch alone must not create a login item");
+        agent
+            .set_relaunch(true)
+            .expect("flag before the file exists");
+        assert!(
+            !agent.is_enabled().expect("read"),
+            "relaunch alone must not create a login item"
+        );
         agent.set_enabled(true).expect("enable");
         assert!(contents(&dir).contains("KeepAlive"));
         agent.set_relaunch(false).expect("off");
         assert!(!contents(&dir).contains("KeepAlive"));
-        assert!(contents(&dir).contains("RunAtLoad"), "login item behaviour stays");
+        assert!(
+            contents(&dir).contains("RunAtLoad"),
+            "login item behaviour stays"
+        );
         agent.set_relaunch(true).expect("on");
         agent.set_enabled(false).expect("disable");
         agent.set_enabled(true).expect("re-enable");
-        assert!(contents(&dir).contains("KeepAlive"), "desired flag is kept across disable/enable");
+        assert!(
+            contents(&dir).contains("KeepAlive"),
+            "desired flag is kept across disable/enable"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 }

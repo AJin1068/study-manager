@@ -30,12 +30,27 @@ pub const MAX_LABEL_CHARS: usize = 80;
 /// The sampler reads a caption at most this often.
 pub const SAMPLE_EVERY_MS: i64 = 30_000;
 
-pub const ENABLED: SettingSpec =
-    SettingSpec { name: "context.enabled", category: CATEGORY, kind: ValueKind::Bool, default: "false", tighten_to: Some("false") };
-pub const WINDOW_TITLES: SettingSpec =
-    SettingSpec { name: "context.window_titles", category: CATEGORY, kind: ValueKind::Bool, default: "false", tighten_to: Some("false") };
-pub const LLM_CONSENT: SettingSpec =
-    SettingSpec { name: "context.llm_consent", category: CATEGORY, kind: ValueKind::Bool, default: "false", tighten_to: Some("false") };
+pub const ENABLED: SettingSpec = SettingSpec {
+    name: "context.enabled",
+    category: CATEGORY,
+    kind: ValueKind::Bool,
+    default: "false",
+    tighten_to: Some("false"),
+};
+pub const WINDOW_TITLES: SettingSpec = SettingSpec {
+    name: "context.window_titles",
+    category: CATEGORY,
+    kind: ValueKind::Bool,
+    default: "false",
+    tighten_to: Some("false"),
+};
+pub const LLM_CONSENT: SettingSpec = SettingSpec {
+    name: "context.llm_consent",
+    category: CATEGORY,
+    kind: ValueKind::Bool,
+    default: "false",
+    tighten_to: Some("false"),
+};
 
 /// API name = camelCase of the variant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,21 +82,36 @@ pub struct ContextConfig {
 fn read_bool(conn: &Connection, spec: &SettingSpec) -> AppResult<bool> {
     match settings::read_value(conn, spec)? {
         SettingValue::Bool(v) => Ok(v),
-        other => Err(AppError::Internal(format!("{} has the wrong type: {other:?}", spec.name))),
+        other => Err(AppError::Internal(format!(
+            "{} has the wrong type: {other:?}",
+            spec.name
+        ))),
     }
 }
 
 impl ContextConfig {
     pub fn load(conn: &Connection) -> AppResult<Self> {
-        Ok(Self { enabled: read_bool(conn, &ENABLED)?, window_titles: read_bool(conn, &WINDOW_TITLES)?, llm_consent: read_bool(conn, &LLM_CONSENT)? })
+        Ok(Self {
+            enabled: read_bool(conn, &ENABLED)?,
+            window_titles: read_bool(conn, &WINDOW_TITLES)?,
+            llm_consent: read_bool(conn, &LLM_CONSENT)?,
+        })
     }
 }
 
 /// Changes one switch. Turning the feature off also deletes what it stored. All three may be
 /// switched off during a planned run (they only narrow collection); switching on is locked.
-pub fn update_setting(conn: &mut Connection, key: ContextSettingKey, value: SettingValue, at_ms: i64) -> AppResult<UpdateOutcome> {
+pub fn update_setting(
+    conn: &mut Connection,
+    key: ContextSettingKey,
+    value: SettingValue,
+    at_ms: i64,
+) -> AppResult<UpdateOutcome> {
     let outcome = settings::apply_setting(conn, &key.spec(), &value, at_ms, || Ok(()))?;
-    if key == ContextSettingKey::Enabled && matches!(outcome, UpdateOutcome::Applied { .. }) && value == SettingValue::Bool(false) {
+    if key == ContextSettingKey::Enabled
+        && matches!(outcome, UpdateOutcome::Applied { .. })
+        && value == SettingValue::Bool(false)
+    {
         repo::delete_all(conn)?;
     }
     Ok(outcome)
@@ -93,7 +123,10 @@ pub fn update_setting(conn: &mut Connection, key: ContextSettingKey, value: Sett
 /// app-name suffix many apps append is cut; control characters and long digit runs (ids, numbers)
 /// are removed; the rest is shortened to 80 characters.
 pub fn label_from_caption(app_name: &str, caption: &str) -> Option<String> {
-    let flat: String = caption.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+    let flat: String = caption
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
     let mut text = flat.split_whitespace().collect::<Vec<_>>().join(" ");
     if text.contains("://") || text.to_ascii_lowercase().contains("www.") {
         return None;
@@ -109,7 +142,13 @@ pub fn label_from_caption(app_name: &str, caption: &str) -> Option<String> {
         }
     }
     let cleaned = drop_digit_runs(&text);
-    let label: String = cleaned.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(MAX_LABEL_CHARS).collect();
+    let label: String = cleaned
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(MAX_LABEL_CHARS)
+        .collect();
     let label = label.trim().to_string();
     (!label.is_empty()).then_some(label)
 }
@@ -144,23 +183,40 @@ fn app_label(app: &AppIdentity) -> Option<String> {
 /// One sampling step, called by the focus sampler for the front app when it is a study app.
 /// Does nothing unless the user switched the feature on. The caption is read without the
 /// database lock held and dropped as soon as the label exists.
-pub fn capture(db: &Mutex<Connection>, probe: &dyn FocusProbe, app: &AppIdentity, segment_id: i64, now_ms: i64) -> AppResult<()> {
+pub fn capture(
+    db: &Mutex<Connection>,
+    probe: &dyn FocusProbe,
+    app: &AppIdentity,
+    segment_id: i64,
+    now_ms: i64,
+) -> AppResult<()> {
     let config = ContextConfig::load(&*lock_db(db)?)?;
     if !config.enabled {
         return Ok(());
     }
     let label = if config.window_titles {
         let caption = probe.front_window_title(app.pid);
-        caption.and_then(|c| label_from_caption(&app.display_name, &c)).or_else(|| app_label(app))
+        caption
+            .and_then(|c| label_from_caption(&app.display_name, &c))
+            .or_else(|| app_label(app))
     } else {
         app_label(app)
     };
     let Some(label) = label else { return Ok(()) };
     let conn = lock_db(db)?;
-    if repo::last_label(&conn, segment_id)?.is_some_and(|(id, last)| id == app.id && last == label) {
+    if repo::last_label(&conn, segment_id)?.is_some_and(|(id, last)| id == app.id && last == label)
+    {
         return Ok(());
     }
-    repo::insert(&conn, &ContextRow { segment_id, at_ms: now_ms, app_id: app.id.clone(), context_label: label })?;
+    repo::insert(
+        &conn,
+        &ContextRow {
+            segment_id,
+            at_ms: now_ms,
+            app_id: app.id.clone(),
+            context_label: label,
+        },
+    )?;
     repo::prune_before(&conn, now_ms - RETENTION_DAYS * DAY_MS)?;
     tracing::info!(event = "study_context_recorded");
     Ok(())
@@ -240,7 +296,12 @@ mod tests {
     }
 
     fn app() -> AppIdentity {
-        AppIdentity { id: "com.example.preview".into(), display_name: "Preview".into(), pid: 7, is_protected: false }
+        AppIdentity {
+            id: "com.example.preview".into(),
+            display_name: "Preview".into(),
+            pid: 7,
+            is_protected: false,
+        }
     }
 
     fn db_with(settings_on: &[ContextSettingKey]) -> Mutex<Connection> {
@@ -253,8 +314,13 @@ mod tests {
 
     fn rows(db: &Mutex<Connection>) -> Vec<(i64, String, String)> {
         let conn = db.lock().expect("db");
-        let mut stmt = conn.prepare("SELECT segment_id, app_id, context_label FROM study_context ORDER BY id").expect("prepare");
-        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).expect("rows").collect::<Result<_, _>>().expect("collect")
+        let mut stmt = conn
+            .prepare("SELECT segment_id, app_id, context_label FROM study_context ORDER BY id")
+            .expect("prepare");
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .expect("rows")
+            .collect::<Result<_, _>>()
+            .expect("collect")
     }
 
     #[test]
@@ -286,21 +352,30 @@ mod tests {
     #[test]
     fn app_name_only_unless_titles_are_switched_on() {
         let db = db_with(&[ContextSettingKey::Enabled]);
-        let probe = Probe { caption: Some(format!("{CANARY} — Preview")) };
+        let probe = Probe {
+            caption: Some(format!("{CANARY} — Preview")),
+        };
         capture(&db, &probe, &app(), 1, 1_000).expect("capture");
-        assert_eq!(rows(&db), [(1, "com.example.preview".to_string(), "Preview".to_string())]);
+        assert_eq!(
+            rows(&db),
+            [(1, "com.example.preview".to_string(), "Preview".to_string())]
+        );
         assert!(!format!("{:?}", rows(&db)).contains(CANARY));
     }
 
     #[test]
     fn a_caption_becomes_a_short_label_without_the_app_suffix_and_repeats_are_not_stored() {
         let db = db_with(&[ContextSettingKey::Enabled, ContextSettingKey::WindowTitles]);
-        let probe = Probe { caption: Some("미분과 적분 정리.pdf — Preview".into()) };
+        let probe = Probe {
+            caption: Some("미분과 적분 정리.pdf — Preview".into()),
+        };
         capture(&db, &probe, &app(), 1, 1_000).expect("first");
         capture(&db, &probe, &app(), 1, 2_000).expect("same label");
         assert_eq!(rows(&db).len(), 1);
         assert_eq!(rows(&db)[0].2, "미분과 적분 정리.pdf");
-        let other = Probe { caption: Some("선형대수.pdf — Preview".into()) };
+        let other = Probe {
+            caption: Some("선형대수.pdf — Preview".into()),
+        };
         capture(&db, &other, &app(), 1, 3_000).expect("new label");
         capture(&db, &other, &app(), 2, 4_000).expect("new segment");
         assert_eq!(rows(&db).len(), 3);
@@ -309,10 +384,25 @@ mod tests {
     #[test]
     fn captions_that_look_like_addresses_fall_back_to_the_app_name() {
         let db = db_with(&[ContextSettingKey::Enabled, ContextSettingKey::WindowTitles]);
-        capture(&db, &Probe { caption: Some("https://private.example/path?token=abc — Chrome".into()) }, &app(), 1, 1).expect("capture");
+        capture(
+            &db,
+            &Probe {
+                caption: Some("https://private.example/path?token=abc — Chrome".into()),
+            },
+            &app(),
+            1,
+            1,
+        )
+        .expect("capture");
         assert_eq!(rows(&db)[0].2, "Preview");
-        assert_eq!(label_from_caption("", "계좌 1234567890 확인"), Some("계좌 확인".to_string()));
-        assert_eq!(label_from_caption("", &"가".repeat(200)).map(|l| l.chars().count()), Some(MAX_LABEL_CHARS));
+        assert_eq!(
+            label_from_caption("", "계좌 1234567890 확인"),
+            Some("계좌 확인".to_string())
+        );
+        assert_eq!(
+            label_from_caption("", &"가".repeat(200)).map(|l| l.chars().count()),
+            Some(MAX_LABEL_CHARS)
+        );
         assert_eq!(label_from_caption("", " \n\t "), None);
     }
 
@@ -321,12 +411,25 @@ mod tests {
         let db = db_with(&[ContextSettingKey::Enabled]);
         capture(&db, &Probe { caption: None }, &app(), 1, 1_000).expect("old");
         let later = 1_000 + RETENTION_DAYS * DAY_MS + 1;
-        let other = AppIdentity { id: "other".into(), display_name: "Other".into(), pid: 8, is_protected: false };
+        let other = AppIdentity {
+            id: "other".into(),
+            display_name: "Other".into(),
+            pid: 8,
+            is_protected: false,
+        };
         capture(&db, &Probe { caption: None }, &other, 2, later).expect("new prunes the old one");
-        assert_eq!(rows(&db).iter().map(|r| r.1.as_str()).collect::<Vec<_>>(), ["other"]);
+        assert_eq!(
+            rows(&db).iter().map(|r| r.1.as_str()).collect::<Vec<_>>(),
+            ["other"]
+        );
         {
             let conn = db.lock().expect("db");
-            let kept = status(&conn, &Probe { caption: None }, later + RETENTION_DAYS * DAY_MS + 1).expect("status");
+            let kept = status(
+                &conn,
+                &Probe { caption: None },
+                later + RETENTION_DAYS * DAY_MS + 1,
+            )
+            .expect("status");
             assert_eq!(kept.row_count, 0, "status prunes too");
         }
         capture(&db, &Probe { caption: None }, &other, 3, later + 1).expect("again");
@@ -340,9 +443,21 @@ mod tests {
         capture(&db, &Probe { caption: None }, &app(), 1, 1_000).expect("capture");
         let mut conn = db.lock().expect("db");
         set_lock_for_test(&conn, true);
-        let widen = update_setting(&mut conn, ContextSettingKey::WindowTitles, SettingValue::Bool(true), 5).expect("outcome");
+        let widen = update_setting(
+            &mut conn,
+            ContextSettingKey::WindowTitles,
+            SettingValue::Bool(true),
+            5,
+        )
+        .expect("outcome");
         assert!(matches!(widen, UpdateOutcome::RejectedLocked { .. }));
-        let off = update_setting(&mut conn, ContextSettingKey::Enabled, SettingValue::Bool(false), 6).expect("off");
+        let off = update_setting(
+            &mut conn,
+            ContextSettingKey::Enabled,
+            SettingValue::Bool(false),
+            6,
+        )
+        .expect("off");
         assert!(matches!(off, UpdateOutcome::Applied { .. }));
         assert_eq!(repo::count(&conn).expect("count"), 0);
         assert!(!ContextConfig::load(&conn).expect("config").enabled);
@@ -353,23 +468,52 @@ mod tests {
         let db = db_with(&[ContextSettingKey::Enabled]);
         let conn = db.lock().expect("db");
         let (run_id, segment) = crate::testutil::insert_run_for_test(&conn, "수학");
-        repo::insert(&conn, &ContextRow { segment_id: segment, at_ms: 1, app_id: "a".into(), context_label: "미분 노트.md".into() }).expect("row");
-        assert_eq!(local_labels(&conn, run_id).expect("local"), ["미분 노트.md"]);
-        assert!(llm_labels(&conn, run_id).expect("llm").is_empty(), "no consent, nothing for the model");
+        repo::insert(
+            &conn,
+            &ContextRow {
+                segment_id: segment,
+                at_ms: 1,
+                app_id: "a".into(),
+                context_label: "미분 노트.md".into(),
+            },
+        )
+        .expect("row");
+        assert_eq!(
+            local_labels(&conn, run_id).expect("local"),
+            ["미분 노트.md"]
+        );
+        assert!(
+            llm_labels(&conn, run_id).expect("llm").is_empty(),
+            "no consent, nothing for the model"
+        );
         drop(conn);
-        update_setting(&mut db.lock().expect("db"), ContextSettingKey::LlmConsent, SettingValue::Bool(true), 2).expect("consent");
-        assert_eq!(llm_labels(&db.lock().expect("db"), run_id).expect("llm"), ["미분 노트.md"]);
+        update_setting(
+            &mut db.lock().expect("db"),
+            ContextSettingKey::LlmConsent,
+            SettingValue::Bool(true),
+            2,
+        )
+        .expect("consent");
+        assert_eq!(
+            llm_labels(&db.lock().expect("db"), run_id).expect("llm"),
+            ["미분 노트.md"]
+        );
     }
 
     #[test]
     fn the_caption_never_reaches_the_log() {
         let db = db_with(&[ContextSettingKey::Enabled, ContextSettingKey::WindowTitles]);
-        let probe = Probe { caption: Some(format!("{CANARY}.pdf — Preview")) };
+        let probe = Probe {
+            caption: Some(format!("{CANARY}.pdf — Preview")),
+        };
         let mut seen = String::new();
         for _ in 0..10 {
             seen = capture_logs(|| {
                 capture(&db, &probe, &app(), 1, 1).ok();
-                db.lock().expect("db").execute("DELETE FROM study_context", []).ok();
+                db.lock()
+                    .expect("db")
+                    .execute("DELETE FROM study_context", [])
+                    .ok();
             });
             if seen.contains("study_context_recorded") {
                 break;

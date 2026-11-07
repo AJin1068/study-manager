@@ -54,11 +54,23 @@ const MAX_CACHED_DOMAINS: usize = 1024;
 const MAX_ENTRY_CHARS: usize = 512;
 
 /// Music apps' web players stay reachable by default (PLAN feature 2). Matching is by domain suffix.
-const MUSIC_DOMAINS: &[&str] = &["spotify.com", "melon.com", "genie.co.kr", "bugs.co.kr", "music.apple.com"];
+const MUSIC_DOMAINS: &[&str] = &[
+    "spotify.com",
+    "melon.com",
+    "genie.co.kr",
+    "bugs.co.kr",
+    "music.apple.com",
+];
 /// Strict-mode allow list used until the user registers their own. A minimal set pending the
 /// user's confirmation (decision D-23).
-const STRICT_DEFAULT_ALLOW: &[&str] =
-    &["github.com", "developer.mozilla.org", "docs.rs", "doc.rust-lang.org", "docs.python.org", "learn.microsoft.com"];
+const STRICT_DEFAULT_ALLOW: &[&str] = &[
+    "github.com",
+    "developer.mozilla.org",
+    "docs.rs",
+    "doc.rust-lang.org",
+    "docs.python.org",
+    "learn.microsoft.com",
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Decision {
@@ -68,7 +80,10 @@ pub struct Decision {
 
 impl Decision {
     fn allow(reason: &'static str) -> Decision {
-        Decision { block: false, reason }
+        Decision {
+            block: false,
+            reason,
+        }
     }
 }
 
@@ -99,8 +114,14 @@ struct HostKey {
 
 fn host_key(url: &Url) -> Option<HostKey> {
     match url.host()? {
-        Host::Domain(name) => Some(HostKey { name: name.trim_end_matches('.').to_owned(), is_domain: true }),
-        Host::Ipv4(ip) => Some(HostKey { name: ip.to_string(), is_domain: false }),
+        Host::Domain(name) => Some(HostKey {
+            name: name.trim_end_matches('.').to_owned(),
+            is_domain: true,
+        }),
+        Host::Ipv4(ip) => Some(HostKey {
+            name: ip.to_string(),
+            is_domain: false,
+        }),
         Host::Ipv6(_) => None,
     }
 }
@@ -111,7 +132,10 @@ fn host_matches(pattern: &str, host: &HostKey) -> bool {
         return true;
     }
     let (name, suffix) = (host.name.as_bytes(), pattern.as_bytes());
-    host.is_domain && name.len() > suffix.len() && name.ends_with(suffix) && name[name.len() - suffix.len() - 1] == b'.'
+    host.is_domain
+        && name.len() > suffix.len()
+        && name.ends_with(suffix)
+        && name[name.len() - suffix.len() - 1] == b'.'
 }
 
 /// Parsed page address, alive only for one judgement.
@@ -130,8 +154,16 @@ impl Target {
             return None;
         }
         let host = host_key(&url)?;
-        let lists = url.query_pairs().filter(|(key, _)| key == "list").map(|(_, value)| value.into_owned()).collect();
-        Some(Target { host, path: url.path().to_owned(), lists })
+        let lists = url
+            .query_pairs()
+            .filter(|(key, _)| key == "list")
+            .map(|(_, value)| value.into_owned())
+            .collect();
+        Some(Target {
+            host,
+            path: url.path().to_owned(),
+            lists,
+        })
     }
 }
 
@@ -151,10 +183,14 @@ impl SitePattern {
             return None;
         }
         let lowered = raw.trim().to_lowercase();
-        let rest = lowered.strip_prefix("https://").or_else(|| lowered.strip_prefix("http://")).unwrap_or(&lowered);
+        let rest = lowered
+            .strip_prefix("https://")
+            .or_else(|| lowered.strip_prefix("http://"))
+            .unwrap_or(&lowered);
         let rest = rest.strip_prefix("*.").unwrap_or(rest);
         let (host_part, path_part) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
-        let bad_host = host_part.is_empty() || host_part.contains(|c: char| c.is_whitespace() || "@:?#\\%".contains(c));
+        let bad_host = host_part.is_empty()
+            || host_part.contains(|c: char| c.is_whitespace() || "@:?#\\%".contains(c));
         if bad_host || path_part.contains(['?', '#']) {
             return None;
         }
@@ -162,7 +198,10 @@ impl SitePattern {
         let url = Url::parse(&format!("https://{host_part}{path_part}")).ok()?;
         let host = host_key(&url)?.name;
         let path = url.path().trim_end_matches('/').to_lowercase();
-        Some(SitePattern { host, path: (!path.is_empty()).then_some(path) })
+        Some(SitePattern {
+            host,
+            path: (!path.is_empty()).then_some(path),
+        })
     }
 
     /// `domain` or `domain/path`: the form stored in the block list and the allow list.
@@ -181,7 +220,8 @@ impl SitePattern {
             None => true,
             Some(prefix) => {
                 let path = target.path.to_lowercase();
-                path.strip_prefix(prefix.as_str()).is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+                path.strip_prefix(prefix.as_str())
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
             }
         }
     }
@@ -222,7 +262,9 @@ fn plain_id(raw: &str) -> Option<&str> {
     let id = raw.trim();
     let ok = !id.is_empty()
         && id.chars().count() <= MAX_ENTRY_CHARS
-        && id.chars().all(|c| !c.is_whitespace() && !c.is_control() && !"/?#&=\\%".contains(c));
+        && id
+            .chars()
+            .all(|c| !c.is_whitespace() && !c.is_control() && !"/?#&=\\%".contains(c));
     ok.then_some(id)
 }
 
@@ -233,16 +275,20 @@ impl StudyYoutube {
 
     /// Returns false for an entry that is not a usable ID.
     fn add_channel(&mut self, raw: &str) -> bool {
-        let Some(id) = plain_id(raw) else { return false };
+        let Some(id) = plain_id(raw) else {
+            return false;
+        };
         match id.strip_prefix('@') {
             // The URL parser encodes a non-ASCII handle; entries get the same encoding.
-            Some(handle) if !handle.is_empty() => match Url::parse(&format!("https://youtube.com/@{handle}")) {
-                Ok(url) => {
-                    let segment = url.path().trim_start_matches('/').to_lowercase();
-                    self.handles.insert(segment)
+            Some(handle) if !handle.is_empty() => {
+                match Url::parse(&format!("https://youtube.com/@{handle}")) {
+                    Ok(url) => {
+                        let segment = url.path().trim_start_matches('/').to_lowercase();
+                        self.handles.insert(segment)
+                    }
+                    Err(_) => return false,
                 }
-                Err(_) => return false,
-            },
+            }
             Some(_) => return false,
             None => self.channels.insert(id.to_owned()),
         };
@@ -253,12 +299,18 @@ impl StudyYoutube {
         if !youtube_host(&target.host) {
             return false;
         }
-        if target.lists.iter().any(|list| self.playlists.contains(list)) {
+        if target
+            .lists
+            .iter()
+            .any(|list| self.playlists.contains(list))
+        {
             return true;
         }
         let mut segments = target.path.split('/').filter(|s| !s.is_empty());
         match (segments.next(), segments.next()) {
-            (Some(first), _) if first.starts_with('@') => self.handles.contains(&first.to_lowercase()),
+            (Some(first), _) if first.starts_with('@') => {
+                self.handles.contains(&first.to_lowercase())
+            }
             (Some("channel"), Some(id)) => self.channels.contains(id),
             _ => false,
         }
@@ -305,12 +357,20 @@ fn parse_all(raw: &[String], skipped: &mut usize) -> Vec<SitePattern> {
 
 impl SiteRules {
     fn build(block_patterns: &[String], stored: SiteRulesConfig) -> SiteRules {
-        let mut rules = SiteRules { strict: stored.strict, ..SiteRules::default() };
+        let mut rules = SiteRules {
+            strict: stored.strict,
+            ..SiteRules::default()
+        };
         let mut skipped = 0;
         rules.block = parse_all(block_patterns, &mut skipped);
         match &stored.allow {
             Some(allow) => rules.allow = parse_all(allow, &mut skipped),
-            None => rules.strict_defaults = STRICT_DEFAULT_ALLOW.iter().filter_map(|d| SitePattern::parse(d)).collect(),
+            None => {
+                rules.strict_defaults = STRICT_DEFAULT_ALLOW
+                    .iter()
+                    .filter_map(|d| SitePattern::parse(d))
+                    .collect()
+            }
         }
         for list in &stored.youtube_playlists {
             match plain_id(list) {
@@ -337,7 +397,10 @@ impl SiteRules {
         if any_match(&self.block, target) {
             return Outcome::Block(REASON_BLOCKED_SITE);
         }
-        if MUSIC_DOMAINS.iter().any(|domain| host_matches(domain, &target.host)) {
+        if MUSIC_DOMAINS
+            .iter()
+            .any(|domain| host_matches(domain, &target.host))
+        {
             return Outcome::Allow(REASON_ALLOWED_MUSIC);
         }
         if self.strict {
@@ -353,7 +416,11 @@ impl SiteRules {
     /// The outcome for this host can depend on the path or query, so it must not be cached by
     /// domain alone.
     fn path_sensitive(&self, host: &HostKey) -> bool {
-        let pathful = |patterns: &[SitePattern]| patterns.iter().any(|p| p.path.is_some() && host_matches(&p.host, host));
+        let pathful = |patterns: &[SitePattern]| {
+            patterns
+                .iter()
+                .any(|p| p.path.is_some() && host_matches(&p.host, host))
+        };
         pathful(&self.block)
             || pathful(&self.allow)
             || pathful(&self.strict_defaults)
@@ -366,8 +433,9 @@ impl SiteRules {
 pub fn load(conn: &Connection) -> AppResult<SiteRules> {
     let block = store::list_enabled_patterns(conn, EntryKind::Site)?;
     let stored = match store::get_setting(conn, SITE_RULES_KEY)? {
-        Some(raw) => serde_json::from_str(&raw)
-            .map_err(|err| AppError::Internal(format!("{SITE_RULES_KEY} setting is invalid: {err}")))?,
+        Some(raw) => serde_json::from_str(&raw).map_err(|err| {
+            AppError::Internal(format!("{SITE_RULES_KEY} setting is invalid: {err}"))
+        })?,
         None => SiteRulesConfig::default(),
     };
     Ok(SiteRules::build(&block, stored))
@@ -392,11 +460,18 @@ impl DecisionCache {
 }
 
 /// Judges one page. `cache` must have been filled under the same `rules`.
-pub fn judge(url: &str, rules: &SiteRules, situation: Situation, cache: &mut DecisionCache) -> Decision {
+pub fn judge(
+    url: &str,
+    rules: &SiteRules,
+    situation: Situation,
+    cache: &mut DecisionCache,
+) -> Decision {
     if !situation.in_study {
         return Decision::allow(REASON_OUTSIDE_STUDY);
     }
-    let Some(target) = Target::parse(url) else { return Decision::allow(REASON_NOT_WEB) };
+    let Some(target) = Target::parse(url) else {
+        return Decision::allow(REASON_NOT_WEB);
+    };
     let outcome = match cache.by_domain.get(&target.host.name) {
         Some(outcome) => *outcome,
         None => {
@@ -410,7 +485,10 @@ pub fn judge(url: &str, rules: &SiteRules, situation: Situation, cache: &mut Dec
     match outcome {
         Outcome::Allow(reason) => Decision::allow(reason),
         Outcome::Block(_) if situation.pass_active => Decision::allow(REASON_SITE_ALLOWED_PASS),
-        Outcome::Block(reason) => Decision { block: true, reason },
+        Outcome::Block(reason) => Decision {
+            block: true,
+            reason,
+        },
     }
 }
 
@@ -434,21 +512,35 @@ impl SiteRuleEngine {
     pub fn new(db: Arc<Mutex<Connection>>) -> SiteRuleEngine {
         SiteRuleEngine {
             db,
-            state: Mutex::new(EngineState { scope: None, rules: SiteRules::default(), cache: DecisionCache::default() }),
+            state: Mutex::new(EngineState {
+                scope: None,
+                rules: SiteRules::default(),
+                cache: DecisionCache::default(),
+            }),
         }
     }
 
     /// Fails open: rules that cannot be read allow the page and say `app_error`.
     pub fn decide(&self, url: &str, scope: Scope, situation: Situation) -> Decision {
-        let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if state.scope != Some(scope) {
             let loaded = lock_db(&self.db).and_then(|conn| load(&conn));
             match loaded {
                 Ok(rules) => {
                     if rules.skipped_entries > 0 {
-                        tracing::warn!(event = "site_rules_entries_skipped", count = rules.skipped_entries);
+                        tracing::warn!(
+                            event = "site_rules_entries_skipped",
+                            count = rules.skipped_entries
+                        );
                     }
-                    *state = EngineState { scope: Some(scope), rules, cache: DecisionCache::default() };
+                    *state = EngineState {
+                        scope: Some(scope),
+                        rules,
+                        cache: DecisionCache::default(),
+                    };
                 }
                 Err(err) => {
                     tracing::error!(error = %err, "site rules unavailable; allowing");

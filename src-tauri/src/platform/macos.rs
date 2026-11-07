@@ -7,16 +7,18 @@ use std::ptr::NonNull;
 use std::sync::mpsc::Sender;
 
 use block2::RcBlock;
-use objc2_app_kit::{
-    NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace, NSWorkspaceDidWakeNotification,
-    NSWorkspaceWillSleepNotification,
-};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
-use objc2_foundation::{NSActivityOptions, NSNotification, NSObjectProtocol, NSProcessInfo, NSString};
+use objc2_app_kit::{
+    NSApplicationActivationPolicy, NSRunningApplication, NSWorkspace,
+    NSWorkspaceDidWakeNotification, NSWorkspaceWillSleepNotification,
+};
+use objc2_foundation::{
+    NSActivityOptions, NSNotification, NSObjectProtocol, NSProcessInfo, NSString,
+};
 
-use super::focus::{whole_idle_seconds, FocusProbe, TitleAccess};
-use super::process::{is_protected_id, normalize_app_id, AppIdentity, ProcessControl};
+use super::focus::{FocusProbe, TitleAccess, whole_idle_seconds};
+use super::process::{AppIdentity, ProcessControl, is_protected_id, normalize_app_id};
 use super::{PlatformError, PowerEvent, PowerEventSource};
 
 pub struct NsWorkspacePowerSource;
@@ -102,7 +104,12 @@ fn build_identity(
     let id = normalize_app_id(raw);
     let display_name = name.map(str::to_owned).unwrap_or_else(|| id.clone());
     let is_protected = pid == self_pid || is_protected_id(&id);
-    Some(AppIdentity { id, display_name, pid, is_protected })
+    Some(AppIdentity {
+        id,
+        display_name,
+        pid,
+        is_protected,
+    })
 }
 
 fn pid_of(app: &AppIdentity) -> Result<i32, PlatformError> {
@@ -115,11 +122,22 @@ fn resolve(app: &AppIdentity) -> Result<Retained<NSRunningApplication>, Platform
     let running = NSRunningApplication::runningApplicationWithProcessIdentifier(pid_of(app)?)
         .ok_or_else(|| PlatformError::Process("app is no longer running".into()))?;
     let bundle = running.bundleIdentifier().map(|b| b.to_string());
-    let exe = running.executableURL().and_then(|u| u.path()).map(|p| p.to_string());
+    let exe = running
+        .executableURL()
+        .and_then(|u| u.path())
+        .map(|p| p.to_string());
     let name = running.localizedName().map(|n| n.to_string());
-    let current = build_identity(bundle.as_deref(), exe.as_deref(), name.as_deref(), app.pid, std::process::id());
+    let current = build_identity(
+        bundle.as_deref(),
+        exe.as_deref(),
+        name.as_deref(),
+        app.pid,
+        std::process::id(),
+    );
     if current.as_ref().map(|c| &c.id) != Some(&app.id) {
-        return Err(PlatformError::Process("pid now belongs to a different app".into()));
+        return Err(PlatformError::Process(
+            "pid now belongs to a different app".into(),
+        ));
     }
     Ok(running)
 }
@@ -133,29 +151,46 @@ impl ProcessControl for MacProcessControl {
             if app.activationPolicy() != NSApplicationActivationPolicy::Regular {
                 continue;
             }
-            let Ok(pid) = u32::try_from(app.processIdentifier()) else { continue };
+            let Ok(pid) = u32::try_from(app.processIdentifier()) else {
+                continue;
+            };
             let bundle = app.bundleIdentifier().map(|b| b.to_string());
-            let exe = app.executableURL().and_then(|u| u.path()).map(|p| p.to_string());
+            let exe = app
+                .executableURL()
+                .and_then(|u| u.path())
+                .map(|p| p.to_string());
             let name = app.localizedName().map(|n| n.to_string());
-            out.extend(build_identity(bundle.as_deref(), exe.as_deref(), name.as_deref(), pid, self_pid));
+            out.extend(build_identity(
+                bundle.as_deref(),
+                exe.as_deref(),
+                name.as_deref(),
+                pid,
+                self_pid,
+            ));
         }
         Ok(out)
     }
 
     fn request_quit(&self, app: &AppIdentity) -> Result<(), PlatformError> {
         if app.is_protected {
-            return Err(PlatformError::Process("refusing to end a protected app".into()));
+            return Err(PlatformError::Process(
+                "refusing to end a protected app".into(),
+            ));
         }
         if resolve(app)?.terminate() {
             Ok(())
         } else {
-            Err(PlatformError::Process("quit request was not delivered".into()))
+            Err(PlatformError::Process(
+                "quit request was not delivered".into(),
+            ))
         }
     }
 
     fn force_kill(&self, app: &AppIdentity) -> Result<(), PlatformError> {
         if app.is_protected {
-            return Err(PlatformError::Process("refusing to end a protected app".into()));
+            return Err(PlatformError::Process(
+                "refusing to end a protected app".into(),
+            ));
         }
         // `forceTerminate` sends SIGKILL to the process.
         if resolve(app)?.forceTerminate() {
@@ -188,12 +223,25 @@ pub struct MacFocusProbe;
 
 impl FocusProbe for MacFocusProbe {
     fn frontmost_app(&self) -> Result<Option<AppIdentity>, PlatformError> {
-        let Some(app) = NSWorkspace::sharedWorkspace().frontmostApplication() else { return Ok(None) };
-        let Ok(pid) = u32::try_from(app.processIdentifier()) else { return Ok(None) };
+        let Some(app) = NSWorkspace::sharedWorkspace().frontmostApplication() else {
+            return Ok(None);
+        };
+        let Ok(pid) = u32::try_from(app.processIdentifier()) else {
+            return Ok(None);
+        };
         let bundle = app.bundleIdentifier().map(|b| b.to_string());
-        let exe = app.executableURL().and_then(|u| u.path()).map(|p| p.to_string());
+        let exe = app
+            .executableURL()
+            .and_then(|u| u.path())
+            .map(|p| p.to_string());
         let name = app.localizedName().map(|n| n.to_string());
-        Ok(build_identity(bundle.as_deref(), exe.as_deref(), name.as_deref(), pid, std::process::id()))
+        Ok(build_identity(
+            bundle.as_deref(),
+            exe.as_deref(),
+            name.as_deref(),
+            pid,
+            std::process::id(),
+        ))
     }
 
     fn idle_seconds(&self) -> Result<u64, PlatformError> {
@@ -204,7 +252,11 @@ impl FocusProbe for MacFocusProbe {
 
     fn window_title_access(&self) -> TitleAccess {
         // SAFETY: argument-free query with no side effects.
-        if unsafe { AXIsProcessTrusted() } != 0 { TitleAccess::Granted } else { TitleAccess::Denied }
+        if unsafe { AXIsProcessTrusted() } != 0 {
+            TitleAccess::Granted
+        } else {
+            TitleAccess::Denied
+        }
     }
 
     fn front_window_title(&self, pid: u32) -> Option<String> {
@@ -226,7 +278,13 @@ fn read_front_window_title(pid: u32) -> Option<String> {
     let script = format!(
         "tell application \"System Events\" to get name of front window of (first process whose unix id is {pid})"
     );
-    let mut child = Command::new("osascript").arg("-e").arg(script).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+    let mut child = Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         match child.try_wait() {
@@ -241,7 +299,12 @@ fn read_front_window_title(pid: u32) -> Option<String> {
         }
     }
     let mut out = String::new();
-    child.stdout.take()?.take(4096).read_to_string(&mut out).ok()?;
+    child
+        .stdout
+        .take()?
+        .take(4096)
+        .read_to_string(&mut out)
+        .ok()?;
     let title = out.trim().to_string();
     (!title.is_empty()).then_some(title)
 }
@@ -255,26 +318,62 @@ mod tests {
         let probe = MacFocusProbe;
         assert!(probe.frontmost_app().is_ok());
         let first = probe.idle_seconds().expect("idle");
-        assert!(first < 10 * 365 * 24 * 3600, "implausible idle reading {first}");
-        assert!(matches!(probe.window_title_access(), TitleAccess::Granted | TitleAccess::Denied));
+        assert!(
+            first < 10 * 365 * 24 * 3600,
+            "implausible idle reading {first}"
+        );
+        assert!(matches!(
+            probe.window_title_access(),
+            TitleAccess::Granted | TitleAccess::Denied
+        ));
     }
 
     #[test]
     fn identity_prefers_bundle_id_and_falls_back_to_the_executable_path() {
-        let by_bundle = build_identity(Some("Com.Example.App"), Some("/x/y"), Some("Example"), 10, 1).expect("id");
+        let by_bundle = build_identity(
+            Some("Com.Example.App"),
+            Some("/x/y"),
+            Some("Example"),
+            10,
+            1,
+        )
+        .expect("id");
         assert_eq!(by_bundle.id, "com.example.app");
         assert_eq!(by_bundle.display_name, "Example");
-        let by_path = build_identity(None, Some("/Applications/Tool.app/Contents/MacOS/Tool"), None, 10, 1).expect("id");
+        let by_path = build_identity(
+            None,
+            Some("/Applications/Tool.app/Contents/MacOS/Tool"),
+            None,
+            10,
+            1,
+        )
+        .expect("id");
         assert_eq!(by_path.id, "/applications/tool.app/contents/macos/tool");
         assert!(build_identity(None, None, Some("Nameless"), 10, 1).is_none());
     }
 
     #[test]
     fn this_process_and_system_apps_are_marked_protected() {
-        assert!(build_identity(Some("com.example.app"), None, None, 42, 42).expect("id").is_protected);
-        assert!(build_identity(Some("com.apple.finder"), None, None, 10, 1).expect("id").is_protected);
-        assert!(build_identity(Some("com.studymanager.app"), None, None, 10, 1).expect("id").is_protected);
-        assert!(!build_identity(Some("com.example.app"), None, None, 10, 1).expect("id").is_protected);
+        assert!(
+            build_identity(Some("com.example.app"), None, None, 42, 42)
+                .expect("id")
+                .is_protected
+        );
+        assert!(
+            build_identity(Some("com.apple.finder"), None, None, 10, 1)
+                .expect("id")
+                .is_protected
+        );
+        assert!(
+            build_identity(Some("com.studymanager.app"), None, None, 10, 1)
+                .expect("id")
+                .is_protected
+        );
+        assert!(
+            !build_identity(Some("com.example.app"), None, None, 10, 1)
+                .expect("id")
+                .is_protected
+        );
     }
 
     #[test]
@@ -286,7 +385,12 @@ mod tests {
 
     #[test]
     fn a_protected_app_is_refused_before_any_os_call() {
-        let app = AppIdentity { id: "com.apple.finder".into(), display_name: "Finder".into(), pid: 1, is_protected: true };
+        let app = AppIdentity {
+            id: "com.apple.finder".into(),
+            display_name: "Finder".into(),
+            pid: 1,
+            is_protected: true,
+        };
         assert!(MacProcessControl.request_quit(&app).is_err());
         assert!(MacProcessControl.force_kill(&app).is_err());
     }

@@ -12,7 +12,7 @@ use chrono::{Datelike, Local, TimeZone};
 
 use super::catalog::catalog;
 use super::compose::{builtin_blurb, builtin_name, compose, parse_names};
-use super::{labels, render, CandidateSet, CandidateView, Equipped, NameSource, SetupInput};
+use super::{CandidateSet, CandidateView, Equipped, NameSource, SetupInput, labels, render};
 use crate::error::AppResult;
 use crate::llm::egress::{CharacterLook, Prompt};
 use crate::llm::service::LlmService;
@@ -28,7 +28,10 @@ pub struct CharacterService {
 }
 
 pub fn year_of(now_ms: i64) -> i32 {
-    Local.timestamp_millis_opt(now_ms).single().map_or(2026, |t| t.year())
+    Local
+        .timestamp_millis_opt(now_ms)
+        .single()
+        .map_or(2026, |t| t.year())
 }
 
 impl CharacterService {
@@ -89,6 +92,10 @@ impl CharacterService {
             }
             Err(err) => Some(err.code().to_string()),
         };
-        Ok(CandidateSet { seed, candidates: views, fallback_reason })
+        Ok(CandidateSet {
+            seed,
+            candidates: views,
+            fallback_reason,
+        })
     }
 }

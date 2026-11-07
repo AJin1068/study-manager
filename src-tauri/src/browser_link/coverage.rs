@@ -4,7 +4,7 @@
 //! is stored. A browser that never connected counts as unwatched, and so does one whose
 //! extension was disabled or removed: the app cannot tell those apart, only that the link is gone.
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::Serialize;
 
 use crate::enforce::model::{BlockAction, EnforceMode, NewBlockEvent, TargetKind};
@@ -38,7 +38,14 @@ fn link_deltas(conn: &Connection) -> AppResult<Vec<(i64, i64)>> {
         |row| {
             let at: i64 = row.get(0)?;
             let action: String = row.get(1)?;
-            Ok((at, if action == BlockAction::ExtensionConnected.as_str() { 1 } else { -1 }))
+            Ok((
+                at,
+                if action == BlockAction::ExtensionConnected.as_str() {
+                    1
+                } else {
+                    -1
+                },
+            ))
         },
     )?;
     Ok(rows.collect::<Result<_, _>>()?)
@@ -77,7 +84,10 @@ pub fn unmonitored_ms(conn: &Connection, from_ms: i64, to_ms: i64) -> AppResult<
 /// Study time and unwatched study time of a run, from its study segments.
 pub fn run_coverage(conn: &Connection, run_id: i64, now_ms: i64) -> AppResult<Coverage> {
     let mut coverage = Coverage::default();
-    for segment in store::list_segments(conn, run_id)?.into_iter().filter(|s| s.kind == BlockKind::Study) {
+    for segment in store::list_segments(conn, run_id)?
+        .into_iter()
+        .filter(|s| s.kind == BlockKind::Study)
+    {
         let end = segment.ended_at_ms.unwrap_or(now_ms);
         if end <= segment.started_at_ms {
             continue;
@@ -91,7 +101,9 @@ pub fn run_coverage(conn: &Connection, run_id: i64, now_ms: i64) -> AppResult<Co
 /// Startup: a previous run that ended with a link open (kill, crash, power loss) never wrote its
 /// disconnects. Closes each outstanding link now so the gap does not run on into this session.
 pub fn close_stale_links(conn: &Connection, now_ms: i64, mode: EnforceMode) -> AppResult<()> {
-    let open = link_deltas(conn)?.iter().fold(0_i64, |open, (_, delta)| (open + delta).max(0));
+    let open = link_deltas(conn)?
+        .iter()
+        .fold(0_i64, |open, (_, delta)| (open + delta).max(0));
     for _ in 0..open {
         store::insert_block_event(
             conn,
@@ -158,7 +170,11 @@ mod tests {
         link(&conn, 10, BlockAction::ExtensionConnected);
         link(&conn, 20, BlockAction::ExtensionConnected);
         link(&conn, 30, BlockAction::ExtensionDisconnected);
-        assert_eq!(unmonitored_ms(&conn, 0, 100).expect("gap"), 10, "only 0..10 is unwatched");
+        assert_eq!(
+            unmonitored_ms(&conn, 0, 100).expect("gap"),
+            10,
+            "only 0..10 is unwatched"
+        );
         link(&conn, 60, BlockAction::ExtensionDisconnected);
         assert_eq!(unmonitored_ms(&conn, 0, 100).expect("gap"), 10 + 40);
     }

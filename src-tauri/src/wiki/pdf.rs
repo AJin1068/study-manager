@@ -44,7 +44,10 @@ impl PdfExtractor for NoPdfExtractor {
 }
 
 /// Runs the extractor on a separate thread and turns a panic into `PdfError::Panicked`.
-pub fn extract_isolated(extractor: &Arc<dyn PdfExtractor>, bytes: Vec<u8>) -> Result<String, PdfError> {
+pub fn extract_isolated(
+    extractor: &Arc<dyn PdfExtractor>,
+    bytes: Vec<u8>,
+) -> Result<String, PdfError> {
     let extractor = Arc::clone(extractor);
     let worker = std::thread::Builder::new()
         .name("pdf-extract".into())
@@ -82,13 +85,19 @@ pub(crate) mod tests {
     #[test]
     fn the_default_extractor_says_unsupported() {
         let extractor: Arc<dyn PdfExtractor> = Arc::new(NoPdfExtractor);
-        assert_eq!(extract_isolated(&extractor, b"%PDF-1.4".to_vec()), Err(PdfError::Unsupported));
+        assert_eq!(
+            extract_isolated(&extractor, b"%PDF-1.4".to_vec()),
+            Err(PdfError::Unsupported)
+        );
     }
 
     #[test]
     fn a_parser_panic_is_contained_and_reported() {
         let extractor: Arc<dyn PdfExtractor> = Arc::new(Panicking);
-        assert_eq!(extract_isolated(&extractor, vec![1, 2, 3]), Err(PdfError::Panicked));
+        assert_eq!(
+            extract_isolated(&extractor, vec![1, 2, 3]),
+            Err(PdfError::Panicked)
+        );
         // The process is still here and can extract again.
         let ok: Arc<dyn PdfExtractor> = Arc::new(Fixed("본문"));
         assert_eq!(extract_isolated(&ok, Vec::new()).as_deref(), Ok("본문"));

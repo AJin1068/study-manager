@@ -33,7 +33,11 @@ pub fn collect<Tz: TimeZone>(conn: &Connection, tz: &Tz, now_ms: i64) -> AppResu
         .ok_or_else(|| AppError::Internal("timestamp has no local date".into()))?
         .date_naive();
     let day_start = |date: chrono::NaiveDate| plan::local_to_ms(tz, date, chrono::NaiveTime::MIN);
-    let attempts_today = store::rooms::count_attempts_between(conn, day_start(today)?, day_start(today + Duration::days(1))?)?;
+    let attempts_today = store::rooms::count_attempts_between(
+        conn,
+        day_start(today)?,
+        day_start(today + Duration::days(1))?,
+    )?;
 
     let week = dashboard::week(conn, tz, now_ms)?;
     let today_text = today.format("%Y-%m-%d").to_string();
@@ -41,10 +45,20 @@ pub fn collect<Tz: TimeZone>(conn: &Connection, tz: &Tz, now_ms: i64) -> AppResu
         .days
         .into_iter()
         .filter(|d| d.date <= today_text)
-        .map(|d| LocalDay { day: d.date, study_min: d.actual_ms / MINUTE_MS, plan_min: d.planned_ms / MINUTE_MS })
+        .map(|d| LocalDay {
+            day: d.date,
+            study_min: d.actual_ms / MINUTE_MS,
+            plan_min: d.planned_ms / MINUTE_MS,
+        })
         .collect();
 
-    Ok(LocalSnapshot { phase, remaining_sec, level: points::status(conn)?.level, attempts_today, days })
+    Ok(LocalSnapshot {
+        phase,
+        remaining_sec,
+        level: points::status(conn)?.level,
+        attempts_today,
+        days,
+    })
 }
 
 #[cfg(test)]
@@ -59,10 +73,24 @@ mod tests {
         let conn = open_in_memory().expect("db");
         let utc = FixedOffset::east_opt(0).expect("offset");
         let snapshot = collect(&conn, &utc, 1_793_975_400_000).expect("collect");
-        assert_eq!((snapshot.phase, snapshot.remaining_sec, snapshot.attempts_today), (LocalPhase::Idle, 0, 0));
+        assert_eq!(
+            (
+                snapshot.phase,
+                snapshot.remaining_sec,
+                snapshot.attempts_today
+            ),
+            (LocalPhase::Idle, 0, 0)
+        );
         assert!(snapshot.level >= 1);
-        assert!(snapshot.days.iter().all(|d| d.study_min == 0), "{:?}", snapshot.days);
-        assert!(snapshot.days.last().is_some_and(|d| d.day == "2026-11-06"), "the week ends at today, not at Sunday");
+        assert!(
+            snapshot.days.iter().all(|d| d.study_min == 0),
+            "{:?}",
+            snapshot.days
+        );
+        assert!(
+            snapshot.days.last().is_some_and(|d| d.day == "2026-11-06"),
+            "the week ends at today, not at Sunday"
+        );
     }
 
     #[test]
@@ -79,6 +107,9 @@ mod tests {
             )
             .expect("event");
         }
-        assert_eq!(collect(&conn, &seoul, now).expect("collect").attempts_today, 2);
+        assert_eq!(
+            collect(&conn, &seoul, now).expect("collect").attempts_today,
+            2
+        );
     }
 }

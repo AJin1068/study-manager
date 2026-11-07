@@ -2,19 +2,23 @@
 //! whose numbers are worked out by hand in the comments.
 
 use chrono::{NaiveDate, TimeZone, Utc};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use super::*;
 use crate::db::open_in_memory;
 use crate::enforce::model::{BlockAction, EnforceMode, NewBlockEvent, TargetKind};
 use crate::focus::model::{FocusEventKind, MinuteDelta, NewFocusEvent};
-use crate::plan::{create_plan, BlockKind, CreatePlanInput};
+use crate::plan::{BlockKind, CreatePlanInput, create_plan};
 use crate::timer::model::{EndReason, NewRun, NewSegment, RunStatus};
 
 const MIN: i64 = 60_000;
 
 fn t(day: u32, h: i64, m: i64) -> i64 {
-    Utc.with_ymd_and_hms(2026, 11, day, 0, 0, 0).single().expect("date").timestamp_millis() + (h * 60 + m) * MIN
+    Utc.with_ymd_and_hms(2026, 11, day, 0, 0, 0)
+        .single()
+        .expect("date")
+        .timestamp_millis()
+        + (h * 60 + m) * MIN
 }
 
 fn now() -> i64 {
@@ -70,7 +74,11 @@ fn run(
             long_break_min: None,
             sets_before_long_break: None,
             sets_total: sets,
-            status: if closed { RunStatus::Completed } else { RunStatus::Active },
+            status: if closed {
+                RunStatus::Completed
+            } else {
+                RunStatus::Active
+            },
             ended_at_ms: closed.then_some(end_ms),
             detail_code: None,
         },
@@ -96,7 +104,12 @@ fn run(
         store::add_focus_minute(
             conn,
             segment,
-            &MinuteDelta { minute_start_ms, credited_ms: MIN, away_ms: 0, idle_ms: 0 },
+            &MinuteDelta {
+                minute_start_ms,
+                credited_ms: MIN,
+                away_ms: 0,
+                idle_ms: 0,
+            },
         )
         .expect("minute");
     }
@@ -106,7 +119,13 @@ fn run(
 fn away(conn: &Connection, run_id: i64, segment_id: i64, at_ms: i64) {
     store::insert_focus_event(
         conn,
-        &NewFocusEvent { run_id, segment_id, at_ms, kind: FocusEventKind::Away, app_id: Some("com.example.game") },
+        &NewFocusEvent {
+            run_id,
+            segment_id,
+            at_ms,
+            kind: FocusEventKind::Away,
+            app_id: Some("com.example.game"),
+        },
     )
     .expect("event");
 }
@@ -164,16 +183,50 @@ fn achieved_is_exactly_eighty_percent_and_never_for_an_empty_plan() {
 
 #[test]
 fn streak_counts_consecutive_achieved_days_and_skips_unplanned_ones() {
-    let days = |rows: &[(u32, i64, i64)]| rows.iter().map(|(d, p, a)| (date(*d), (*p, *a))).collect::<BTreeMap<_, _>>();
+    let days = |rows: &[(u32, i64, i64)]| {
+        rows.iter()
+            .map(|(d, p, a)| (date(*d), (*p, *a)))
+            .collect::<BTreeMap<_, _>>()
+    };
     // (label, data, today, expected)
     let table = vec![
         ("no data", days(&[]), 5, 0),
-        ("three in a row", days(&[(3, 100, 80), (4, 100, 100), (5, 100, 90)]), 5, 3),
-        ("79% on a past day ends it", days(&[(2, 100, 100), (3, 100, 79), (4, 100, 100), (5, 100, 100)]), 5, 2),
-        ("today in progress does not break", days(&[(3, 100, 100), (4, 100, 100), (5, 100, 10)]), 5, 2),
-        ("today with nothing planned is skipped", days(&[(3, 100, 100), (4, 100, 100)]), 5, 2),
-        ("a rest day between is skipped", days(&[(2, 100, 100), (3, 0, 0), (4, 100, 100)]), 4, 2),
-        ("a missed day (planned, nothing done) ends it", days(&[(3, 100, 100), (4, 100, 0), (5, 100, 100)]), 5, 1),
+        (
+            "three in a row",
+            days(&[(3, 100, 80), (4, 100, 100), (5, 100, 90)]),
+            5,
+            3,
+        ),
+        (
+            "79% on a past day ends it",
+            days(&[(2, 100, 100), (3, 100, 79), (4, 100, 100), (5, 100, 100)]),
+            5,
+            2,
+        ),
+        (
+            "today in progress does not break",
+            days(&[(3, 100, 100), (4, 100, 100), (5, 100, 10)]),
+            5,
+            2,
+        ),
+        (
+            "today with nothing planned is skipped",
+            days(&[(3, 100, 100), (4, 100, 100)]),
+            5,
+            2,
+        ),
+        (
+            "a rest day between is skipped",
+            days(&[(2, 100, 100), (3, 0, 0), (4, 100, 100)]),
+            4,
+            2,
+        ),
+        (
+            "a missed day (planned, nothing done) ends it",
+            days(&[(3, 100, 100), (4, 100, 0), (5, 100, 100)]),
+            5,
+            1,
+        ),
     ];
     for (label, data, today, expected) in table {
         assert_eq!(streak_days(&data, date(today)), expected, "{label}");
@@ -184,8 +237,15 @@ fn streak_counts_consecutive_achieved_days_and_skips_unplanned_ones() {
 fn overlap_counts_sleep_and_forced_quit_once_and_only_inside_plans() {
     let iv = |s: i64, e: i64| Interval { start: s, end: e };
     // Sleep 0-30 and forced quit 20-50 overlap each other (union 0-50); plans 10-40 and 45-60.
-    assert_eq!(overlap_ms(vec![iv(0, 30), iv(20, 50)], vec![iv(10, 40), iv(45, 60)]), 30 + 5);
-    assert_eq!(overlap_ms(vec![iv(0, 10)], vec![iv(10, 20)]), 0, "touching is no overlap");
+    assert_eq!(
+        overlap_ms(vec![iv(0, 30), iv(20, 50)], vec![iv(10, 40), iv(45, 60)]),
+        30 + 5
+    );
+    assert_eq!(
+        overlap_ms(vec![iv(0, 10)], vec![iv(10, 20)]),
+        0,
+        "touching is no overlap"
+    );
     assert_eq!(overlap_ms(vec![], vec![iv(0, 5)]), 0);
 }
 
@@ -208,27 +268,54 @@ fn today_matches_the_hand_computed_golden() {
     let (mut conn, _, _) = golden();
     let got = today(&mut conn, &Utc, now()).expect("today");
     // Thursday: planned 100 min (50 run + 50 not yet run), recognized 45 min.
-    assert_eq!((got.date.as_str(), got.planned_ms, got.actual_ms), ("2026-11-05", 100 * MIN, 45 * MIN));
+    assert_eq!(
+        (got.date.as_str(), got.planned_ms, got.actual_ms),
+        ("2026-11-05", 100 * MIN, 45 * MIN)
+    );
     assert_eq!(got.achievement_pct, Some(45));
     // Next plan: the 22:00 evening plan, 10 hours away. The 09:00 plan already has a run.
     let next = got.next_plan.expect("next plan");
-    assert_eq!((next.name.as_str(), next.planned_start_ms, next.starts_in_ms), ("수학 저녁", t(5, 22, 0), 10 * 60 * MIN));
+    assert_eq!(
+        (next.name.as_str(), next.planned_start_ms, next.starts_in_ms),
+        ("수학 저녁", t(5, 22, 0), 10 * 60 * MIN)
+    );
     // Streak: Wednesday 80% counts, Tuesday 70% ends it; unfinished Thursday does not break it.
     assert_eq!((got.streak_days, got.streak_threshold_pct), (1, 80));
     // Windows of 30 recognized minutes: Mon 3 + Tue 2 + Wed 1 + Thu 1 = 7 x 20 points.
-    assert_eq!((got.points.earned, got.points.balance, got.points.level), (140, 140, 5));
+    assert_eq!(
+        (got.points.earned, got.points.balance, got.points.level),
+        (140, 140, 5)
+    );
 }
 
 #[test]
 fn empty_database_is_an_empty_state_not_an_error() {
     let mut conn = open_in_memory().expect("db");
     let got = today(&mut conn, &Utc, now()).expect("today");
-    assert_eq!((got.planned_ms, got.actual_ms, got.achievement_pct, got.streak_days), (0, 0, None, 0));
-    assert_eq!((got.next_plan, got.points.level, got.points.balance), (None, 1, 0));
+    assert_eq!(
+        (
+            got.planned_ms,
+            got.actual_ms,
+            got.achievement_pct,
+            got.streak_days
+        ),
+        (0, 0, None, 0)
+    );
+    assert_eq!(
+        (got.next_plan, got.points.level, got.points.balance),
+        (None, 1, 0)
+    );
 
     let week = week(&conn, &Utc, now()).expect("week");
-    assert_eq!((week.days.len(), week.planned_ms, week.achievement_pct), (7, 0, None));
-    assert!(week.days.iter().all(|d| d.actual_ms == 0 && d.focus_score.is_none() && !d.achieved));
+    assert_eq!(
+        (week.days.len(), week.planned_ms, week.achievement_pct),
+        (7, 0, None)
+    );
+    assert!(
+        week.days
+            .iter()
+            .all(|d| d.actual_ms == 0 && d.focus_score.is_none() && !d.achieved)
+    );
     assert!(week.by_subject.is_empty());
 
     let weak = weakness(&conn, &Utc, now()).expect("weakness");
@@ -244,7 +331,10 @@ fn a_plan_with_no_attempt_and_no_study_yet_shows_planned_only() {
     let mut conn = open_in_memory().expect("db");
     plan(&mut conn, "수학", "수학", 5, "20:00", 2);
     let got = today(&mut conn, &Utc, now()).expect("today");
-    assert_eq!((got.planned_ms, got.actual_ms, got.achievement_pct), (100 * MIN, 0, Some(0)));
+    assert_eq!(
+        (got.planned_ms, got.actual_ms, got.achievement_pct),
+        (100 * MIN, 0, Some(0))
+    );
     assert_eq!(got.next_plan.map(|n| n.starts_in_ms), Some(8 * 60 * MIN));
 }
 
@@ -255,11 +345,23 @@ fn a_run_past_midnight_stays_on_the_day_it_was_planned_for() {
     // 23:00 to 00:40; 100 recognized minutes, 60 of them after midnight.
     run(&conn, id, 4, t(4, 23, 0), 2, 100, true);
     let got = today(&mut conn, &Utc, now()).expect("today");
-    assert_eq!((got.planned_ms, got.actual_ms), (0, 0), "nothing is attributed to the 5th");
+    assert_eq!(
+        (got.planned_ms, got.actual_ms),
+        (0, 0),
+        "nothing is attributed to the 5th"
+    );
     assert_eq!(got.streak_days, 1, "the 4th was achieved");
     let w = week(&conn, &Utc, now()).expect("week");
     let wed = &w.days[2];
-    assert_eq!((wed.date.as_str(), wed.planned_ms, wed.actual_ms, wed.achieved), ("2026-11-04", 100 * MIN, 100 * MIN, true));
+    assert_eq!(
+        (
+            wed.date.as_str(),
+            wed.planned_ms,
+            wed.actual_ms,
+            wed.achieved
+        ),
+        ("2026-11-04", 100 * MIN, 100 * MIN, true)
+    );
     assert_eq!(w.days[3].actual_ms, 0);
 }
 
@@ -269,7 +371,10 @@ fn a_run_in_progress_counts_its_time_but_gives_no_score() {
     let id = plan(&mut conn, "수학", "수학", 5, "11:00", 2);
     run(&conn, id, 5, t(5, 11, 0), 2, 50, false);
     let got = today(&mut conn, &Utc, now()).expect("today");
-    assert_eq!((got.planned_ms, got.actual_ms, got.achievement_pct), (100 * MIN, 50 * MIN, Some(50)));
+    assert_eq!(
+        (got.planned_ms, got.actual_ms, got.achievement_pct),
+        (100 * MIN, 50 * MIN, Some(50))
+    );
     let w = week(&conn, &Utc, now()).expect("week");
     assert_eq!(w.days[3].focus_score, None);
 }
@@ -280,11 +385,23 @@ fn a_run_in_progress_counts_its_time_but_gives_no_score() {
 fn week_matches_the_hand_computed_golden() {
     let (conn, _, _) = golden();
     let w = week(&conn, &Utc, now()).expect("week");
-    assert_eq!((w.week_start.as_str(), w.week_end.as_str()), ("2026-11-02", "2026-11-08"));
+    assert_eq!(
+        (w.week_start.as_str(), w.week_end.as_str()),
+        ("2026-11-02", "2026-11-08")
+    );
     let rows: Vec<_> = w
         .days
         .iter()
-        .map(|d| (d.weekday, d.planned_ms / MIN, d.actual_ms / MIN, d.achievement_pct, d.achieved, d.focus_score))
+        .map(|d| {
+            (
+                d.weekday,
+                d.planned_ms / MIN,
+                d.actual_ms / MIN,
+                d.achievement_pct,
+                d.achieved,
+                d.focus_score,
+            )
+        })
         .collect();
     assert_eq!(
         rows,
@@ -299,10 +416,17 @@ fn week_matches_the_hand_computed_golden() {
         ]
     );
     // 350 planned, 245 recognized: 70%. Two of the four planned days were achieved.
-    assert_eq!((w.planned_ms / MIN, w.actual_ms / MIN, w.achievement_pct), (350, 245, Some(70)));
+    assert_eq!(
+        (w.planned_ms / MIN, w.actual_ms / MIN, w.achievement_pct),
+        (350, 245, Some(70))
+    );
     assert_eq!((w.achieved_days, w.planned_days), (2, 4));
     // 수학: Mon 90 + Wed 40; 영어: Tue 70 + Thu 45.
-    let subjects: Vec<(&str, i64)> = w.by_subject.iter().map(|s| (s.subject.as_str(), s.actual_ms / MIN)).collect();
+    let subjects: Vec<(&str, i64)> = w
+        .by_subject
+        .iter()
+        .map(|s| (s.subject.as_str(), s.actual_ms / MIN))
+        .collect();
     assert_eq!(subjects, vec![("수학", 130), ("영어", 115)]);
 }
 
@@ -330,7 +454,14 @@ fn week_boundary_is_monday_to_sunday_in_the_given_timezone() {
     let w = week(&conn, &Utc, now()).expect("week");
     assert_eq!((w.planned_ms, w.actual_ms), (0, 0));
     let prev = week(&conn, &Utc, t(1, 12, 0)).expect("previous week");
-    assert_eq!((prev.week_start.as_str(), prev.days[6].date.as_str(), prev.days[6].actual_ms), ("2026-10-26", "2026-11-01", 50 * MIN));
+    assert_eq!(
+        (
+            prev.week_start.as_str(),
+            prev.days[6].date.as_str(),
+            prev.days[6].actual_ms
+        ),
+        ("2026-10-26", "2026-11-01", 50 * MIN)
+    );
 }
 
 // ---- weakness ----
@@ -340,27 +471,90 @@ fn weakness_matches_the_hand_computed_golden() {
     let (conn, _, _) = golden();
     // Attempts: game x4 (three quit requests, one dry-run hit), chat x1; a `terminated` outcome and
     // a protected skip are not attempts.
-    block(&conn, t(3, 20, 40), TargetKind::App, "com.example.game", BlockAction::TerminateRequested);
-    block(&conn, t(3, 20, 41), TargetKind::App, "com.example.game", BlockAction::Terminated);
-    block(&conn, t(3, 20, 50), TargetKind::App, "com.example.game", BlockAction::TerminateRequested);
-    block(&conn, t(4, 20, 5), TargetKind::App, "com.example.game", BlockAction::TerminateRequested);
-    block(&conn, t(4, 21, 0), TargetKind::App, "com.example.game", BlockAction::WouldTerminate);
-    block(&conn, t(5, 9, 15), TargetKind::App, "com.example.chat", BlockAction::TerminateRequested);
-    block(&conn, t(5, 9, 16), TargetKind::App, "com.example.chat", BlockAction::SkippedProtected);
-    block(&conn, t(2, 20, 45), TargetKind::Site, "news.example", BlockAction::SiteBlocked);
+    block(
+        &conn,
+        t(3, 20, 40),
+        TargetKind::App,
+        "com.example.game",
+        BlockAction::TerminateRequested,
+    );
+    block(
+        &conn,
+        t(3, 20, 41),
+        TargetKind::App,
+        "com.example.game",
+        BlockAction::Terminated,
+    );
+    block(
+        &conn,
+        t(3, 20, 50),
+        TargetKind::App,
+        "com.example.game",
+        BlockAction::TerminateRequested,
+    );
+    block(
+        &conn,
+        t(4, 20, 5),
+        TargetKind::App,
+        "com.example.game",
+        BlockAction::TerminateRequested,
+    );
+    block(
+        &conn,
+        t(4, 21, 0),
+        TargetKind::App,
+        "com.example.game",
+        BlockAction::WouldTerminate,
+    );
+    block(
+        &conn,
+        t(5, 9, 15),
+        TargetKind::App,
+        "com.example.chat",
+        BlockAction::TerminateRequested,
+    );
+    block(
+        &conn,
+        t(5, 9, 16),
+        TargetKind::App,
+        "com.example.chat",
+        BlockAction::SkippedProtected,
+    );
+    block(
+        &conn,
+        t(2, 20, 45),
+        TargetKind::Site,
+        "news.example",
+        BlockAction::SiteBlocked,
+    );
     // Outside the 28-day window: ignored.
-    block(&conn, t(5, 12, 0) - 29 * 86_400_000, TargetKind::App, "com.example.old", BlockAction::TerminateRequested);
+    block(
+        &conn,
+        t(5, 12, 0) - 29 * 86_400_000,
+        TargetKind::App,
+        "com.example.old",
+        BlockAction::TerminateRequested,
+    );
 
     let weak = weakness(&conn, &Utc, now()).expect("weakness");
     assert_eq!(
         weak.deviation_apps,
         vec![
-            AppCount { app_id: "com.example.game".into(), count: 4 },
-            AppCount { app_id: "com.example.chat".into(), count: 1 },
+            AppCount {
+                app_id: "com.example.game".into(),
+                count: 4
+            },
+            AppCount {
+                app_id: "com.example.chat".into(),
+                count: 1
+            },
         ]
     );
     // Four study sets began in the window; two had a deviation, 30 and 10 minutes in: mean 20.
-    assert_eq!((weak.sets_total, weak.sets_with_away, weak.avg_first_away_ms), (4, 2, Some(20 * MIN)));
+    assert_eq!(
+        (weak.sets_total, weak.sets_with_away, weak.avg_first_away_ms),
+        (4, 2, Some(20 * MIN))
+    );
     // Deviations: away Mon 20:30, away Tue 20:10, game x2 Tue 20:40/20:50, game Wed 20:05 and 21:00,
     // chat Thu 09:15, site Mon 20:45.
     let mut expected = vec![vec![0_i64; 24]; 7];
@@ -375,7 +569,13 @@ fn weakness_matches_the_hand_computed_golden() {
 #[test]
 fn often_postponed_plans_come_from_applied_postponements_only() {
     let (conn, _, _) = golden();
-    let ids: Vec<i64> = conn.prepare("SELECT id FROM plans ORDER BY id").expect("p").query_map([], |r| r.get(0)).expect("q").collect::<Result<_, _>>().expect("rows");
+    let ids: Vec<i64> = conn
+        .prepare("SELECT id FROM plans ORDER BY id")
+        .expect("p")
+        .query_map([], |r| r.get(0))
+        .expect("q")
+        .collect::<Result<_, _>>()
+        .expect("rows");
     let history = |plan_id: i64, at_ms: i64, reason: &str, outcome: &str| {
         conn.execute(
             "INSERT INTO plan_history (plan_id, at_ms, action, reason_code, outcome) VALUES (?1, ?2, 'move', ?3, ?4)",
@@ -391,7 +591,12 @@ fn often_postponed_plans_come_from_applied_postponements_only() {
     let weak = weakness(&conn, &Utc, now()).expect("weakness");
     assert_eq!(
         weak.postponed_plans,
-        vec![PostponedPlan { plan_id: ids[0], name: "수학 풀이".into(), subject: "수학".into(), count: 2 }]
+        vec![PostponedPlan {
+            plan_id: ids[0],
+            name: "수학 풀이".into(),
+            subject: "수학".into(),
+            count: 2
+        }]
     );
 }
 
@@ -408,7 +613,12 @@ fn app_off_time_is_reported_separately_and_overlaps_plans_once() {
     let off = weakness(&conn, &Utc, now()).expect("weakness").app_off;
     assert_eq!(
         off,
-        AppOffStat { sleep_ms: 30 * MIN, forced_quit_ms: 20 * MIN, forced_quit_count: 1, planned_overlap_ms: 30 * MIN }
+        AppOffStat {
+            sleep_ms: 30 * MIN,
+            forced_quit_ms: 20 * MIN,
+            forced_quit_count: 1,
+            planned_overlap_ms: 30 * MIN
+        }
     );
 }
 
@@ -429,7 +639,15 @@ fn release_usage_counts_each_kind_and_aborted_runs() {
     pass("skip_today", t(5, 8, 0) - 40 * 86_400_000, None); // out of window
     store::finish_run(&conn, tue_run, RunStatus::Aborted, t(3, 21, 0), None).expect("abort");
     let r = weakness(&conn, &Utc, now()).expect("weakness").releases;
-    assert_eq!(r, ReleaseUsage { emergency_pass: 1, skip_today: 1, early_release: 2, aborted_runs: 1 });
+    assert_eq!(
+        r,
+        ReleaseUsage {
+            emergency_pass: 1,
+            skip_today: 1,
+            early_release: 2,
+            aborted_runs: 1
+        }
+    );
 }
 
 #[test]
@@ -441,31 +659,67 @@ fn dashboard_logs_carry_no_titles_or_urls() {
         weakness(&conn, &Utc, now()).expect("weakness");
     });
     for forbidden in ["http", "title", "://"] {
-        assert!(!logs.contains(forbidden), "log leaked {forbidden:?}: {logs}");
+        assert!(
+            !logs.contains(forbidden),
+            "log leaked {forbidden:?}: {logs}"
+        );
     }
 }
 
 // ---- the phone (stage 5): statistics only ----
 
 fn segment_ids(conn: &Connection) -> Vec<i64> {
-    conn.prepare("SELECT id FROM timer_segments ORDER BY id").expect("p").query_map([], |r| r.get(0)).expect("q").collect::<Result<_, _>>().expect("rows")
+    conn.prepare("SELECT id FROM timer_segments ORDER BY id")
+        .expect("p")
+        .query_map([], |r| r.get(0))
+        .expect("q")
+        .collect::<Result<_, _>>()
+        .expect("rows")
 }
 
 fn gap(conn: &Connection, run_id: i64, start_ms: i64, end_ms: i64, kind: &str) {
-    store::phone::insert_gap(conn, &store::phone::GapRow { run_id, start_ms, end_ms, kind: kind.into() }).expect("gap");
+    store::phone::insert_gap(
+        conn,
+        &store::phone::GapRow {
+            run_id,
+            start_ms,
+            end_ms,
+            kind: kind.into(),
+        },
+    )
+    .expect("gap");
 }
 
 #[test]
-fn phone_unreachable_time_counts_each_stretch_once_clipped_to_the_window_and_pickups_count_study_sets() {
+fn phone_unreachable_time_counts_each_stretch_once_clipped_to_the_window_and_pickups_count_study_sets()
+ {
     let (conn, tue_run, _) = golden();
     let from = now() - WEAKNESS_DAYS * DAY_MS;
     // Tuesday: silence 20:10-20:40 and a switched-off service 20:30-20:50 overlap: 20:10-20:50.
     gap(&conn, tue_run, t(3, 20, 10), t(3, 20, 40), "unreachable");
-    gap(&conn, tue_run, t(3, 20, 30), t(3, 20, 50), "service_disabled");
+    gap(
+        &conn,
+        tue_run,
+        t(3, 20, 30),
+        t(3, 20, 50),
+        "service_disabled",
+    );
     // Half in the window, half before it: only the inside counts.
-    gap(&conn, tue_run, from - 10 * MIN, from + 10 * MIN, "lease_expired");
+    gap(
+        &conn,
+        tue_run,
+        from - 10 * MIN,
+        from + 10 * MIN,
+        "lease_expired",
+    );
     // Entirely before the window: not counted at all.
-    gap(&conn, tue_run, from - 50 * MIN, from - 40 * MIN, "unreachable");
+    gap(
+        &conn,
+        tue_run,
+        from - 50 * MIN,
+        from - 40 * MIN,
+        "unreachable",
+    );
 
     let segments = segment_ids(&conn);
     let (mon, tue, wed) = (segments[0], segments[1], segments[2]);
@@ -494,29 +748,65 @@ fn without_a_phone_every_phone_number_is_zero() {
     let phone = weakness(&conn, &Utc, now()).expect("weakness").phone;
     assert_eq!(
         phone,
-        PhoneStat { unreachable_ms: 0, gaps: 0, service_disabled_gaps: 0, pickup_sets_reported: 0, pickup_sets_with_pickups: 0, pickups_total: 0 }
+        PhoneStat {
+            unreachable_ms: 0,
+            gaps: 0,
+            service_disabled_gaps: 0,
+            pickup_sets_reported: 0,
+            pickup_sets_with_pickups: 0,
+            pickups_total: 0
+        }
     );
 }
 
 #[test]
 fn phone_data_never_changes_a_focus_score_a_streak_or_a_point() {
     let (mut conn, tue_run, _) = golden();
-    let before = (today(&mut conn, &Utc, now()).expect("today"), week(&conn, &Utc, now()).expect("week"));
+    let before = (
+        today(&mut conn, &Utc, now()).expect("today"),
+        week(&conn, &Utc, now()).expect("week"),
+    );
     let weak_before = weakness(&conn, &Utc, now()).expect("weakness");
-    let ledger_before: i64 = conn.query_row("SELECT COUNT(*) FROM point_ledger", [], |r| r.get(0)).expect("ledger");
+    let ledger_before: i64 = conn
+        .query_row("SELECT COUNT(*) FROM point_ledger", [], |r| r.get(0))
+        .expect("ledger");
 
     // The worst the phone can say: pick-ups in every set and gaps across every run.
     for segment in segment_ids(&conn) {
         store::phone::record_pickups(&conn, segment, 500, now()).expect("pickups");
     }
     gap(&conn, tue_run, t(3, 20, 0), t(3, 21, 40), "unreachable");
-    gap(&conn, tue_run, t(2, 20, 0), t(2, 21, 40), "service_disabled");
+    gap(
+        &conn,
+        tue_run,
+        t(2, 20, 0),
+        t(2, 21, 40),
+        "service_disabled",
+    );
 
-    let after = (today(&mut conn, &Utc, now()).expect("today"), week(&conn, &Utc, now()).expect("week"));
-    assert_eq!(before, after, "today and week, including focus score, streak and points, are unchanged");
+    let after = (
+        today(&mut conn, &Utc, now()).expect("today"),
+        week(&conn, &Utc, now()).expect("week"),
+    );
+    assert_eq!(
+        before, after,
+        "today and week, including focus score, streak and points, are unchanged"
+    );
     let weak_after = weakness(&conn, &Utc, now()).expect("weakness");
     assert_eq!(weak_after.phone.pickups_total, 2_000);
-    assert_eq!(Weakness { phone: weak_before.phone.clone(), ..weak_after }, weak_before, "everything but the phone block is unchanged");
-    let ledger_after: i64 = conn.query_row("SELECT COUNT(*) FROM point_ledger", [], |r| r.get(0)).expect("ledger");
-    assert_eq!(ledger_before, ledger_after, "no point was posted or deducted");
+    assert_eq!(
+        Weakness {
+            phone: weak_before.phone.clone(),
+            ..weak_after
+        },
+        weak_before,
+        "everything but the phone block is unchanged"
+    );
+    let ledger_after: i64 = conn
+        .query_row("SELECT COUNT(*) FROM point_ledger", [], |r| r.get(0))
+        .expect("ledger");
+    assert_eq!(
+        ledger_before, ledger_after,
+        "no point was posted or deducted"
+    );
 }

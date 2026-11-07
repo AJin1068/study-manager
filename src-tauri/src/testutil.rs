@@ -50,7 +50,9 @@ impl crate::platform::Notifier for FakeNotifier {
     fn notify(&self, title: &str, body: &str) -> Result<(), crate::platform::PlatformError> {
         self.sent
             .lock()
-            .map_err(|_| crate::platform::PlatformError::Notification("fake notifier poisoned".into()))?
+            .map_err(|_| {
+                crate::platform::PlatformError::Notification("fake notifier poisoned".into())
+            })?
             .push((title.to_owned(), body.to_owned()));
         Ok(())
     }
@@ -61,7 +63,10 @@ pub struct TempDir(std::path::PathBuf);
 
 impl TempDir {
     pub fn new(tag: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("study-manager-test-{tag}-{}", uuid::Uuid::new_v4().simple()));
+        let path = std::env::temp_dir().join(format!(
+            "study-manager-test-{tag}-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
         std::fs::create_dir_all(&path).expect("create temp dir");
         Self(path)
     }

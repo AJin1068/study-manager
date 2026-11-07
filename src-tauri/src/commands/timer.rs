@@ -4,7 +4,7 @@
 use chrono::Local;
 use tauri::State;
 
-use super::{lock_db, AppState};
+use super::{AppState, lock_db};
 use crate::clock::now_ms;
 use crate::error::AppResult;
 use crate::timer::engine::HealthSnapshot;
@@ -33,12 +33,15 @@ pub struct EngineHealthView {
 pub fn get_engine_health(state: State<'_, AppState>) -> AppResult<EngineHealthView> {
     let now = state.high_water.get();
     let conn = lock_db(&state.db)?;
-    Ok(EngineHealthView { health: state.health.snapshot(), clock_jump_ms: timer::clock_jump_ms(&conn, now - DAY_MS, now)? })
+    Ok(EngineHealthView {
+        health: state.health.snapshot(),
+        clock_jump_ms: timer::clock_jump_ms(&conn, now - DAY_MS, now)?,
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     use super::*;
     use crate::timer::model::{NextPlan, Phase};
@@ -47,8 +50,12 @@ mod tests {
 
     #[test]
     fn timer_wire_shapes_match_the_shared_fixture() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../src/api/fixtures/timer-contract.json");
-        let expected: Value = serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../src/api/fixtures/timer-contract.json"
+        );
+        let expected: Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
         let idle = TimerState {
             phase: Phase::Idle,
             run_id: None,

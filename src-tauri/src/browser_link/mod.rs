@@ -9,17 +9,17 @@
 //! in memory only: logs and `block_events` carry the domain and a fixed reason code.
 
 pub mod coverage;
+#[cfg(test)]
+mod e2e_tests;
 pub mod host;
 mod llm_judge;
 pub mod protocol;
 pub mod register;
 mod service;
 #[cfg(test)]
-mod e2e_tests;
-#[cfg(test)]
 mod tests;
 
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -72,7 +72,10 @@ pub struct LinkHub {
 
 impl LinkHub {
     pub fn new(on_change: OnChange) -> LinkHub {
-        LinkHub { status: Mutex::new(LinkStatus::default()), on_change }
+        LinkHub {
+            status: Mutex::new(LinkStatus::default()),
+            on_change,
+        }
     }
 
     /// Emits `browser_link_changed` to the UI on every change.
@@ -85,12 +88,18 @@ impl LinkHub {
     }
 
     pub fn status(&self) -> LinkStatus {
-        self.status.lock().map(|s| s.clone()).unwrap_or_else(|poisoned| poisoned.into_inner().clone())
+        self.status
+            .lock()
+            .map(|s| s.clone())
+            .unwrap_or_else(|poisoned| poisoned.into_inner().clone())
     }
 
     fn update(&self, change: impl FnOnce(&mut LinkStatus)) {
         let snapshot = {
-            let mut guard = self.status.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut guard = self
+                .status
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             change(&mut guard);
             guard.clone()
         };
@@ -164,30 +173,38 @@ pub fn spawn(
             Arc::new(llm_judge::ThreadRunner),
         )),
         token,
-        ALLOWED_EXTENSION_IDS.iter().map(|id| (*id).to_owned()).collect(),
+        ALLOWED_EXTENSION_IDS
+            .iter()
+            .map(|id| (*id).to_owned())
+            .collect(),
     ));
     let active = Arc::new(AtomicUsize::new(0));
-    thread::spawn(move || loop {
-        let mut stream = match listener.accept_stream() {
-            Ok(stream) => stream,
-            Err(err) => {
-                tracing::error!(error = %err, "browser link accept failed");
-                thread::sleep(Duration::from_secs(1));
+    thread::spawn(move || {
+        loop {
+            let mut stream = match listener.accept_stream() {
+                Ok(stream) => stream,
+                Err(err) => {
+                    tracing::error!(error = %err, "browser link accept failed");
+                    thread::sleep(Duration::from_secs(1));
+                    continue;
+                }
+            };
+            if active.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
+                active.fetch_sub(1, Ordering::SeqCst);
+                tracing::warn!(
+                    reason = "too_many_connections",
+                    "browser link connection refused"
+                );
                 continue;
             }
-        };
-        if active.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
-            active.fetch_sub(1, Ordering::SeqCst);
-            tracing::warn!(reason = "too_many_connections", "browser link connection refused");
-            continue;
+            let service = Arc::clone(&service);
+            let active = Arc::clone(&active);
+            thread::spawn(move || {
+                if catch_unwind(AssertUnwindSafe(|| service.serve(stream.as_mut()))).is_err() {
+                    tracing::error!("browser link connection thread panicked");
+                }
+                active.fetch_sub(1, Ordering::SeqCst);
+            });
         }
-        let service = Arc::clone(&service);
-        let active = Arc::clone(&active);
-        thread::spawn(move || {
-            if catch_unwind(AssertUnwindSafe(|| service.serve(stream.as_mut()))).is_err() {
-                tracing::error!("browser link connection thread panicked");
-            }
-            active.fetch_sub(1, Ordering::SeqCst);
-        });
     });
 }

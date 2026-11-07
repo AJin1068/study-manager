@@ -25,19 +25,19 @@
 //! failed publication is retried with the SAME number (the server treats a repeat as already
 //! applied) and growing waits; nothing is published for a state that is no longer wanted.
 
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use chrono::TimeZone;
-use link_protocol::{LockLease, ReleaseCause, GRACE_MS, MAX_PICKUPS_PER_REPORT, MAX_SEGMENT_MS};
-use rusqlite::{params, Connection};
+use link_protocol::{GRACE_MS, LockLease, MAX_PICKUPS_PER_REPORT, MAX_SEGMENT_MS, ReleaseCause};
+use rusqlite::{Connection, params};
 use serde::Serialize;
 
 use super::gap::{GapTracker, Heard, Observation, Watch};
-use super::model::{cause_text, state_text, PhoneError};
+use super::model::{PhoneError, cause_text, state_text};
 use super::pairing::PairingBackend;
 use crate::commands::lock_db;
 use crate::error::AppResult;
@@ -45,7 +45,7 @@ use crate::plan::BlockKind;
 use crate::remote::Clock;
 use crate::store::{self, phone as repo};
 use crate::timer::model::{Phase, TimerState};
-use crate::timer::{self, study_pass, HighWater};
+use crate::timer::{self, HighWater, study_pass};
 
 const BUSY_WAIT: Duration = Duration::from_secs(1);
 const IDLE_WAIT: Duration = Duration::from_secs(5);
@@ -77,8 +77,16 @@ pub fn parse_segment_key(key: &str) -> Option<(i64, i64)> {
 pub enum Desired {
     /// Nothing to tell the phone (never locked, or the engine has not written the segment yet).
     Nothing,
-    Lock { key: String, run_id: i64, segment_started_ms: i64, segment_end_ms: i64 },
-    Free { key: String, cause: ReleaseCause },
+    Lock {
+        key: String,
+        run_id: i64,
+        segment_started_ms: i64,
+        segment_end_ms: i64,
+    },
+    Free {
+        key: String,
+        cause: ReleaseCause,
+    },
 }
 
 pub struct Facts<'a> {
@@ -98,27 +106,47 @@ pub fn decide(facts: &Facts<'_>) -> Desired {
     let state = facts.state;
     match state.phase {
         Phase::Study => {
-            let (Some(run_id), Some(segment_id), Some(end), Some(started)) =
-                (state.run_id, state.segment_id, state.planned_end_ms, facts.segment_started_ms)
-            else {
+            let (Some(run_id), Some(segment_id), Some(end), Some(started)) = (
+                state.run_id,
+                state.segment_id,
+                state.planned_end_ms,
+                facts.segment_started_ms,
+            ) else {
                 return Desired::Nothing;
             };
             let key = segment_key(run_id, segment_id);
             if facts.emergency_pass_active {
-                Desired::Free { key, cause: ReleaseCause::EmergencyPass }
+                Desired::Free {
+                    key,
+                    cause: ReleaseCause::EmergencyPass,
+                }
             } else if end.saturating_add(GRACE_MS) <= facts.now_ms {
                 // The segment ran out and the engine has not moved on yet.
-                Desired::Free { key, cause: ReleaseCause::RunEnded }
+                Desired::Free {
+                    key,
+                    cause: ReleaseCause::RunEnded,
+                }
             } else {
-                Desired::Lock { key, run_id, segment_started_ms: started, segment_end_ms: end }
+                Desired::Lock {
+                    key,
+                    run_id,
+                    segment_started_ms: started,
+                    segment_end_ms: end,
+                }
             }
         }
         Phase::Break | Phase::LongBreak => match (state.run_id, state.segment_id) {
-            (Some(run), Some(segment)) => Desired::Free { key: segment_key(run, segment), cause: ReleaseCause::RunEnded },
+            (Some(run), Some(segment)) => Desired::Free {
+                key: segment_key(run, segment),
+                cause: ReleaseCause::RunEnded,
+            },
             _ => Desired::Nothing,
         },
         Phase::Idle => match facts.last_key {
-            Some(key) => Desired::Free { key: key.to_string(), cause: facts.last_run_release.unwrap_or(ReleaseCause::RunEnded) },
+            Some(key) => Desired::Free {
+                key: key.to_string(),
+                cause: facts.last_run_release.unwrap_or(ReleaseCause::RunEnded),
+            },
             None => Desired::Nothing,
         },
     }
@@ -135,13 +163,23 @@ struct Signature {
 fn signature_of(desired: &Desired) -> Option<Signature> {
     match desired {
         Desired::Nothing => None,
-        Desired::Lock { key, .. } => Some(Signature { key: key.clone(), state: "locked", cause: None }),
-        Desired::Free { key, cause } => Some(Signature { key: key.clone(), state: "free", cause: Some(cause_text(*cause)) }),
+        Desired::Lock { key, .. } => Some(Signature {
+            key: key.clone(),
+            state: "locked",
+            cause: None,
+        }),
+        Desired::Free { key, cause } => Some(Signature {
+            key: key.clone(),
+            state: "free",
+            cause: Some(cause_text(*cause)),
+        }),
     }
 }
 
 fn published_matches(row: &repo::PublishRow, sig: &Signature) -> bool {
-    row.last_key.as_deref() == Some(sig.key.as_str()) && row.last_state.as_deref() == Some(sig.state) && row.last_cause.as_deref() == sig.cause
+    row.last_key.as_deref() == Some(sig.key.as_str())
+        && row.last_state.as_deref() == Some(sig.state)
+        && row.last_cause.as_deref() == sig.cause
 }
 
 /// The lease for `desired` at sequence number `seq`. A lock that would outlast the segment cap
@@ -149,15 +187,25 @@ fn published_matches(row: &repo::PublishRow, sig: &Signature) -> bool {
 fn lease_for(desired: &Desired, seq: i64, now_ms: i64) -> Option<LockLease> {
     match desired {
         Desired::Nothing => None,
-        Desired::Lock { key, segment_end_ms, .. } => {
-            LockLease::locked(key, seq, now_ms, (*segment_end_ms).min(now_ms.saturating_add(MAX_SEGMENT_MS))).ok()
-        }
+        Desired::Lock {
+            key,
+            segment_end_ms,
+            ..
+        } => LockLease::locked(
+            key,
+            seq,
+            now_ms,
+            (*segment_end_ms).min(now_ms.saturating_add(MAX_SEGMENT_MS)),
+        )
+        .ok(),
         Desired::Free { key, cause } => LockLease::free(key, seq, now_ms, *cause).ok(),
     }
 }
 
 fn retry_delay_ms(failures: u32) -> i64 {
-    RETRY_FIRST_MS.saturating_mul(1_i64 << failures.saturating_sub(1).min(5)).min(RETRY_MAX_MS)
+    RETRY_FIRST_MS
+        .saturating_mul(1_i64 << failures.saturating_sub(1).min(5))
+        .min(RETRY_MAX_MS)
 }
 
 // ---- diagnostics for the UI ----
@@ -301,7 +349,15 @@ impl<Tz: TimeZone> Publisher<Tz> {
             Some((run_id, _)) => released_by(&conn, run_id)?,
             None => None,
         };
-        Ok(Read { paired, state, segment_started_ms, emergency_pass_active, publish, last_run_release, effective_now_ms: effective })
+        Ok(Read {
+            paired,
+            state,
+            segment_started_ms,
+            emergency_pass_active,
+            publish,
+            last_run_release,
+            effective_now_ms: effective,
+        })
     }
 
     /// One look: publish what changed, watch the heartbeat, pull the pick-up counts. Returns how
@@ -318,7 +374,8 @@ impl<Tz: TimeZone> Publisher<Tz> {
             Ok(read) => read,
             Err(err) => {
                 tracing::warn!(event = "phone_publisher_read", error = %err);
-                self.diag.update(|v| v.last_error = Some("read_failed".into()));
+                self.diag
+                    .update(|v| v.last_error = Some("read_failed".into()));
                 return IDLE_WAIT;
             }
         };
@@ -348,7 +405,10 @@ impl<Tz: TimeZone> Publisher<Tz> {
             v.want_locked = locked;
         });
         match &self.pending {
-            Some(p) => Duration::from_millis(u64::try_from((p.next_try_ms - now).max(100)).unwrap_or(1_000)).min(BUSY_WAIT),
+            Some(p) => Duration::from_millis(
+                u64::try_from((p.next_try_ms - now).max(100)).unwrap_or(1_000),
+            )
+            .min(BUSY_WAIT),
             None => BUSY_WAIT,
         }
     }
@@ -357,7 +417,12 @@ impl<Tz: TimeZone> Publisher<Tz> {
     fn stand_down(&mut self, now: i64) {
         self.pending = None;
         self.was_locked = false;
-        let rows = self.tracker.observe(&Observation { now_ms: now, watch: None, heard: None, covered_until_ms: None });
+        let rows = self.tracker.observe(&Observation {
+            now_ms: now,
+            watch: None,
+            heard: None,
+            covered_until_ms: None,
+        });
         self.store_gaps(&rows);
         self.diag.update(|v| *v = PhoneLinkView::default());
     }
@@ -367,12 +432,17 @@ impl<Tz: TimeZone> Publisher<Tz> {
             self.pending = None;
             return;
         };
-        let nothing_to_free = signature.state == "free" && read.publish.last_state.as_deref() != Some("locked");
+        let nothing_to_free =
+            signature.state == "free" && read.publish.last_state.as_deref() != Some("locked");
         if nothing_to_free || published_matches(&read.publish, &signature) {
             self.pending = None;
             return;
         }
-        if self.pending.as_ref().is_some_and(|p| p.signature != signature) {
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|p| p.signature != signature)
+        {
             self.pending = None;
         }
         if self.pending.is_none() {
@@ -384,23 +454,43 @@ impl<Tz: TimeZone> Publisher<Tz> {
                 }
             };
             let Some(lease) = lease_for(desired, seq, now) else {
-                self.diag.update(|v| v.last_error = Some("lease_invalid".into()));
+                self.diag
+                    .update(|v| v.last_error = Some("lease_invalid".into()));
                 return;
             };
-            self.pending = Some(Pending { signature, desired: desired.clone(), lease, failures: 0, next_try_ms: now });
+            self.pending = Some(Pending {
+                signature,
+                desired: desired.clone(),
+                lease,
+                failures: 0,
+                next_try_ms: now,
+            });
         }
-        let Some(pending) = self.pending.as_mut() else { return };
+        let Some(pending) = self.pending.as_mut() else {
+            return;
+        };
         if now < pending.next_try_ms {
             return;
         }
         // The network call: the database lock is not held here.
-        let mut outcome = self.backend.api().and_then(|api| api.publish_lock(&pending.lease));
+        let mut outcome = self
+            .backend
+            .api()
+            .and_then(|api| api.publish_lock(&pending.lease));
         for _ in 0..STALE_RETRIES {
-            let Err(PhoneError::Stale { current_seq }) = outcome else { break };
-            let renumbered = lock_db(&self.db).and_then(|conn| repo::reserve_seq(&conn, current_seq, now)).ok().and_then(|seq| lease_for(&pending.desired, seq, now));
+            let Err(PhoneError::Stale { current_seq }) = outcome else {
+                break;
+            };
+            let renumbered = lock_db(&self.db)
+                .and_then(|conn| repo::reserve_seq(&conn, current_seq, now))
+                .ok()
+                .and_then(|seq| lease_for(&pending.desired, seq, now));
             let Some(lease) = renumbered else { break };
             pending.lease = lease;
-            outcome = self.backend.api().and_then(|api| api.publish_lock(&pending.lease));
+            outcome = self
+                .backend
+                .api()
+                .and_then(|api| api.publish_lock(&pending.lease));
         }
         match outcome {
             Ok(_) => {
@@ -408,14 +498,26 @@ impl<Tz: TimeZone> Publisher<Tz> {
                 let signature = pending.signature.clone();
                 self.pending = None;
                 let saved = lock_db(&self.db).and_then(|conn| {
-                    repo::save_published(&conn, &signature.key, signature.state, signature.cause, lease.valid_until_ms, now)
+                    repo::save_published(
+                        &conn,
+                        &signature.key,
+                        signature.state,
+                        signature.cause,
+                        lease.valid_until_ms,
+                        now,
+                    )
                 });
                 if let Err(err) = saved {
                     // The server has it; the next look would publish the same state again under a
                     // new number, which is harmless.
                     tracing::warn!(event = "phone_publisher_save", error = %err);
                 }
-                tracing::info!(event = "phone_lease", seq = lease.seq, state = state_text(lease.state), reason = lease.release_cause.map_or("none", cause_text));
+                tracing::info!(
+                    event = "phone_lease",
+                    seq = lease.seq,
+                    state = state_text(lease.state),
+                    reason = lease.release_cause.map_or("none", cause_text)
+                );
                 self.diag.update(|v| {
                     v.published = Some(PublishedView {
                         seq: lease.seq,
@@ -430,7 +532,11 @@ impl<Tz: TimeZone> Publisher<Tz> {
             Err(err) => {
                 pending.failures = pending.failures.saturating_add(1);
                 pending.next_try_ms = now.saturating_add(retry_delay_ms(pending.failures));
-                tracing::warn!(event = "phone_publish_failed", code = err.code(), failures = pending.failures);
+                tracing::warn!(
+                    event = "phone_publish_failed",
+                    code = err.code(),
+                    failures = pending.failures
+                );
                 let code = err.code().to_string();
                 self.diag.update(|v| {
                     v.publish_failing = true;
@@ -442,32 +548,65 @@ impl<Tz: TimeZone> Publisher<Tz> {
 
     fn watch_gaps(&mut self, read: &Read, desired: &Desired, now: i64) {
         let watch = match desired {
-            Desired::Lock { run_id, segment_started_ms, segment_end_ms, .. } => {
-                Some(Watch { run_id: *run_id, segment_started_ms: *segment_started_ms, segment_end_ms: *segment_end_ms })
-            }
+            Desired::Lock {
+                run_id,
+                segment_started_ms,
+                segment_end_ms,
+                ..
+            } => Some(Watch {
+                run_id: *run_id,
+                segment_started_ms: *segment_started_ms,
+                segment_end_ms: *segment_end_ms,
+            }),
             _ => None,
         };
         if watch.is_some() && now >= self.next_gap_poll_ms {
             self.next_gap_poll_ms = now.saturating_add(GAP_POLL_MS);
-            self.heard = self.backend.api().and_then(|api| api.status()).ok().filter(|wire| wire.paired).map(|wire| {
-                // The beat time is the server's; the offset to this PC's clock is taken from the
-                // same answer.
-                let offset = wire.server_now_ms.map_or(0, |server| now - server);
-                Heard { last_beat_ms: wire.last_beat_ms.map(|beat| beat.saturating_add(offset)), service_enabled: wire.service_enabled }
-            });
+            self.heard = self
+                .backend
+                .api()
+                .and_then(|api| api.status())
+                .ok()
+                .filter(|wire| wire.paired)
+                .map(|wire| {
+                    // The beat time is the server's; the offset to this PC's clock is taken from the
+                    // same answer.
+                    let offset = wire.server_now_ms.map_or(0, |server| now - server);
+                    Heard {
+                        last_beat_ms: wire.last_beat_ms.map(|beat| beat.saturating_add(offset)),
+                        service_enabled: wire.service_enabled,
+                    }
+                });
         }
         let covered_until_ms = match desired {
-            Desired::Lock { key, .. } if read.publish.last_key.as_deref() == Some(key.as_str()) && read.publish.last_state.as_deref() == Some("locked") => {
+            Desired::Lock { key, .. }
+                if read.publish.last_key.as_deref() == Some(key.as_str())
+                    && read.publish.last_state.as_deref() == Some("locked") =>
+            {
                 read.publish.last_valid_until_ms
             }
             _ => None,
         };
-        let rows = self.tracker.observe(&Observation { now_ms: now, watch, heard: self.heard, covered_until_ms });
+        let rows = self.tracker.observe(&Observation {
+            now_ms: now,
+            watch,
+            heard: self.heard,
+            covered_until_ms,
+        });
         self.store_gaps(&rows);
         let open = self.tracker.open_gaps();
-        let (beat, service) = (self.heard.and_then(|h| h.last_beat_ms), self.heard.and_then(|h| h.service_enabled));
+        let (beat, service) = (
+            self.heard.and_then(|h| h.last_beat_ms),
+            self.heard.and_then(|h| h.service_enabled),
+        );
         self.diag.update(|v| {
-            v.open_gaps = open.iter().map(|g| OpenGapView { kind: g.kind.as_str(), since_ms: g.since_ms }).collect();
+            v.open_gaps = open
+                .iter()
+                .map(|g| OpenGapView {
+                    kind: g.kind.as_str(),
+                    since_ms: g.since_ms,
+                })
+                .collect();
             v.last_beat_ms = beat;
             v.service_enabled = service;
         });
@@ -480,7 +619,12 @@ impl<Tz: TimeZone> Publisher<Tz> {
         let Ok(conn) = lock_db(&self.db) else { return };
         for row in rows {
             match repo::insert_gap(&conn, row) {
-                Ok(_) => tracing::warn!(event = "phone_gap", kind = row.kind.as_str(), run_id = row.run_id, ms = row.end_ms - row.start_ms),
+                Ok(_) => tracing::warn!(
+                    event = "phone_gap",
+                    kind = row.kind.as_str(),
+                    run_id = row.run_id,
+                    ms = row.end_ms - row.start_ms
+                ),
                 Err(err) => tracing::error!(event = "phone_gap_write_failed", error = %err),
             }
         }
@@ -491,7 +635,9 @@ impl<Tz: TimeZone> Publisher<Tz> {
             return;
         }
         self.next_pickup_poll_ms = now.saturating_add(PICKUP_POLL_MS);
-        let Ok(rows) = self.backend.api().and_then(|api| api.fetch_pickups()) else { return };
+        let Ok(rows) = self.backend.api().and_then(|api| api.fetch_pickups()) else {
+            return;
+        };
         let Ok(conn) = lock_db(&self.db) else { return };
         for row in rows {
             if let Err(err) = record_report(&conn, &row.segment_id, row.count, now) {
@@ -526,11 +672,14 @@ fn released_by(conn: &Connection, run_id: i64) -> AppResult<Option<ReleaseCause>
 /// table takes a count only when it is higher than what the segment has. Returns whether a row
 /// was added.
 pub fn record_report(conn: &Connection, key: &str, count: i64, at_ms: i64) -> AppResult<bool> {
-    let Some((run_id, segment_id)) = parse_segment_key(key) else { return Ok(false) };
+    let Some((run_id, segment_id)) = parse_segment_key(key) else {
+        return Ok(false);
+    };
     if !(0..=MAX_PICKUPS_PER_REPORT).contains(&count) {
         return Ok(false);
     }
-    let known = store::get_segment(conn, segment_id)?.is_some_and(|s| s.run_id == run_id && s.kind == BlockKind::Study);
+    let known = store::get_segment(conn, segment_id)?
+        .is_some_and(|s| s.run_id == run_id && s.kind == BlockKind::Study);
     if !known {
         return Ok(false);
     }
@@ -554,7 +703,10 @@ where
             // Wakes that piled up while a look was running count as one.
             while rx.try_recv().is_ok() {}
             wait = catch_unwind(AssertUnwindSafe(|| publisher.step())).unwrap_or_else(|_| {
-                tracing::error!(event = "phone_publisher_panic", "a publisher look panicked; retrying");
+                tracing::error!(
+                    event = "phone_publisher_panic",
+                    "a publisher look panicked; retrying"
+                );
                 IDLE_WAIT
             });
         }

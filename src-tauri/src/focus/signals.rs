@@ -10,7 +10,7 @@
 
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -63,7 +63,9 @@ pub enum SelfReportOutcome {
     Recorded,
     /// A "focused" check-in answer: acknowledged, nothing stored.
     Acknowledged,
-    Ignored { reason: IgnoreReason },
+    Ignored {
+        reason: IgnoreReason,
+    },
 }
 
 /// Writes one `self_report` row for the window's segment. The lock is checked again inside the
@@ -74,29 +76,48 @@ fn record_in(
     at_ms: i64,
     dedupe: bool,
 ) -> AppResult<SelfReportOutcome> {
-    let Some(StudyWindow { run_id: Some(run_id), segment_id: Some(segment_id) }) = window else {
-        return Ok(SelfReportOutcome::Ignored { reason: IgnoreReason::NotStudying });
+    let Some(StudyWindow {
+        run_id: Some(run_id),
+        segment_id: Some(segment_id),
+    }) = window
+    else {
+        return Ok(SelfReportOutcome::Ignored {
+            reason: IgnoreReason::NotStudying,
+        });
     };
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     if !crate::study::lock_held(&tx)? {
-        return Ok(SelfReportOutcome::Ignored { reason: IgnoreReason::NotStudying });
+        return Ok(SelfReportOutcome::Ignored {
+            reason: IgnoreReason::NotStudying,
+        });
     }
     if dedupe {
         let last = store::last_focus_event_at(&tx, segment_id, FocusEventKind::SelfReport)?;
         if last.is_some_and(|last| at_ms.saturating_sub(last) < SELF_REPORT_DEDUP_MS) {
-            return Ok(SelfReportOutcome::Ignored { reason: IgnoreReason::TooSoon });
+            return Ok(SelfReportOutcome::Ignored {
+                reason: IgnoreReason::TooSoon,
+            });
         }
     }
     store::insert_focus_event(
         &tx,
-        &NewFocusEvent { run_id, segment_id, at_ms, kind: FocusEventKind::SelfReport, app_id: None },
+        &NewFocusEvent {
+            run_id,
+            segment_id,
+            at_ms,
+            kind: FocusEventKind::SelfReport,
+            app_id: None,
+        },
     )?;
     tx.commit()?;
     tracing::info!(event = "self_report", run_id, segment_id, "focus");
     Ok(SelfReportOutcome::Recorded)
 }
 
-fn current_window(db: &Mutex<Connection>, high_water: &HighWater) -> AppResult<(Option<StudyWindow>, i64)> {
+fn current_window(
+    db: &Mutex<Connection>,
+    high_water: &HighWater,
+) -> AppResult<(Option<StudyWindow>, i64)> {
     let effective = high_water.observe(now_ms()?);
     let state = timer::current_state(&*lock_db(db)?, &Local, effective)?;
     Ok((enforce::study_window(&state), effective))
@@ -183,7 +204,12 @@ fn poisoned<T>(_: T) -> AppError {
 impl SignalHub {
     pub fn new(rng: Box<dyn RandomSource>) -> Self {
         Self {
-            schedule: Mutex::new(Schedule { segment: None, next_at_ms: 0, pending: None, rng }),
+            schedule: Mutex::new(Schedule {
+                segment: None,
+                next_at_ms: 0,
+                pending: None,
+                rng,
+            }),
             status: Mutex::new(SelfReportStatus {
                 shortcut: SELF_REPORT_SHORTCUT.into(),
                 shortcut_registered: false,
@@ -203,15 +229,25 @@ impl SignalHub {
 
     /// Advances the schedule. Returns the prompt when a check-in falls due now. Outside a study
     /// block the schedule and any pending prompt are dropped, so a break never asks anything.
-    pub fn tick(&self, window: Option<StudyWindow>, now_ms: i64) -> AppResult<Option<CheckinPrompt>> {
+    pub fn tick(
+        &self,
+        window: Option<StudyWindow>,
+        now_ms: i64,
+    ) -> AppResult<Option<CheckinPrompt>> {
         let mut s = self.schedule.lock().map_err(poisoned)?;
-        let Some(StudyWindow { run_id: Some(run_id), segment_id: Some(segment_id) }) = window else {
+        let Some(StudyWindow {
+            run_id: Some(run_id),
+            segment_id: Some(segment_id),
+        }) = window
+        else {
             s.segment = None;
             s.pending = None;
             return Ok(None);
         };
         let key = (run_id, segment_id);
-        let max_ms = i64::try_from(CHECKIN_MAX_MINUTES).unwrap_or(0).saturating_mul(60_000);
+        let max_ms = i64::try_from(CHECKIN_MAX_MINUTES)
+            .unwrap_or(0)
+            .saturating_mul(60_000);
         if s.segment != Some(key) {
             s.segment = Some(key);
             s.pending = None;
@@ -231,7 +267,11 @@ impl SignalHub {
         if now_ms < s.next_at_ms {
             return Ok(None);
         }
-        let prompt = CheckinPrompt { run_id, segment_id, asked_at_ms: now_ms };
+        let prompt = CheckinPrompt {
+            run_id,
+            segment_id,
+            asked_at_ms: now_ms,
+        };
         s.pending = Some(prompt);
         s.schedule_from(now_ms);
         Ok(Some(prompt))
@@ -240,7 +280,8 @@ impl SignalHub {
     /// The prompt still waiting for an answer at `now_ms`.
     pub fn pending(&self, now_ms: i64) -> AppResult<Option<CheckinPrompt>> {
         let s = self.schedule.lock().map_err(poisoned)?;
-        Ok(s.pending.filter(|p| now_ms.saturating_sub(p.asked_at_ms) < CHECKIN_ANSWER_WINDOW_MS))
+        Ok(s.pending
+            .filter(|p| now_ms.saturating_sub(p.asked_at_ms) < CHECKIN_ANSWER_WINDOW_MS))
     }
 
     fn take_pending(&self, now_ms: i64, window: Option<StudyWindow>) -> AppResult<CheckinPrompt> {
@@ -254,7 +295,9 @@ impl SignalHub {
             {
                 Ok(p)
             }
-            _ => Err(AppError::Invalid("no check-in is waiting for an answer".into())),
+            _ => Err(AppError::Invalid(
+                "no check-in is waiting for an answer".into(),
+            )),
         }
     }
 }
@@ -296,7 +339,9 @@ pub fn checkin_pass(
     let prompt = hub.tick(window, now_ms)?;
     if prompt.is_some() {
         // No subject or plan name: a notification body can show on a lock screen.
-        if let Err(err) = notifier.notify("집중 체크인", "방금 집중하고 있었나요? 앱에서 답해 주세요.") {
+        if let Err(err) =
+            notifier.notify("집중 체크인", "방금 집중하고 있었나요? 앱에서 답해 주세요.")
+        {
             tracing::warn!(event = "checkin_notify_failed", error = %err);
         }
     }
@@ -311,21 +356,26 @@ pub fn spawn(
     hub: Arc<SignalHub>,
     notifier: Arc<dyn Notifier>,
 ) {
-    thread::spawn(move || loop {
-        thread::sleep(Duration::from_millis(SAMPLE_INTERVAL_MS.unsigned_abs()));
-        let result = catch_unwind(AssertUnwindSafe(|| -> AppResult<Option<CheckinPrompt>> {
-            let (window, now) = current_window(&db, &high_water)?;
-            checkin_pass(&hub, notifier.as_ref(), window, now)
-        }));
-        match result {
-            Ok(Ok(Some(prompt))) => {
-                if let Err(err) = app.emit(CHECKIN_EVENT, prompt) {
-                    tracing::error!(error = %err, "failed to emit focus_checkin");
+    thread::spawn(move || {
+        loop {
+            thread::sleep(Duration::from_millis(SAMPLE_INTERVAL_MS.unsigned_abs()));
+            let result = catch_unwind(AssertUnwindSafe(|| -> AppResult<Option<CheckinPrompt>> {
+                let (window, now) = current_window(&db, &high_water)?;
+                checkin_pass(&hub, notifier.as_ref(), window, now)
+            }));
+            match result {
+                Ok(Ok(Some(prompt))) => {
+                    if let Err(err) = app.emit(CHECKIN_EVENT, prompt) {
+                        tracing::error!(error = %err, "failed to emit focus_checkin");
+                    }
                 }
+                Ok(Ok(None)) => {}
+                Ok(Err(err)) => tracing::error!(event = "checkin_pass_failed", error = %err),
+                Err(_) => tracing::error!(
+                    event = "checkin_pass_panicked",
+                    "check-in pass panicked; retrying"
+                ),
             }
-            Ok(Ok(None)) => {}
-            Ok(Err(err)) => tracing::error!(event = "checkin_pass_failed", error = %err),
-            Err(_) => tracing::error!(event = "checkin_pass_panicked", "check-in pass panicked; retrying"),
         }
     });
 }
@@ -334,7 +384,11 @@ pub fn spawn(
 
 /// Registers the plugin and the shortcut. Any failure (plugin, a binding another app owns, a
 /// missing OS permission) comes back in the status instead of failing startup.
-pub fn install_shortcut(app: &AppHandle, db: Arc<Mutex<Connection>>, high_water: Arc<HighWater>) -> SelfReportStatus {
+pub fn install_shortcut(
+    app: &AppHandle,
+    db: Arc<Mutex<Connection>>,
+    high_water: Arc<HighWater>,
+) -> SelfReportStatus {
     let registered = register_shortcut(app, db, high_water);
     if let Err(err) = &registered {
         tracing::warn!(event = "self_report_shortcut_unavailable", error = %err);
@@ -346,8 +400,13 @@ pub fn install_shortcut(app: &AppHandle, db: Arc<Mutex<Connection>>, high_water:
     }
 }
 
-fn register_shortcut(app: &AppHandle, db: Arc<Mutex<Connection>>, high_water: Arc<HighWater>) -> Result<(), String> {
-    app.plugin(tauri_plugin_global_shortcut::Builder::new().build()).map_err(|e| e.to_string())?;
+fn register_shortcut(
+    app: &AppHandle,
+    db: Arc<Mutex<Connection>>,
+    high_water: Arc<HighWater>,
+) -> Result<(), String> {
+    app.plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .map_err(|e| e.to_string())?;
     let emitter = app.clone();
     app.global_shortcut()
         .on_shortcut(SELF_REPORT_SHORTCUT, move |_app, _shortcut, event| {
@@ -374,7 +433,7 @@ mod tests {
 
     use super::*;
     use crate::db::open_in_memory;
-    use crate::plan::{create_plan, CreatePlanInput};
+    use crate::plan::{CreatePlanInput, create_plan};
     use crate::study::{ModeConfig, StudyLevel};
     use crate::testutil::FakeNotifier;
     use crate::timer::model::TimerState;
@@ -393,10 +452,17 @@ mod tests {
     }
 
     fn t(h: i64, m: i64, s: i64) -> i64 {
-        Utc.with_ymd_and_hms(2026, 11, 5, u32::try_from(h).expect("h"), u32::try_from(m).expect("m"), u32::try_from(s).expect("s"))
-            .single()
-            .expect("time")
-            .timestamp_millis()
+        Utc.with_ymd_and_hms(
+            2026,
+            11,
+            5,
+            u32::try_from(h).expect("h"),
+            u32::try_from(m).expect("m"),
+            u32::try_from(s).expect("s"),
+        )
+        .single()
+        .expect("time")
+        .timestamp_millis()
     }
 
     const MIN: i64 = 60_000;
@@ -426,19 +492,32 @@ mod tests {
 
     fn state_at(db: &Mutex<Connection>, now: i64) -> TimerState {
         let mut conn = db.lock().expect("db");
-        timer::reconcile(&mut conn, &Utc, now).expect("reconcile").state
+        timer::reconcile(&mut conn, &Utc, now)
+            .expect("reconcile")
+            .state
     }
 
     fn self_reports(db: &Mutex<Connection>) -> Vec<(i64, Option<String>)> {
         let conn = db.lock().expect("db");
         let mut stmt = conn
-            .prepare("SELECT at_ms, app_id FROM focus_events WHERE kind = 'self_report' ORDER BY id")
+            .prepare(
+                "SELECT at_ms, app_id FROM focus_events WHERE kind = 'self_report' ORDER BY id",
+            )
             .expect("prepare");
-        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).expect("query").map(|r| r.expect("row")).collect()
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .expect("query")
+            .map(|r| r.expect("row"))
+            .collect()
     }
 
     fn report(db: &Mutex<Connection>, state: &TimerState, at_ms: i64) -> SelfReportOutcome {
-        record_in(&mut db.lock().expect("db"), enforce::study_window(state), at_ms, true).expect("record")
+        record_in(
+            &mut db.lock().expect("db"),
+            enforce::study_window(state),
+            at_ms,
+            true,
+        )
+        .expect("record")
     }
 
     #[test]
@@ -446,7 +525,10 @@ mod tests {
         let db = rig();
         let state = state_at(&db, t(20, 5, 0));
         assert!(state.lock_held);
-        assert_eq!(report(&db, &state, t(20, 5, 0)), SelfReportOutcome::Recorded);
+        assert_eq!(
+            report(&db, &state, t(20, 5, 0)),
+            SelfReportOutcome::Recorded
+        );
         assert_eq!(self_reports(&db), vec![(t(20, 5, 0), None)]);
     }
 
@@ -455,13 +537,23 @@ mod tests {
         let db = rig();
         // Before the plan: the lock is free.
         let before = state_at(&db, t(19, 0, 0));
-        assert_eq!(report(&db, &before, t(19, 0, 0)), SelfReportOutcome::Ignored { reason: IgnoreReason::NotStudying });
+        assert_eq!(
+            report(&db, &before, t(19, 0, 0)),
+            SelfReportOutcome::Ignored {
+                reason: IgnoreReason::NotStudying
+            }
+        );
         // Break between the first and second set (21:00..21:10).
         let during_break = state_at(&db, t(21, 5, 0));
-        assert!(during_break.lock_held, "the lock is held during a break, but it is not a study phase");
+        assert!(
+            during_break.lock_held,
+            "the lock is held during a break, but it is not a study phase"
+        );
         assert_eq!(
             report(&db, &during_break, t(21, 5, 0)),
-            SelfReportOutcome::Ignored { reason: IgnoreReason::NotStudying }
+            SelfReportOutcome::Ignored {
+                reason: IgnoreReason::NotStudying
+            }
         );
         assert!(self_reports(&db).is_empty());
     }
@@ -471,7 +563,12 @@ mod tests {
         let db = rig();
         let state = state_at(&db, t(20, 5, 0));
         crate::testutil::set_lock_for_test(&db.lock().expect("db"), false);
-        assert_eq!(report(&db, &state, t(20, 5, 1)), SelfReportOutcome::Ignored { reason: IgnoreReason::NotStudying });
+        assert_eq!(
+            report(&db, &state, t(20, 5, 1)),
+            SelfReportOutcome::Ignored {
+                reason: IgnoreReason::NotStudying
+            }
+        );
         assert!(self_reports(&db).is_empty());
     }
 
@@ -479,14 +576,28 @@ mod tests {
     fn presses_within_five_seconds_are_one_report_and_five_seconds_apart_are_two() {
         let db = rig();
         let state = state_at(&db, t(20, 5, 0));
-        assert_eq!(report(&db, &state, t(20, 5, 0)), SelfReportOutcome::Recorded);
-        assert_eq!(report(&db, &state, t(20, 5, 4)), SelfReportOutcome::Ignored { reason: IgnoreReason::TooSoon });
-        assert_eq!(report(&db, &state, t(20, 5, 5)), SelfReportOutcome::Recorded);
+        assert_eq!(
+            report(&db, &state, t(20, 5, 0)),
+            SelfReportOutcome::Recorded
+        );
+        assert_eq!(
+            report(&db, &state, t(20, 5, 4)),
+            SelfReportOutcome::Ignored {
+                reason: IgnoreReason::TooSoon
+            }
+        );
+        assert_eq!(
+            report(&db, &state, t(20, 5, 5)),
+            SelfReportOutcome::Recorded
+        );
         assert_eq!(self_reports(&db).len(), 2);
     }
 
     fn window(run: i64, segment: i64) -> Option<StudyWindow> {
-        Some(StudyWindow { run_id: Some(run), segment_id: Some(segment) })
+        Some(StudyWindow {
+            run_id: Some(run),
+            segment_id: Some(segment),
+        })
     }
 
     #[test]
@@ -496,9 +607,19 @@ mod tests {
             let hub = hub(&[draw]);
             let start = t(20, 0, 0);
             assert_eq!(hub.tick(window(1, 1), start).expect("tick"), None);
-            assert_eq!(hub.tick(window(1, 1), start + minutes * MIN - 1).expect("tick"), None);
-            let prompt = hub.tick(window(1, 1), start + minutes * MIN).expect("tick").expect("due");
-            assert_eq!((prompt.run_id, prompt.segment_id, prompt.asked_at_ms), (1, 1, start + minutes * MIN));
+            assert_eq!(
+                hub.tick(window(1, 1), start + minutes * MIN - 1)
+                    .expect("tick"),
+                None
+            );
+            let prompt = hub
+                .tick(window(1, 1), start + minutes * MIN)
+                .expect("tick")
+                .expect("due");
+            assert_eq!(
+                (prompt.run_id, prompt.segment_id, prompt.asked_at_ms),
+                (1, 1, start + minutes * MIN)
+            );
         }
         assert_eq!(CHECKIN_MIN_MINUTES + 25, CHECKIN_MAX_MINUTES);
     }
@@ -508,16 +629,29 @@ mod tests {
         let hub = hub(&[0, 0, 0]);
         let start = t(20, 0, 0);
         hub.tick(window(1, 1), start).expect("tick");
-        let prompt = hub.tick(window(1, 1), start + 15 * MIN).expect("tick").expect("due");
-        assert_eq!(hub.pending(prompt.asked_at_ms).expect("pending"), Some(prompt));
+        let prompt = hub
+            .tick(window(1, 1), start + 15 * MIN)
+            .expect("tick")
+            .expect("due");
+        assert_eq!(
+            hub.pending(prompt.asked_at_ms).expect("pending"),
+            Some(prompt)
+        );
         // A break: nothing is asked and the prompt is gone.
         assert_eq!(hub.tick(None, start + 16 * MIN).expect("tick"), None);
         assert_eq!(hub.pending(start + 16 * MIN).expect("pending"), None);
         // The next block starts a new schedule from its own start, not an old one.
         let next_start = start + 40 * MIN;
         assert_eq!(hub.tick(window(1, 2), next_start).expect("tick"), None);
-        assert_eq!(hub.tick(window(1, 2), next_start + 14 * MIN).expect("tick"), None);
-        assert!(hub.tick(window(1, 2), next_start + 15 * MIN).expect("tick").is_some());
+        assert_eq!(
+            hub.tick(window(1, 2), next_start + 14 * MIN).expect("tick"),
+            None
+        );
+        assert!(
+            hub.tick(window(1, 2), next_start + 15 * MIN)
+                .expect("tick")
+                .is_some()
+        );
     }
 
     #[test]
@@ -532,7 +666,11 @@ mod tests {
         assert_eq!(hub.pending(asked + 120_000).expect("pending"), None);
         hub.tick(window(1, 1), asked + 120_000).expect("tick");
         // Next one is 15 minutes after the first prompt, so it is due again soon after the lapse.
-        assert!(hub.tick(window(1, 1), asked + 15 * MIN).expect("tick").is_some());
+        assert!(
+            hub.tick(window(1, 1), asked + 15 * MIN)
+                .expect("tick")
+                .is_some()
+        );
     }
 
     #[test]
@@ -542,7 +680,11 @@ mod tests {
         hub.tick(window(1, 1), start).expect("tick"); // due at +40 minutes
         let back = start - 3 * 60 * MIN;
         assert_eq!(hub.tick(window(1, 1), back).expect("tick"), None);
-        assert!(hub.tick(window(1, 1), back + 15 * MIN).expect("tick").is_some());
+        assert!(
+            hub.tick(window(1, 1), back + 15 * MIN)
+                .expect("tick")
+                .is_some()
+        );
     }
 
     #[test]
@@ -553,11 +695,22 @@ mod tests {
         checkin_pass(&hub, &notifier, window(1, 1), start).expect("pass");
         assert!(notifier.sent().is_empty());
         let due = start + 15 * MIN;
-        assert!(checkin_pass(&hub, &notifier, window(1, 1), due).expect("pass").is_some());
-        assert!(checkin_pass(&hub, &notifier, window(1, 1), due + 5_000).expect("pass").is_none());
+        assert!(
+            checkin_pass(&hub, &notifier, window(1, 1), due)
+                .expect("pass")
+                .is_some()
+        );
+        assert!(
+            checkin_pass(&hub, &notifier, window(1, 1), due + 5_000)
+                .expect("pass")
+                .is_none()
+        );
         let sent = notifier.sent();
         assert_eq!(sent.len(), 1);
-        assert!(!sent[0].1.contains("수학"), "a lock screen must not show the subject");
+        assert!(
+            !sent[0].1.contains("수학"),
+            "a lock screen must not show the subject"
+        );
     }
 
     #[test]
@@ -573,7 +726,10 @@ mod tests {
         hub.tick(win, asked).expect("tick").expect("due");
 
         let at = asked + 20_000;
-        assert_eq!(answer_checkin(&db, &hub, win, at, false).expect("answer"), SelfReportOutcome::Recorded);
+        assert_eq!(
+            answer_checkin(&db, &hub, win, at, false).expect("answer"),
+            SelfReportOutcome::Recorded
+        );
         assert_eq!(self_reports(&db), vec![(at, None)]);
         // The prompt is consumed: a second answer is refused.
         assert!(answer_checkin(&db, &hub, win, at + 1_000, false).is_err());
@@ -603,9 +759,21 @@ mod tests {
         assert!(answer_checkin(&db, &hub, win, asked + CHECKIN_ANSWER_WINDOW_MS, false).is_err());
 
         let hub = hub_with_prompt(win, asked);
-        let other = Some(StudyWindow { run_id: Some(99), segment_id: Some(99) });
+        let other = Some(StudyWindow {
+            run_id: Some(99),
+            segment_id: Some(99),
+        });
         assert!(answer_checkin(&db, &hub, other, asked + 1_000, false).is_err());
-        assert!(answer_checkin(&db, &hub_with_prompt(win, asked), None, asked + 1_000, false).is_err());
+        assert!(
+            answer_checkin(
+                &db,
+                &hub_with_prompt(win, asked),
+                None,
+                asked + 1_000,
+                false
+            )
+            .is_err()
+        );
         assert!(self_reports(&db).is_empty());
     }
 

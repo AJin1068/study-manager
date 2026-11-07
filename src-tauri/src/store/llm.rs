@@ -1,7 +1,7 @@
 //! `llm_usage`: one append-only row per LLM call attempt (purpose, model, token counts, latency,
 //! result code). It records that a call happened, never what was in it.
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::Serialize;
 
 use crate::error::AppResult;
@@ -57,13 +57,21 @@ pub fn tokens_between(conn: &Connection, from_ms: i64, to_ms: i64) -> AppResult<
     )?)
 }
 
-pub fn usage_by_purpose(conn: &Connection, from_ms: i64, to_ms: i64) -> AppResult<Vec<PurposeUsage>> {
+pub fn usage_by_purpose(
+    conn: &Connection,
+    from_ms: i64,
+    to_ms: i64,
+) -> AppResult<Vec<PurposeUsage>> {
     let mut stmt = conn.prepare(
         "SELECT purpose, COUNT(*), COALESCE(SUM(in_tokens + out_tokens), 0) FROM llm_usage
          WHERE at_ms >= ?1 AND at_ms < ?2 GROUP BY purpose ORDER BY purpose",
     )?;
     let rows = stmt.query_map(params![from_ms, to_ms], |row| {
-        Ok(PurposeUsage { purpose: row.get(0)?, calls: row.get(1)?, tokens: row.get(2)? })
+        Ok(PurposeUsage {
+            purpose: row.get(0)?,
+            calls: row.get(1)?,
+            tokens: row.get(2)?,
+        })
     })?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
@@ -74,7 +82,17 @@ mod tests {
     use crate::db::open_in_memory;
 
     fn usage(at_ms: i64, mode: &'static str, tokens: i64) -> NewUsage<'static> {
-        NewUsage { at_ms, purpose: "wiki_ingest", model: "m", mode, in_tokens: tokens, out_tokens: 1, latency_ms: 5, cached: false, result_code: "ok" }
+        NewUsage {
+            at_ms,
+            purpose: "wiki_ingest",
+            model: "m",
+            mode,
+            in_tokens: tokens,
+            out_tokens: 1,
+            latency_ms: 5,
+            cached: false,
+            result_code: "ok",
+        }
     }
 
     #[test]
@@ -83,12 +101,22 @@ mod tests {
         insert_usage(&conn, &usage(10, "live", 100)).expect("live");
         insert_usage(&conn, &usage(11, "mock", 5_000)).expect("mock");
         insert_usage(&conn, &usage(500, "live", 7)).expect("later");
-        assert!(conn.execute("UPDATE llm_usage SET in_tokens = 0", []).is_err());
+        assert!(
+            conn.execute("UPDATE llm_usage SET in_tokens = 0", [])
+                .is_err()
+        );
         assert!(conn.execute("DELETE FROM llm_usage", []).is_err());
         assert_eq!(tokens_between(&conn, 0, 100).expect("sum"), 5_102);
         assert_eq!(tokens_between(&conn, 100, 1000).expect("sum"), 8);
         let by = usage_by_purpose(&conn, 0, 1000).expect("by purpose");
-        assert_eq!(by, [PurposeUsage { purpose: "wiki_ingest".into(), calls: 3, tokens: 5_110 }]);
+        assert_eq!(
+            by,
+            [PurposeUsage {
+                purpose: "wiki_ingest".into(),
+                calls: 3,
+                tokens: 5_110
+            }]
+        );
     }
 
     #[test]

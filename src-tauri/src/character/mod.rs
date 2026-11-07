@@ -26,8 +26,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
 use crate::messages::config::TONE;
-use crate::points::rewards::Stage;
 use crate::points;
+use crate::points::rewards::Stage;
 use crate::settings::{self, SettingValue, UpdateOutcome};
 use crate::shop::items::{self, ItemKind, Slot, Source};
 use crate::store;
@@ -77,7 +77,11 @@ impl Traits {
     /// Stable text of the inputs that shape the look (not gender, which only picks the starter
     /// top): the seed of the candidate rules mixes it in.
     pub fn key(&self) -> String {
-        format!("{}|{}", self.mbti.as_deref().unwrap_or("-"), self.birth_year.map_or("-".to_string(), |y| y.to_string()))
+        format!(
+            "{}|{}",
+            self.mbti.as_deref().unwrap_or("-"),
+            self.birth_year.map_or("-".to_string(), |y| y.to_string())
+        )
     }
 }
 
@@ -85,11 +89,18 @@ impl SetupInput {
     /// Validates and normalizes. A blank MBTI counts as skipped; anything else must be a real
     /// MBTI. The birth year must be between 1900 and `current_year`.
     pub fn normalize(&self, current_year: i32) -> AppResult<Traits> {
-        let mbti = match self.mbti.as_deref().map(str::trim).filter(|m| !m.is_empty()) {
+        let mbti = match self
+            .mbti
+            .as_deref()
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+        {
             None => None,
             Some(raw) => {
                 if compose::tone_for_mbti(raw).is_none() {
-                    return Err(AppError::Invalid("mbti must be four letters like INFP".into()));
+                    return Err(AppError::Invalid(
+                        "mbti must be four letters like INFP".into(),
+                    ));
                 }
                 Some(raw.to_uppercase())
             }
@@ -141,7 +152,11 @@ pub fn labels(look: &Look) -> AppResult<LookLabels> {
     Ok(LookLabels {
         species: cat.species(&look.species).ok_or_else(miss)?.label.clone(),
         palette: cat.palette(&look.palette).ok_or_else(miss)?.label.clone(),
-        expression: cat.expression(&look.expression).ok_or_else(miss)?.label.clone(),
+        expression: cat
+            .expression(&look.expression)
+            .ok_or_else(miss)?
+            .label
+            .clone(),
         prop: cat.prop(&look.prop).ok_or_else(miss)?.label.clone(),
     })
 }
@@ -227,8 +242,15 @@ pub struct CharacterView {
 
 /// The saved character at its current level, or `None` before the first pick.
 pub fn view(conn: &Connection) -> AppResult<Option<CharacterView>> {
-    let Some(profile) = repo::get_profile(conn)? else { return Ok(None) };
-    let look = Look { species: profile.species, palette: profile.palette, expression: profile.expression, prop: profile.prop };
+    let Some(profile) = repo::get_profile(conn)? else {
+        return Ok(None);
+    };
+    let look = Look {
+        species: profile.species,
+        palette: profile.palette,
+        expression: profile.expression,
+        prop: profile.prop,
+    };
     let equipped = Equipped::from_rows(&repo::wardrobe(conn)?);
     let status = points::status(conn)?;
     Ok(Some(CharacterView {
@@ -253,12 +275,17 @@ pub fn tray_line(view: &CharacterView) -> String {
         Stage::SmallTree => "🌳",
         Stage::ForestSpirit => "✨",
     };
-    format!("{glyph} {} · Lv.{} {}", view.name, view.level, view.stage_label)
+    format!(
+        "{glyph} {} · Lv.{} {}",
+        view.name, view.level, view.stage_label
+    )
 }
 
 /// Updates the menu-bar line from the database. Best effort: the tray is not worth failing for.
 pub fn refresh_tray(app: &tauri::AppHandle, db: &std::sync::Mutex<Connection>) {
-    let line = crate::commands::lock_db(db).and_then(|conn| view(&conn)).map(|v| v.map(|v| tray_line(&v)));
+    let line = crate::commands::lock_db(db)
+        .and_then(|conn| view(&conn))
+        .map(|v| v.map(|v| tray_line(&v)));
     match line {
         Ok(line) => crate::tray::set_character_line(app, line.as_deref()),
         Err(err) => tracing::warn!(error = %err, "character line for the tray unavailable"),
@@ -287,22 +314,35 @@ pub struct ChooseOutcome {
 
 /// Saves the pick. Validates every id against the catalogs, keeps the wardrobe, grants and wears
 /// the free starter top when the top slot is empty, and (once) sets the message tone from the MBTI.
-pub fn choose(conn: &mut Connection, req: &ChooseRequest, now_ms: i64, current_year: i32) -> AppResult<ChooseOutcome> {
+pub fn choose(
+    conn: &mut Connection,
+    req: &ChooseRequest,
+    now_ms: i64,
+    current_year: i32,
+) -> AppResult<ChooseOutcome> {
     let traits = req.input.normalize(current_year)?;
     let cat = catalog::catalog()?;
     let invalid = |what: &str| AppError::Invalid(format!("unknown or unavailable {what}"));
-    let species = cat.species(&req.look.species).ok_or_else(|| invalid("species"))?;
+    let species = cat
+        .species(&req.look.species)
+        .ok_or_else(|| invalid("species"))?;
     if species.shop_only && !crate::shop::owns_species(conn, &species.id)? {
         return Err(invalid("species"));
     }
-    cat.palette(&req.look.palette).ok_or_else(|| invalid("palette"))?;
-    cat.expression(&req.look.expression).ok_or_else(|| invalid("expression"))?;
+    cat.palette(&req.look.palette)
+        .ok_or_else(|| invalid("palette"))?;
+    cat.expression(&req.look.expression)
+        .ok_or_else(|| invalid("expression"))?;
     cat.prop(&req.look.prop).ok_or_else(|| invalid("prop"))?;
     let starter = items::item(&req.starter_top)?
-        .filter(|i| i.source == Source::Starter && i.kind == ItemKind::Clothing && i.slot == Some(Slot::Top))
+        .filter(|i| {
+            i.source == Source::Starter && i.kind == ItemKind::Clothing && i.slot == Some(Slot::Top)
+        })
         .ok_or_else(|| invalid("starter top"))?;
-    let name = compose::clean_name(&req.name).ok_or_else(|| AppError::Invalid("name must be 1-8 characters".into()))?;
-    let blurb = compose::clean_intro(&req.blurb).ok_or_else(|| AppError::Invalid("intro must be 1-40 characters".into()))?;
+    let name = compose::clean_name(&req.name)
+        .ok_or_else(|| AppError::Invalid("name must be 1-8 characters".into()))?;
+    let blurb = compose::clean_intro(&req.blurb)
+        .ok_or_else(|| AppError::Invalid("intro must be 1-40 characters".into()))?;
 
     {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -321,25 +361,50 @@ pub fn choose(conn: &mut Connection, req: &ChooseRequest, now_ms: i64, current_y
                 chosen_at_ms: now_ms,
             },
         )?;
-        crate::store::shop::insert_inventory(&tx, &starter.id, Source::Starter.as_str(), now_ms, None)?;
-        if !repo::wardrobe(&tx)?.iter().any(|(slot, _)| slot == Slot::Top.as_str()) {
+        crate::store::shop::insert_inventory(
+            &tx,
+            &starter.id,
+            Source::Starter.as_str(),
+            now_ms,
+            None,
+        )?;
+        if !repo::wardrobe(&tx)?
+            .iter()
+            .any(|(slot, _)| slot == Slot::Top.as_str())
+        {
             repo::set_wardrobe(&tx, Slot::Top.as_str(), &starter.id)?;
         }
         tx.commit()?;
     }
 
     let tone_applied = apply_default_tone(conn, traits.mbti.as_deref(), now_ms)?;
-    let character = view(conn)?.ok_or_else(|| AppError::Internal("saved character is missing".into()))?;
-    Ok(ChooseOutcome { character, tone_applied })
+    let character =
+        view(conn)?.ok_or_else(|| AppError::Internal("saved character is missing".into()))?;
+    Ok(ChooseOutcome {
+        character,
+        tone_applied,
+    })
 }
 
 /// Sets `messages.tone` from the MBTI when no tone row exists yet. A user's own value (any row,
 /// even one equal to the default) is never overwritten, and a locked setting is simply skipped.
-fn apply_default_tone(conn: &mut Connection, mbti: Option<&str>, now_ms: i64) -> AppResult<Option<String>> {
-    let Some(tone) = mbti.and_then(compose::tone_for_mbti) else { return Ok(None) };
+fn apply_default_tone(
+    conn: &mut Connection,
+    mbti: Option<&str>,
+    now_ms: i64,
+) -> AppResult<Option<String>> {
+    let Some(tone) = mbti.and_then(compose::tone_for_mbti) else {
+        return Ok(None);
+    };
     if store::get_setting(conn, TONE.name)?.is_some() {
         return Ok(None);
     }
-    let outcome = settings::apply_setting(conn, &TONE, &SettingValue::Text(tone.as_str().to_string()), now_ms, || Ok(()))?;
+    let outcome = settings::apply_setting(
+        conn,
+        &TONE,
+        &SettingValue::Text(tone.as_str().to_string()),
+        now_ms,
+        || Ok(()),
+    )?;
     Ok(matches!(outcome, UpdateOutcome::Applied { .. }).then(|| tone.as_str().to_string()))
 }

@@ -25,17 +25,26 @@ pub fn local_dates<Tz: TimeZone>(tz: &Tz, now_ms: i64) -> AppResult<LocalDates> 
         .ok_or_else(|| AppError::Internal("timestamp has no local date".into()))?
         .date_naive();
     let monday = today - Duration::days(i64::from(today.weekday().num_days_from_monday()));
-    Ok(LocalDates { today: today.format("%Y-%m-%d").to_string(), week_start: monday.format("%Y-%m-%d").to_string() })
+    Ok(LocalDates {
+        today: today.format("%Y-%m-%d").to_string(),
+        week_start: monday.format("%Y-%m-%d").to_string(),
+    })
 }
 
 /// Minutes reported for exactly `day` (0 when the member reported nothing that day).
 pub fn minutes_on(days: &[WireDay], day: &str) -> i64 {
-    days.iter().filter(|d| d.day == day).map(|d| d.study_min).sum()
+    days.iter()
+        .filter(|d| d.day == day)
+        .map(|d| d.study_min)
+        .sum()
 }
 
 /// Minutes on days from `week_start` through `today`, both inclusive. ISO dates order as text.
 pub fn minutes_in_week(days: &[WireDay], week_start: &str, today: &str) -> i64 {
-    days.iter().filter(|d| d.day.as_str() >= week_start && d.day.as_str() <= today).map(|d| d.study_min).sum()
+    days.iter()
+        .filter(|d| d.day.as_str() >= week_start && d.day.as_str() <= today)
+        .map(|d| d.study_min)
+        .sum()
 }
 
 /// `(user id, nickname, is self, minutes or None when not shared)` -> rows ordered by minutes
@@ -63,7 +72,13 @@ pub fn rank_rows(entries: Vec<(String, String, bool, Option<i64>)>) -> Vec<RankR
         if let (Some(m), Some(r)) = (minutes, rank) {
             previous = Some((m, r));
         }
-        rows.push(RankRow { user_id, nickname, is_self, minutes, rank });
+        rows.push(RankRow {
+            user_id,
+            nickname,
+            is_self,
+            minutes,
+            rank,
+        });
     }
     rows
 }
@@ -74,7 +89,11 @@ mod tests {
     use chrono::FixedOffset;
 
     fn day(day: &str, study_min: i64) -> WireDay {
-        WireDay { day: day.into(), study_min, plan_min: 0 }
+        WireDay {
+            day: day.into(),
+            study_min,
+            plan_min: 0,
+        }
     }
 
     fn entry(id: &str, minutes: Option<i64>) -> (String, String, bool, Option<i64>) {
@@ -87,47 +106,101 @@ mod tests {
         let seoul = FixedOffset::east_opt(9 * 3600).expect("offset");
         let utc = FixedOffset::east_opt(0).expect("offset");
         let before = 1_793_975_400_000; // 2026-11-06T14:30:00Z
-        assert_eq!(local_dates(&seoul, before).expect("dates").today, "2026-11-06");
-        assert_eq!(local_dates(&seoul, before + 3_600_000).expect("dates").today, "2026-11-07");
-        assert_eq!(local_dates(&utc, before + 3_600_000).expect("dates").today, "2026-11-06");
-        assert_eq!(local_dates(&seoul, before).expect("dates").week_start, "2026-11-02", "Monday");
+        assert_eq!(
+            local_dates(&seoul, before).expect("dates").today,
+            "2026-11-06"
+        );
+        assert_eq!(
+            local_dates(&seoul, before + 3_600_000)
+                .expect("dates")
+                .today,
+            "2026-11-07"
+        );
+        assert_eq!(
+            local_dates(&utc, before + 3_600_000).expect("dates").today,
+            "2026-11-06"
+        );
+        assert_eq!(
+            local_dates(&seoul, before).expect("dates").week_start,
+            "2026-11-02",
+            "Monday"
+        );
     }
 
     #[test]
-    fn the_week_starts_on_monday_and_a_sunday_still_belongs_to_the_week_that_began_six_days_before() {
+    fn the_week_starts_on_monday_and_a_sunday_still_belongs_to_the_week_that_began_six_days_before()
+    {
         let utc = FixedOffset::east_opt(0).expect("offset");
         let sunday = 1_794_139_200_000; // 2026-11-08T12:00:00Z
         let dates = local_dates(&utc, sunday).expect("dates");
-        assert_eq!((dates.today.as_str(), dates.week_start.as_str()), ("2026-11-08", "2026-11-02"));
+        assert_eq!(
+            (dates.today.as_str(), dates.week_start.as_str()),
+            ("2026-11-08", "2026-11-02")
+        );
         let monday = sunday + 86_400_000; // 2026-11-09T12:00:00Z
-        assert_eq!(local_dates(&utc, monday).expect("dates").week_start, "2026-11-09");
+        assert_eq!(
+            local_dates(&utc, monday).expect("dates").week_start,
+            "2026-11-09"
+        );
     }
 
     #[test]
     fn minutes_are_summed_inside_the_inclusive_week_window_only() {
-        let days = [day("2026-11-01", 100), day("2026-11-02", 30), day("2026-11-04", 45), day("2026-11-06", 20), day("2026-11-07", 99)];
+        let days = [
+            day("2026-11-01", 100),
+            day("2026-11-02", 30),
+            day("2026-11-04", 45),
+            day("2026-11-06", 20),
+            day("2026-11-07", 99),
+        ];
         assert_eq!(minutes_on(&days, "2026-11-06"), 20);
         assert_eq!(minutes_on(&days, "2026-11-05"), 0);
-        assert_eq!(minutes_in_week(&days, "2026-11-02", "2026-11-06"), 95, "Sunday before and Saturday after are outside");
+        assert_eq!(
+            minutes_in_week(&days, "2026-11-02", "2026-11-06"),
+            95,
+            "Sunday before and Saturday after are outside"
+        );
     }
 
     #[test]
     fn ties_share_a_rank_and_the_next_rank_skips() {
-        let rows = rank_rows(vec![entry("c", Some(30)), entry("a", Some(60)), entry("b", Some(60)), entry("d", Some(10))]);
-        let got: Vec<(&str, Option<u32>)> = rows.iter().map(|r| (r.user_id.as_str(), r.rank)).collect();
-        assert_eq!(got, [("a", Some(1)), ("b", Some(1)), ("c", Some(3)), ("d", Some(4))]);
+        let rows = rank_rows(vec![
+            entry("c", Some(30)),
+            entry("a", Some(60)),
+            entry("b", Some(60)),
+            entry("d", Some(10)),
+        ]);
+        let got: Vec<(&str, Option<u32>)> =
+            rows.iter().map(|r| (r.user_id.as_str(), r.rank)).collect();
+        assert_eq!(
+            got,
+            [
+                ("a", Some(1)),
+                ("b", Some(1)),
+                ("c", Some(3)),
+                ("d", Some(4))
+            ]
+        );
     }
 
     #[test]
     fn members_who_do_not_share_are_listed_last_without_a_rank() {
-        let rows = rank_rows(vec![entry("h", None), entry("a", Some(0)), entry("b", Some(5))]);
-        let got: Vec<(&str, Option<u32>)> = rows.iter().map(|r| (r.user_id.as_str(), r.rank)).collect();
+        let rows = rank_rows(vec![
+            entry("h", None),
+            entry("a", Some(0)),
+            entry("b", Some(5)),
+        ]);
+        let got: Vec<(&str, Option<u32>)> =
+            rows.iter().map(|r| (r.user_id.as_str(), r.rank)).collect();
         assert_eq!(got, [("b", Some(1)), ("a", Some(2)), ("h", None)]);
     }
 
     #[test]
     fn zero_minutes_still_rank_and_tie_at_zero() {
         let rows = rank_rows(vec![entry("a", Some(0)), entry("b", Some(0))]);
-        assert_eq!(rows.iter().map(|r| r.rank).collect::<Vec<_>>(), [Some(1), Some(1)]);
+        assert_eq!(
+            rows.iter().map(|r| r.rank).collect::<Vec<_>>(),
+            [Some(1), Some(1)]
+        );
     }
 }

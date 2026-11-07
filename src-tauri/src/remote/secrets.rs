@@ -25,7 +25,11 @@ pub enum SecretName {
 }
 
 impl SecretName {
-    pub const ALL: [SecretName; 3] = [SecretName::AnthropicApiKey, SecretName::SupabaseRefreshToken, SecretName::NtfyTopic];
+    pub const ALL: [SecretName; 3] = [
+        SecretName::AnthropicApiKey,
+        SecretName::SupabaseRefreshToken,
+        SecretName::NtfyTopic,
+    ];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -110,11 +114,17 @@ pub struct MemorySecretStore {
 
 impl MemorySecretStore {
     pub fn in_memory() -> Self {
-        Self { kind: SecretStoreKind::InMemory, values: Mutex::new(HashMap::new()) }
+        Self {
+            kind: SecretStoreKind::InMemory,
+            values: Mutex::new(HashMap::new()),
+        }
     }
 
     pub fn session_only() -> Self {
-        Self { kind: SecretStoreKind::SessionOnly, values: Mutex::new(HashMap::new()) }
+        Self {
+            kind: SecretStoreKind::SessionOnly,
+            values: Mutex::new(HashMap::new()),
+        }
     }
 }
 
@@ -130,12 +140,18 @@ impl SecretStore for MemorySecretStore {
 
     fn set(&self, name: SecretName, value: &str) -> Result<(), SecretError> {
         validate_value(value)?;
-        self.values.lock().map_err(|_| SecretError::Unavailable)?.insert(name, value.to_string());
+        self.values
+            .lock()
+            .map_err(|_| SecretError::Unavailable)?
+            .insert(name, value.to_string());
         Ok(())
     }
 
     fn delete(&self, name: SecretName) -> Result<(), SecretError> {
-        self.values.lock().map_err(|_| SecretError::Unavailable)?.remove(&name);
+        self.values
+            .lock()
+            .map_err(|_| SecretError::Unavailable)?
+            .remove(&name);
         Ok(())
     }
 }
@@ -166,7 +182,9 @@ impl SecretStore for KeyringSecretStore {
 
     fn set(&self, name: SecretName, value: &str) -> Result<(), SecretError> {
         validate_value(value)?;
-        Self::entry(name)?.set_password(value).map_err(|_| SecretError::Unavailable)
+        Self::entry(name)?
+            .set_password(value)
+            .map_err(|_| SecretError::Unavailable)
     }
 
     fn delete(&self, name: SecretName) -> Result<(), SecretError> {
@@ -211,10 +229,19 @@ fn probe(primary: &dyn SecretStore) -> bool {
 /// fallback).
 pub fn select_secret_store(primary: Arc<dyn SecretStore>) -> SelectedStore {
     if probe(primary.as_ref()) {
-        return SelectedStore { store: primary, degraded: None };
+        return SelectedStore {
+            store: primary,
+            degraded: None,
+        };
     }
-    tracing::warn!(event = "secret_store_degraded", code = DEGRADED_SESSION_ONLY);
-    SelectedStore { store: Arc::new(MemorySecretStore::session_only()), degraded: Some(DEGRADED_SESSION_ONLY) }
+    tracing::warn!(
+        event = "secret_store_degraded",
+        code = DEGRADED_SESSION_ONLY
+    );
+    SelectedStore {
+        store: Arc::new(MemorySecretStore::session_only()),
+        degraded: Some(DEGRADED_SESSION_ONLY),
+    }
 }
 
 #[cfg(test)]
@@ -230,7 +257,11 @@ pub(crate) mod tests {
 
     impl FaultyStore {
         pub fn new(fail_set: bool, forget_on_read: bool) -> Self {
-            Self { fail_set, forget_on_read, inner: MemorySecretStore::in_memory() }
+            Self {
+                fail_set,
+                forget_on_read,
+                inner: MemorySecretStore::in_memory(),
+            }
         }
     }
 
@@ -259,20 +290,44 @@ pub(crate) mod tests {
     fn memory_store_round_trips_and_delete_is_idempotent() {
         let store = MemorySecretStore::in_memory();
         assert_eq!(store.get(SecretName::AnthropicApiKey), Ok(None));
-        store.set(SecretName::AnthropicApiKey, "sk-test-1").expect("set");
-        assert_eq!(store.get(SecretName::AnthropicApiKey).expect("get").expect("some").expose(), "sk-test-1");
+        store
+            .set(SecretName::AnthropicApiKey, "sk-test-1")
+            .expect("set");
+        assert_eq!(
+            store
+                .get(SecretName::AnthropicApiKey)
+                .expect("get")
+                .expect("some")
+                .expose(),
+            "sk-test-1"
+        );
         store.delete(SecretName::AnthropicApiKey).expect("delete");
-        store.delete(SecretName::AnthropicApiKey).expect("delete again");
+        store
+            .delete(SecretName::AnthropicApiKey)
+            .expect("delete again");
         assert_eq!(store.get(SecretName::AnthropicApiKey), Ok(None));
     }
 
     #[test]
     fn values_are_size_and_shape_checked() {
         let store = MemorySecretStore::in_memory();
-        assert_eq!(store.set(SecretName::NtfyTopic, ""), Err(SecretError::Invalid));
-        assert_eq!(store.set(SecretName::NtfyTopic, "a\nb"), Err(SecretError::Invalid));
-        assert_eq!(store.set(SecretName::NtfyTopic, &"x".repeat(MAX_SECRET_BYTES + 1)), Err(SecretError::TooLarge));
-        assert!(store.set(SecretName::NtfyTopic, &"x".repeat(MAX_SECRET_BYTES)).is_ok());
+        assert_eq!(
+            store.set(SecretName::NtfyTopic, ""),
+            Err(SecretError::Invalid)
+        );
+        assert_eq!(
+            store.set(SecretName::NtfyTopic, "a\nb"),
+            Err(SecretError::Invalid)
+        );
+        assert_eq!(
+            store.set(SecretName::NtfyTopic, &"x".repeat(MAX_SECRET_BYTES + 1)),
+            Err(SecretError::TooLarge)
+        );
+        assert!(
+            store
+                .set(SecretName::NtfyTopic, &"x".repeat(MAX_SECRET_BYTES))
+                .is_ok()
+        );
     }
 
     #[test]
@@ -287,10 +342,19 @@ pub(crate) mod tests {
     #[test]
     fn probe_does_not_disturb_an_existing_secret() {
         let primary: Arc<dyn SecretStore> = Arc::new(MemorySecretStore::in_memory());
-        primary.set(SecretName::NtfyTopic, "real-topic").expect("set");
+        primary
+            .set(SecretName::NtfyTopic, "real-topic")
+            .expect("set");
         let selected = select_secret_store(Arc::clone(&primary));
         assert_eq!(selected.degraded, None);
-        assert_eq!(primary.get(SecretName::NtfyTopic).expect("get").expect("some").expose(), "real-topic");
+        assert_eq!(
+            primary
+                .get(SecretName::NtfyTopic)
+                .expect("get")
+                .expect("some")
+                .expose(),
+            "real-topic"
+        );
     }
 
     #[test]
@@ -298,7 +362,10 @@ pub(crate) mod tests {
         let selected = select_secret_store(Arc::new(FaultyStore::new(true, false)));
         assert_eq!(selected.degraded, Some(DEGRADED_SESSION_ONLY));
         assert_eq!(selected.store.kind(), SecretStoreKind::SessionOnly);
-        selected.store.set(SecretName::AnthropicApiKey, "k").expect("session store works");
+        selected
+            .store
+            .set(SecretName::AnthropicApiKey, "k")
+            .expect("session store works");
     }
 
     #[test]
@@ -310,7 +377,10 @@ pub(crate) mod tests {
 
     #[test]
     fn secret_value_debug_is_redacted() {
-        assert_eq!(format!("{:?}", SecretValue::new("sk-live-abc")), "SecretValue(..)");
+        assert_eq!(
+            format!("{:?}", SecretValue::new("sk-live-abc")),
+            "SecretValue(..)"
+        );
     }
 
     #[test]

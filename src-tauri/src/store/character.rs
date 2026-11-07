@@ -1,7 +1,7 @@
 //! `character_profile` and `wardrobe`. The profile row holds the user's setup answers; no reader
 //! other than the character module is meant to expose them.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::error::AppResult;
 
@@ -64,7 +64,10 @@ pub fn save_profile(conn: &Connection, p: &ProfileRow) -> AppResult<()> {
 
 /// Switches the species of the saved character. `false` when there is no character yet.
 pub fn set_species(conn: &Connection, species: &str) -> AppResult<bool> {
-    Ok(conn.execute("UPDATE character_profile SET species = ?1 WHERE id = 1", params![species])? == 1)
+    Ok(conn.execute(
+        "UPDATE character_profile SET species = ?1 WHERE id = 1",
+        params![species],
+    )? == 1)
 }
 
 pub fn wardrobe(conn: &Connection) -> AppResult<Vec<(String, String)>> {

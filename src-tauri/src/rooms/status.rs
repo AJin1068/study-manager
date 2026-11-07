@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use super::model::{RoomCode, RoomError};
 use super::port::RoomApi;
-use super::prefs::{daily_reports, status_report, FriendSettings, LocalSnapshot};
+use super::prefs::{FriendSettings, LocalSnapshot, daily_reports, status_report};
 use crate::remote::payload::{FriendPrefsArgs, InventoryPublicArgs};
 
 /// A changed status goes out at the next tick; an unchanged one is repeated this often so the
@@ -40,7 +40,9 @@ pub enum PublishOutcome {
     Inactive,
     /// Not due, or nothing changed.
     Idle,
-    Sent { calls: u32 },
+    Sent {
+        calls: u32,
+    },
     Failed(&'static str),
 }
 
@@ -56,7 +58,10 @@ pub struct Publisher {
 }
 
 fn status_key(report: &crate::remote::payload::StatusReportArgs) -> String {
-    format!("{}|{}|{:?}", report.state, report.level, report.attempts_today)
+    format!(
+        "{}|{}|{:?}",
+        report.state, report.level, report.attempts_today
+    )
 }
 
 impl Publisher {
@@ -81,7 +86,9 @@ impl Publisher {
             self.reset();
             return PublishOutcome::Inactive;
         };
-        let Some(settings) = source.settings() else { return PublishOutcome::Idle };
+        let Some(settings) = source.settings() else {
+            return PublishOutcome::Idle;
+        };
         let in_room = source.in_a_room();
         // A settings change must still reach the server after the last room is left.
         if !in_room && self.pushed_prefs.is_none() {
@@ -91,11 +98,16 @@ impl Publisher {
             Ok(calls) => {
                 self.failures = 0;
                 self.next_due_ms = now_ms + TICK_MS;
-                if calls == 0 { PublishOutcome::Idle } else { PublishOutcome::Sent { calls } }
+                if calls == 0 {
+                    PublishOutcome::Idle
+                } else {
+                    PublishOutcome::Sent { calls }
+                }
             }
             Err(err) => {
                 self.failures = self.failures.saturating_add(1);
-                let backoff = TICK_MS.saturating_mul(1_i64 << self.failures.saturating_sub(1).min(4));
+                let backoff =
+                    TICK_MS.saturating_mul(1_i64 << self.failures.saturating_sub(1).min(4));
                 self.next_due_ms = now_ms + backoff.min(BACKOFF_CAP_MS);
                 PublishOutcome::Failed(err.code())
             }
@@ -127,7 +139,9 @@ impl Publisher {
         if !in_room {
             return Ok(calls);
         }
-        let Some(local) = source.local(now_ms) else { return Ok(calls) };
+        let Some(local) = source.local(now_ms) else {
+            return Ok(calls);
+        };
 
         // 2. State report: on change, or as a keep-alive.
         if let Some(report) = status_report(settings, &local) {
@@ -155,8 +169,10 @@ impl Publisher {
                 continue;
             }
             match api.report_daily(&report) {
-                Ok(()) | Err(RoomError::Rejected(RoomCode::NotShared | RoomCode::SurgeRejected)) => {
-                    self.last_daily.insert(report.day.clone(), (report.study_min, now_ms));
+                Ok(())
+                | Err(RoomError::Rejected(RoomCode::NotShared | RoomCode::SurgeRejected)) => {
+                    self.last_daily
+                        .insert(report.day.clone(), (report.study_min, now_ms));
                     calls += 1;
                 }
                 Err(err) => return Err(err),
@@ -193,7 +209,7 @@ mod tests {
     use super::*;
     use crate::rooms::port::RoomService;
     use crate::rooms::prefs::{LocalDay, LocalPhase};
-    use crate::rooms::testkit::{Person, World, T0};
+    use crate::rooms::testkit::{Person, T0, World};
 
     struct Source {
         api: Option<Arc<dyn RoomApi>>,
@@ -238,13 +254,23 @@ mod tests {
             remaining_sec: 1_800,
             level: 4,
             attempts_today: attempts,
-            days: vec![LocalDay { day: "2026-11-06".into(), study_min, plan_min: 90 }],
+            days: vec![LocalDay {
+                day: "2026-11-06".into(),
+                study_min,
+                plan_min: 90,
+            }],
         }
     }
 
     fn source(person: &Person, settings: FriendSettings, in_room: bool) -> Source {
         let api: Arc<dyn RoomApi> = person.rooms.clone();
-        Source { api: Some(api), settings: Mutex::new(settings), local: Mutex::new(snapshot(0, 10)), in_room, inventory: None }
+        Source {
+            api: Some(api),
+            settings: Mutex::new(settings),
+            local: Mutex::new(snapshot(0, 10)),
+            in_room,
+            inventory: None,
+        }
     }
 
     #[test]
@@ -253,12 +279,23 @@ mod tests {
         let alice = world.person("a@example.test");
         let mut publisher = Publisher::new();
 
-        let signed_out = Source { api: None, ..source(&alice, defaults(), true) };
+        let signed_out = Source {
+            api: None,
+            ..source(&alice, defaults(), true)
+        };
         assert_eq!(publisher.tick(T0, &signed_out), PublishOutcome::Inactive);
 
         let no_room = source(&alice, defaults(), false);
         assert_eq!(publisher.tick(T0, &no_room), PublishOutcome::Inactive);
-        assert!(world.recorder.bodies().iter().all(|(name, _)| name == "token" || name == "verify" || name == "otp"), "{:?}", world.recorder.bodies());
+        assert!(
+            world
+                .recorder
+                .bodies()
+                .iter()
+                .all(|(name, _)| name == "token" || name == "verify" || name == "otp"),
+            "{:?}",
+            world.recorder.bodies()
+        );
     }
 
     #[test]
@@ -270,15 +307,41 @@ mod tests {
         let mut publisher = Publisher::new();
 
         assert_eq!(publisher.tick(T0, &src), PublishOutcome::Sent { calls: 2 });
-        let order: Vec<String> = world.recorder.bodies().into_iter().map(|(name, _)| name).filter(|n| n.contains('_')).collect();
-        assert_eq!(order[order.len() - 2..], ["set_friend_prefs", "report_status"], "settings go before the status");
+        let order: Vec<String> = world
+            .recorder
+            .bodies()
+            .into_iter()
+            .map(|(name, _)| name)
+            .filter(|n| n.contains('_'))
+            .collect();
+        assert_eq!(
+            order[order.len() - 2..],
+            ["set_friend_prefs", "report_status"],
+            "settings go before the status"
+        );
 
-        assert_eq!(publisher.tick(T0 + 1_000, &src), PublishOutcome::Idle, "not due yet");
-        assert_eq!(publisher.tick(T0 + 5_000, &src), PublishOutcome::Idle, "nothing changed");
-        assert_eq!(publisher.tick(T0 + 30_000, &src), PublishOutcome::Sent { calls: 1 }, "keep-alive");
+        assert_eq!(
+            publisher.tick(T0 + 1_000, &src),
+            PublishOutcome::Idle,
+            "not due yet"
+        );
+        assert_eq!(
+            publisher.tick(T0 + 5_000, &src),
+            PublishOutcome::Idle,
+            "nothing changed"
+        );
+        assert_eq!(
+            publisher.tick(T0 + 30_000, &src),
+            PublishOutcome::Sent { calls: 1 },
+            "keep-alive"
+        );
 
         src.local.lock().expect("lock").phase = LocalPhase::Break;
-        assert_eq!(publisher.tick(T0 + 35_000, &src), PublishOutcome::Sent { calls: 1 }, "a state change goes at the next tick");
+        assert_eq!(
+            publisher.tick(T0 + 35_000, &src),
+            PublishOutcome::Sent { calls: 1 },
+            "a state change goes at the next tick"
+        );
     }
 
     #[test]
@@ -290,13 +353,35 @@ mod tests {
         *src.local.lock().expect("lock") = snapshot(6, 75);
         let mut publisher = Publisher::new();
         publisher.tick(T0, &src);
-        assert!(world.recorder.bodies_of("report_daily").is_empty(), "study minutes are private by default");
-        assert!(world.recorder.bodies_of("report_status").iter().all(|b| b.contains("\"p_attempts_today\":null")));
+        assert!(
+            world.recorder.bodies_of("report_daily").is_empty(),
+            "study minutes are private by default"
+        );
+        assert!(
+            world
+                .recorder
+                .bodies_of("report_status")
+                .iter()
+                .all(|b| b.contains("\"p_attempts_today\":null"))
+        );
 
-        *src.settings.lock().expect("lock") = FriendSettings { share_week_time: true, share_attempts: true, ..defaults() };
-        assert!(matches!(publisher.tick(T0 + 5_000, &src), PublishOutcome::Sent { .. }));
+        *src.settings.lock().expect("lock") = FriendSettings {
+            share_week_time: true,
+            share_attempts: true,
+            ..defaults()
+        };
+        assert!(matches!(
+            publisher.tick(T0 + 5_000, &src),
+            PublishOutcome::Sent { .. }
+        ));
         assert_eq!(world.recorder.bodies_of("report_daily").len(), 1);
-        assert!(world.recorder.bodies_of("report_status").last().is_some_and(|b| b.contains("\"p_attempts_today\":6")));
+        assert!(
+            world
+                .recorder
+                .bodies_of("report_status")
+                .last()
+                .is_some_and(|b| b.contains("\"p_attempts_today\":6"))
+        );
     }
 
     #[test]
@@ -304,21 +389,43 @@ mod tests {
         let world = World::new();
         let alice = world.person("a@example.test");
         alice.rooms.create_room("room", "앨리스").expect("room");
-        let src = source(&alice, FriendSettings { distraction_publish: true, ..defaults() }, true);
+        let src = source(
+            &alice,
+            FriendSettings {
+                distraction_publish: true,
+                ..defaults()
+            },
+            true,
+        );
         let mut publisher = Publisher::new();
         publisher.tick(T0, &src);
-        assert!(world.recorder.bodies_of("report_distraction").is_empty(), "the first reading is only a baseline");
+        assert!(
+            world.recorder.bodies_of("report_distraction").is_empty(),
+            "the first reading is only a baseline"
+        );
 
         src.local.lock().expect("lock").attempts_today = 1;
         publisher.tick(T0 + 5_000, &src);
-        assert_eq!(world.recorder.bodies_of("report_distraction"), ["{}"], "the body is empty: no app, no count");
+        assert_eq!(
+            world.recorder.bodies_of("report_distraction"),
+            ["{}"],
+            "the body is empty: no app, no count"
+        );
         publisher.tick(T0 + 10_000, &src);
-        assert_eq!(world.recorder.bodies_of("report_distraction").len(), 1, "no new attempt, no new notice");
+        assert_eq!(
+            world.recorder.bodies_of("report_distraction").len(),
+            1,
+            "no new attempt, no new notice"
+        );
 
         *src.settings.lock().expect("lock") = defaults();
         src.local.lock().expect("lock").attempts_today = 2;
         publisher.tick(T0 + 15_000, &src);
-        assert_eq!(world.recorder.bodies_of("report_distraction").len(), 1, "publishing is off");
+        assert_eq!(
+            world.recorder.bodies_of("report_distraction").len(),
+            1,
+            "publishing is off"
+        );
     }
 
     #[test]
@@ -342,7 +449,10 @@ mod tests {
         assert_eq!(waits, [5_000, 10_000, 20_000, 40_000, 60_000]);
         let at = failed_at[5];
         world.backend.set_outage(false);
-        assert!(matches!(publisher.tick(at + 60_000, &src), PublishOutcome::Sent { .. }));
+        assert!(matches!(
+            publisher.tick(at + 60_000, &src),
+            PublishOutcome::Sent { .. }
+        ));
         assert_eq!(publisher.consecutive_failures(), 0);
     }
 
@@ -351,7 +461,14 @@ mod tests {
         let world = World::new();
         let alice = world.person("a@example.test");
         let room = alice.rooms.create_room("room", "앨리스").expect("room");
-        let mut src = source(&alice, FriendSettings { share_week_time: true, ..defaults() }, true);
+        let mut src = source(
+            &alice,
+            FriendSettings {
+                share_week_time: true,
+                ..defaults()
+            },
+            true,
+        );
         let mut publisher = Publisher::new();
         publisher.tick(T0, &src);
         assert_eq!(world.recorder.bodies_of("report_daily").len(), 1);
@@ -359,8 +476,17 @@ mod tests {
         alice.rooms.leave_room(&room).expect("leave");
         src.in_room = false;
         *src.settings.lock().expect("lock") = defaults();
-        assert!(matches!(publisher.tick(T0 + 5_000, &src), PublishOutcome::Sent { calls: 1 }));
-        assert!(world.recorder.bodies_of("set_friend_prefs").last().is_some_and(|b| b.contains("\"p_share_week_time\":false")));
+        assert!(matches!(
+            publisher.tick(T0 + 5_000, &src),
+            PublishOutcome::Sent { calls: 1 }
+        ));
+        assert!(
+            world
+                .recorder
+                .bodies_of("set_friend_prefs")
+                .last()
+                .is_some_and(|b| b.contains("\"p_share_week_time\":false"))
+        );
     }
 
     #[test]
@@ -369,16 +495,29 @@ mod tests {
         let alice = world.person("a@example.test");
         alice.rooms.create_room("room", "앨리스").expect("room");
         let mut src = source(&alice, defaults(), true);
-        src.inventory = Some(InventoryPublicArgs { species: "fox".into(), hat: Some("hat_beanie".into()), top: None, accessory: None, hand: None });
+        src.inventory = Some(InventoryPublicArgs {
+            species: "fox".into(),
+            hat: Some("hat_beanie".into()),
+            top: None,
+            accessory: None,
+            hand: None,
+        });
         let mut publisher = Publisher::new();
         publisher.tick(T0, &src);
         publisher.tick(T0 + 5_000, &src);
         assert_eq!(world.recorder.bodies_of("set_inventory_public").len(), 1);
 
-        *src.settings.lock().expect("lock") = FriendSettings { share_level: false, ..defaults() };
+        *src.settings.lock().expect("lock") = FriendSettings {
+            share_level: false,
+            ..defaults()
+        };
         publisher.tick(T0 + 10_000, &src);
         *src.settings.lock().expect("lock") = defaults();
         publisher.tick(T0 + 15_000, &src);
-        assert_eq!(world.recorder.bodies_of("set_inventory_public").len(), 2, "re-sent after being switched back on");
+        assert_eq!(
+            world.recorder.bodies_of("set_inventory_public").len(),
+            2,
+            "re-sent after being switched back on"
+        );
     }
 }

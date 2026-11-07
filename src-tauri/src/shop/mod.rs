@@ -18,9 +18,9 @@ use serde::Serialize;
 use crate::character::{self, CharacterView, Equipped};
 use crate::error::{AppError, AppResult};
 use crate::points::rewards::REASON_SHOP_PURCHASE;
+use crate::store;
 use crate::store::character as char_repo;
 use crate::store::shop as repo;
-use crate::store;
 use items::{Achievement, Item, ItemKind, Slot, Source};
 
 /// Days in a row at the streak threshold for the scarf, and right answers for the mortarboard.
@@ -30,9 +30,14 @@ pub const QUIZ_ACHIEVEMENT_CORRECT: i64 = 100;
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum PurchaseOutcome {
-    Purchased { balance: i64 },
+    Purchased {
+        balance: i64,
+    },
     AlreadyOwned,
-    InsufficientPoints { balance: i64, price: i64 },
+    InsufficientPoints {
+        balance: i64,
+        price: i64,
+    },
     /// Starter and achievement items are not for sale.
     NotForSale,
 }
@@ -75,12 +80,21 @@ pub fn earned_achievements(streak_days: i64, quiz_correct: i64) -> Vec<Achieveme
 
 /// Grants the items of every earned achievement not owned yet; returns the new item ids. Once
 /// granted an item stays, even if the streak later breaks.
-pub fn grant_achievements(conn: &Connection, streak_days: i64, quiz_correct: i64, now_ms: i64) -> AppResult<Vec<String>> {
+pub fn grant_achievements(
+    conn: &Connection,
+    streak_days: i64,
+    quiz_correct: i64,
+    now_ms: i64,
+) -> AppResult<Vec<String>> {
     let earned = earned_achievements(streak_days, quiz_correct);
     let mut granted = Vec::new();
     for item in &items::catalog()?.items {
-        let Some(achievement) = item.achievement else { continue };
-        if earned.contains(&achievement) && repo::insert_inventory(conn, &item.id, Source::Achievement.as_str(), now_ms, None)? {
+        let Some(achievement) = item.achievement else {
+            continue;
+        };
+        if earned.contains(&achievement)
+            && repo::insert_inventory(conn, &item.id, Source::Achievement.as_str(), now_ms, None)?
+        {
             granted.push(item.id.clone());
         }
     }
@@ -97,7 +111,9 @@ pub fn grant_from_records(conn: &mut Connection, now_ms: i64) -> AppResult<Vec<S
 /// Whether an owned character item unlocks `species`.
 pub fn owns_species(conn: &Connection, species: &str) -> AppResult<bool> {
     for row in repo::list_owned(conn)? {
-        if items::item(&row.item_id)?.is_some_and(|i| i.kind == ItemKind::Character && i.species.as_deref() == Some(species)) {
+        if items::item(&row.item_id)?
+            .is_some_and(|i| i.kind == ItemKind::Character && i.species.as_deref() == Some(species))
+        {
             return Ok(true);
         }
     }
@@ -115,22 +131,32 @@ pub fn purchase(conn: &mut Connection, item_id: &str, now_ms: i64) -> AppResult<
     }
     let (balance, _) = store::ledger_sums(&tx)?;
     if balance < item.price {
-        return Ok(PurchaseOutcome::InsufficientPoints { balance, price: item.price });
+        return Ok(PurchaseOutcome::InsufficientPoints {
+            balance,
+            price: item.price,
+        });
     }
     let n = repo::purchase_count(&tx, &item.id)? + 1;
     let ref_key = format!("buy:{}:{n}", item.id);
     if !store::insert_ledger_entry(&tx, now_ms, -item.price, REASON_SHOP_PURCHASE, &ref_key)? {
-        return Err(AppError::Internal("purchase ledger key already used".into()));
+        return Err(AppError::Internal(
+            "purchase ledger key already used".into(),
+        ));
     }
     repo::insert_inventory(&tx, &item.id, Source::Shop.as_str(), now_ms, Some(&ref_key))?;
     tx.commit()?;
     tracing::info!(event = "shop_purchase", price = item.price);
-    Ok(PurchaseOutcome::Purchased { balance: balance - item.price })
+    Ok(PurchaseOutcome::Purchased {
+        balance: balance - item.price,
+    })
 }
 
 pub fn shop_view(conn: &Connection) -> AppResult<ShopView> {
     let (balance, _) = store::ledger_sums(conn)?;
-    let owned: Vec<String> = repo::list_owned(conn)?.into_iter().map(|r| r.item_id).collect();
+    let owned: Vec<String> = repo::list_owned(conn)?
+        .into_iter()
+        .map(|r| r.item_id)
+        .collect();
     let equipped = Equipped::from_rows(&char_repo::wardrobe(conn)?);
     let worn: Vec<&str> = Slot::ALL.iter().filter_map(|s| equipped.get(*s)).collect();
     let items = items::catalog()?
@@ -169,7 +195,10 @@ pub fn equip(conn: &mut Connection, item_id: &str) -> AppResult<CharacterView> {
     match (item.kind, item.slot) {
         (ItemKind::Clothing, Some(slot)) => char_repo::set_wardrobe(&tx, slot.as_str(), &item.id)?,
         (ItemKind::Character, _) => {
-            let species = item.species.as_deref().ok_or_else(|| AppError::Internal("character item has no species".into()))?;
+            let species = item
+                .species
+                .as_deref()
+                .ok_or_else(|| AppError::Internal("character item has no species".into()))?;
             char_repo::set_species(&tx, species)?;
         }
         _ => return Err(AppError::Invalid("item cannot be worn".into())),

@@ -6,11 +6,11 @@ use std::sync::Arc;
 
 use tauri::{AppHandle, Emitter, State};
 
-use super::{lock_db, AppState};
+use super::{AppState, lock_db};
 use crate::clock::now_ms;
 use crate::error::{AppError, AppResult};
-use crate::quiz::config::{update_setting, QuizConfig, QuizSettingKey};
-use crate::quiz::gate::{CardResult, QuizCard, CARD_EVENT};
+use crate::quiz::config::{QuizConfig, QuizSettingKey, update_setting};
+use crate::quiz::gate::{CARD_EVENT, CardResult, QuizCard};
 use crate::quiz::service::{GenerateReport, QuizService};
 use crate::settings::{SettingValue, UpdateOutcome};
 use crate::store::quiz::BankStats;
@@ -29,7 +29,11 @@ pub fn get_quiz_settings(state: State<'_, AppState>) -> AppResult<QuizConfig> {
 }
 
 #[tauri::command]
-pub fn update_quiz_setting(state: State<'_, AppState>, key: QuizSettingKey, value: SettingValue) -> AppResult<UpdateOutcome> {
+pub fn update_quiz_setting(
+    state: State<'_, AppState>,
+    key: QuizSettingKey,
+    value: SettingValue,
+) -> AppResult<UpdateOutcome> {
     let mut conn = lock_db(&state.db)?;
     update_setting(&mut conn, key, value, now_ms()?)
 }
@@ -41,7 +45,10 @@ pub fn get_quiz_stats(state: State<'_, AppState>) -> AppResult<BankStats> {
 
 /// Writes questions for the subject's pages that have none. Async: it may call the model.
 #[tauri::command]
-pub async fn generate_quiz_bank(state: State<'_, AppState>, subject_id: i64) -> AppResult<GenerateReport> {
+pub async fn generate_quiz_bank(
+    state: State<'_, AppState>,
+    subject_id: i64,
+) -> AppResult<GenerateReport> {
     let quiz: Arc<QuizService> = Arc::clone(&state.quiz);
     tauri::async_runtime::spawn_blocking(move || quiz.generate_for_subject(subject_id))
         .await
@@ -55,8 +62,14 @@ pub fn flag_quiz_item(state: State<'_, AppState>, item_id: i64, reason: String) 
 
 /// Practice questions on request.
 #[tauri::command]
-pub fn start_review_quiz(state: State<'_, AppState>, subject_id: Option<i64>, count: Option<u32>) -> AppResult<Option<QuizCard>> {
-    state.quiz.review_card(subject_id, usize::try_from(count.unwrap_or(1)).unwrap_or(1))
+pub fn start_review_quiz(
+    state: State<'_, AppState>,
+    subject_id: Option<i64>,
+    count: Option<u32>,
+) -> AppResult<Option<QuizCard>> {
+    state
+        .quiz
+        .review_card(subject_id, usize::try_from(count.unwrap_or(1)).unwrap_or(1))
 }
 
 /// The quiz of the run that just finished, if any (once per run).
@@ -78,6 +91,11 @@ pub fn get_checkin_quiz(state: State<'_, AppState>) -> AppResult<Option<QuizCard
 
 /// Grades a card. `skip` is for the session-end quiz (recorded) or dismisses any other card.
 #[tauri::command]
-pub fn answer_quiz_card(state: State<'_, AppState>, card_id: u64, answers: Vec<String>, skip: bool) -> AppResult<Option<CardResult>> {
+pub fn answer_quiz_card(
+    state: State<'_, AppState>,
+    card_id: u64,
+    answers: Vec<String>,
+    skip: bool,
+) -> AppResult<Option<CardResult>> {
     state.quiz.answer_card(card_id, &answers, skip)
 }

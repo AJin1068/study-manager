@@ -10,10 +10,10 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
+use super::Clock;
 use super::http::{HttpRequest, HttpResponse, HttpTransport, Method, RequestTag, TransportError};
 use super::payload::{Body, OtpRequest, OtpVerify, RefreshRequest};
 use super::secrets::{SecretError, SecretName, SecretStore};
-use super::Clock;
 use crate::error::AppError;
 
 /// Wrong codes tolerated before the client stops asking the server for a while.
@@ -116,10 +116,17 @@ pub fn email_domain(email: &str) -> &str {
 pub fn validate_email(email: &str) -> Result<(), AuthError> {
     let ok = email.len() <= 254
         && email.split_once('@').is_some_and(|(local, domain)| {
-            !local.is_empty() && domain.contains('.') && !domain.starts_with('.') && !domain.ends_with('.')
+            !local.is_empty()
+                && domain.contains('.')
+                && !domain.starts_with('.')
+                && !domain.ends_with('.')
         })
         && !email.chars().any(|c| c.is_whitespace() || c.is_control());
-    if ok { Ok(()) } else { Err(AuthError::InvalidEmail) }
+    if ok {
+        Ok(())
+    } else {
+        Err(AuthError::InvalidEmail)
+    }
 }
 
 // ---- real adapter: Supabase GoTrue ----
@@ -145,12 +152,26 @@ struct TokenUser {
 
 impl SupabaseAuth {
     pub fn new(endpoint: &str, anon_key: &str, transport: Arc<dyn HttpTransport>) -> Self {
-        Self { endpoint: endpoint.trim_end_matches('/').to_string(), anon_key: anon_key.to_string(), transport }
+        Self {
+            endpoint: endpoint.trim_end_matches('/').to_string(),
+            anon_key: anon_key.to_string(),
+            transport,
+        }
     }
 
-    fn call(&self, kind: &'static str, path: &str, body: Option<Body>, bearer: Option<&str>) -> Result<HttpResponse, AuthError> {
-        let tag = RequestTag { port: "supabase", kind };
-        let mut request = HttpRequest::new(tag, Method::Post, format!("{}{}", self.endpoint, path)).header("apikey", &self.anon_key);
+    fn call(
+        &self,
+        kind: &'static str,
+        path: &str,
+        body: Option<Body>,
+        bearer: Option<&str>,
+    ) -> Result<HttpResponse, AuthError> {
+        let tag = RequestTag {
+            port: "supabase",
+            kind,
+        };
+        let mut request = HttpRequest::new(tag, Method::Post, format!("{}{}", self.endpoint, path))
+            .header("apikey", &self.anon_key);
         if let Some(token) = bearer {
             request = request.header("authorization", &format!("Bearer {token}"));
         }
@@ -161,7 +182,8 @@ impl SupabaseAuth {
     }
 
     fn tokens(response: &HttpResponse) -> Result<AuthTokens, AuthError> {
-        let parsed: TokenResponse = serde_json::from_slice(&response.body).map_err(|_| AuthError::Decode)?;
+        let parsed: TokenResponse =
+            serde_json::from_slice(&response.body).map_err(|_| AuthError::Decode)?;
         Ok(AuthTokens {
             access_token: parsed.access_token,
             refresh_token: parsed.refresh_token,
@@ -172,9 +194,13 @@ impl SupabaseAuth {
 
     fn common_failure(response: &HttpResponse) -> AuthError {
         if response.status == 429 {
-            AuthError::RateLimited { retry_after_ms: response.retry_after_ms().unwrap_or(30_000) }
+            AuthError::RateLimited {
+                retry_after_ms: response.retry_after_ms().unwrap_or(30_000),
+            }
         } else {
-            AuthError::Server { status: response.status }
+            AuthError::Server {
+                status: response.status,
+            }
         }
     }
 }
@@ -182,7 +208,11 @@ impl SupabaseAuth {
 impl AuthProvider for SupabaseAuth {
     fn request_otp(&self, email: &str) -> Result<(), AuthError> {
         validate_email(email)?;
-        let body = Body::from_payload(&OtpRequest { email: email.to_string(), create_user: true }).map_err(|_| AuthError::Decode)?;
+        let body = Body::from_payload(&OtpRequest {
+            email: email.to_string(),
+            create_user: true,
+        })
+        .map_err(|_| AuthError::Decode)?;
         let response = self.call("auth_otp", "/auth/v1/otp", Some(body), None)?;
         match response.status {
             200..=299 => Ok(()),
@@ -192,7 +222,11 @@ impl AuthProvider for SupabaseAuth {
     }
 
     fn verify_otp(&self, email: &str, code: &str) -> Result<AuthTokens, AuthError> {
-        let payload = OtpVerify { email: email.to_string(), token: code.to_string(), kind: "email" };
+        let payload = OtpVerify {
+            email: email.to_string(),
+            token: code.to_string(),
+            kind: "email",
+        };
         let body = Body::from_payload(&payload).map_err(|_| AuthError::Decode)?;
         let response = self.call("auth_verify", "/auth/v1/verify", Some(body), None)?;
         match response.status {
@@ -203,8 +237,16 @@ impl AuthProvider for SupabaseAuth {
     }
 
     fn refresh(&self, refresh_token: &str) -> Result<AuthTokens, AuthError> {
-        let body = Body::from_payload(&RefreshRequest { refresh_token: refresh_token.to_string() }).map_err(|_| AuthError::Decode)?;
-        let response = self.call("auth_refresh", "/auth/v1/token?grant_type=refresh_token", Some(body), None)?;
+        let body = Body::from_payload(&RefreshRequest {
+            refresh_token: refresh_token.to_string(),
+        })
+        .map_err(|_| AuthError::Decode)?;
+        let response = self.call(
+            "auth_refresh",
+            "/auth/v1/token?grant_type=refresh_token",
+            Some(body),
+            None,
+        )?;
         match response.status {
             200..=299 => Self::tokens(&response),
             400 | 401 | 403 => Err(AuthError::Expired),
@@ -305,7 +347,11 @@ impl AuthService {
     pub fn request_otp(&self, email: &str) -> Result<(), AuthError> {
         validate_email(email)?;
         let result = self.provider.request_otp(email);
-        tracing::info!(event = "auth_request_otp", domain = email_domain(email), ok = result.is_ok());
+        tracing::info!(
+            event = "auth_request_otp",
+            domain = email_domain(email),
+            ok = result.is_ok()
+        );
         result
     }
 
@@ -317,12 +363,22 @@ impl AuthService {
         {
             let state = self.lock();
             if now < state.cooldown_until_ms {
-                return Err(AuthError::Cooldown { until_ms: state.cooldown_until_ms });
+                return Err(AuthError::Cooldown {
+                    until_ms: state.cooldown_until_ms,
+                });
             }
         }
         let wellformed = code.len() == 6 && code.chars().all(|c| c.is_ascii_digit());
-        let outcome = if wellformed { self.provider.verify_otp(email, code) } else { Err(AuthError::InvalidCode) };
-        tracing::info!(event = "auth_verify", domain = email_domain(email), ok = outcome.is_ok());
+        let outcome = if wellformed {
+            self.provider.verify_otp(email, code)
+        } else {
+            Err(AuthError::InvalidCode)
+        };
+        tracing::info!(
+            event = "auth_verify",
+            domain = email_domain(email),
+            ok = outcome.is_ok()
+        );
         match outcome {
             Ok(tokens) => {
                 self.secrets
@@ -366,7 +422,9 @@ impl AuthService {
         match self.provider.refresh(refresh.expose()) {
             Ok(tokens) => {
                 // Refresh tokens rotate: the new one replaces the old before the old is forgotten.
-                self.secrets.set(SecretName::SupabaseRefreshToken, &tokens.refresh_token).map_err(AuthError::Secret)?;
+                self.secrets
+                    .set(SecretName::SupabaseRefreshToken, &tokens.refresh_token)
+                    .map_err(AuthError::Secret)?;
                 let mut state = self.lock();
                 state.expired = false;
                 state.user_id = Some(tokens.user_id);
@@ -381,7 +439,10 @@ impl AuthService {
                 let mut state = self.lock();
                 state.expired = true;
                 state.access = None;
-                tracing::warn!(event = "auth_expired", "stored login was rejected; sign in again");
+                tracing::warn!(
+                    event = "auth_expired",
+                    "stored login was rejected; sign in again"
+                );
                 Err(AuthError::Expired)
             }
             Err(other) => Err(other),
@@ -405,16 +466,25 @@ impl AuthService {
     /// the `signed_in` flag stops the workers.
     pub fn sign_out(&self, device_id: &str) -> Result<SignOutReport, AuthError> {
         let access = self.access_token().ok();
-        let mut report = SignOutReport { device_removed: false, server_session_ended: false };
+        let mut report = SignOutReport {
+            device_removed: false,
+            server_session_ended: false,
+        };
         if let Some(token) = access.as_deref() {
             report.device_removed = self.devices.remove_device(token, device_id).is_ok();
             report.server_session_ended = self.provider.sign_out(token).is_ok();
         }
-        self.secrets.delete(SecretName::SupabaseRefreshToken).map_err(AuthError::Secret)?;
+        self.secrets
+            .delete(SecretName::SupabaseRefreshToken)
+            .map_err(AuthError::Secret)?;
         let mut state = self.lock();
         *state = AuthState::default();
         self.signed_in.store(false, Ordering::SeqCst);
-        tracing::info!(event = "auth_sign_out", device_removed = report.device_removed, session_ended = report.server_session_ended);
+        tracing::info!(
+            event = "auth_sign_out",
+            device_removed = report.device_removed,
+            session_ended = report.server_session_ended
+        );
         Ok(report)
     }
 }
@@ -447,10 +517,10 @@ impl AccessTokenSource for AuthService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::remote::ManualClock;
     use crate::remote::fake::FakeBackend;
     use crate::remote::http::{HostPolicy, ScriptedTransport};
     use crate::remote::secrets::MemorySecretStore;
-    use crate::remote::ManualClock;
     use crate::testutil::capture_logs;
 
     struct Rig {
@@ -464,13 +534,25 @@ mod tests {
         let clock = Arc::new(ManualClock::new(1_000_000));
         let backend = Arc::new(FakeBackend::new(clock.clone()));
         let secrets = Arc::new(MemorySecretStore::in_memory());
-        let service = AuthService::new(backend.auth(), secrets.clone(), backend.clone(), clock.clone());
-        Rig { backend, clock, secrets, service }
+        let service = AuthService::new(
+            backend.auth(),
+            secrets.clone(),
+            backend.clone(),
+            clock.clone(),
+        );
+        Rig {
+            backend,
+            clock,
+            secrets,
+            service,
+        }
     }
 
     fn sign_in(rig: &Rig) -> String {
         rig.service.request_otp("person@example.test").expect("otp");
-        rig.service.verify_otp("person@example.test", "000000").expect("verify")
+        rig.service
+            .verify_otp("person@example.test", "000000")
+            .expect("verify")
     }
 
     #[test]
@@ -478,10 +560,19 @@ mod tests {
         let rig = rig();
         let user = sign_in(&rig);
         assert!(rig.service.is_signed_in());
-        let stored = rig.secrets.get(SecretName::SupabaseRefreshToken).expect("get").expect("stored");
+        let stored = rig
+            .secrets
+            .get(SecretName::SupabaseRefreshToken)
+            .expect("get")
+            .expect("stored");
         assert!(stored.expose().starts_with("fake-refresh-"));
         // A new service over the same secret store resumes without a code.
-        let resumed = AuthService::new(rig.backend.auth(), rig.secrets.clone(), rig.backend.clone(), rig.clock.clone());
+        let resumed = AuthService::new(
+            rig.backend.auth(),
+            rig.secrets.clone(),
+            rig.backend.clone(),
+            rig.clock.clone(),
+        );
         assert!(resumed.is_signed_in());
         assert!(!resumed.access_token().expect("renewed").is_empty());
         assert_eq!(resumed.status().user_id.as_deref(), Some(user.as_str()));
@@ -492,7 +583,11 @@ mod tests {
         let rig = rig();
         sign_in(&rig);
         let first = rig.service.access_token().expect("token");
-        assert_eq!(rig.service.access_token().expect("cached"), first, "valid token is reused");
+        assert_eq!(
+            rig.service.access_token().expect("cached"),
+            first,
+            "valid token is reused"
+        );
         rig.clock.advance(3_600_000 - EXPIRY_SKEW_MS + 1);
         let second = rig.service.access_token().expect("renewed");
         assert_ne!(second, first);
@@ -510,7 +605,9 @@ mod tests {
         assert!(!status.signed_in);
         assert_eq!(status.degraded_code, Some("auth_expired"));
         // Signing in again clears the degraded state.
-        rig.service.verify_otp("person@example.test", "000000").expect("sign in again");
+        rig.service
+            .verify_otp("person@example.test", "000000")
+            .expect("sign in again");
         assert_eq!(rig.service.status().degraded_code, None);
     }
 
@@ -520,8 +617,15 @@ mod tests {
         sign_in(&rig);
         rig.clock.advance(3_600_000);
         rig.backend.set_outage(true);
-        assert!(matches!(rig.service.access_token(), Err(AuthError::Network(_))));
-        assert_eq!(rig.service.status().degraded_code, None, "offline is not a reason to ask for a new login");
+        assert!(matches!(
+            rig.service.access_token(),
+            Err(AuthError::Network(_))
+        ));
+        assert_eq!(
+            rig.service.status().degraded_code,
+            None,
+            "offline is not a reason to ask for a new login"
+        );
         rig.backend.set_outage(false);
         assert!(rig.service.access_token().is_ok());
     }
@@ -531,21 +635,38 @@ mod tests {
         let rig = rig();
         rig.service.request_otp("person@example.test").expect("otp");
         for _ in 0..3 {
-            assert_eq!(rig.service.verify_otp("person@example.test", "111111"), Err(AuthError::InvalidCode));
+            assert_eq!(
+                rig.service.verify_otp("person@example.test", "111111"),
+                Err(AuthError::InvalidCode)
+            );
         }
         let calls = rig.backend.verify_calls();
         let until = 1_000_000 + CODE_COOLDOWN_MS;
-        assert_eq!(rig.service.verify_otp("person@example.test", "000000"), Err(AuthError::Cooldown { until_ms: until }));
-        assert_eq!(rig.backend.verify_calls(), calls, "the server is not asked during the cooldown");
+        assert_eq!(
+            rig.service.verify_otp("person@example.test", "000000"),
+            Err(AuthError::Cooldown { until_ms: until })
+        );
+        assert_eq!(
+            rig.backend.verify_calls(),
+            calls,
+            "the server is not asked during the cooldown"
+        );
         assert_eq!(rig.service.status().cooldown_until_ms, Some(until));
         rig.clock.advance(CODE_COOLDOWN_MS);
-        assert!(rig.service.verify_otp("person@example.test", "000000").is_ok());
+        assert!(
+            rig.service
+                .verify_otp("person@example.test", "000000")
+                .is_ok()
+        );
     }
 
     #[test]
     fn malformed_code_counts_as_wrong_without_a_server_call() {
         let rig = rig();
-        assert_eq!(rig.service.verify_otp("person@example.test", "12"), Err(AuthError::InvalidCode));
+        assert_eq!(
+            rig.service.verify_otp("person@example.test", "12"),
+            Err(AuthError::InvalidCode)
+        );
         assert_eq!(rig.backend.verify_calls(), 0);
     }
 
@@ -559,7 +680,13 @@ mod tests {
         assert!(flag.load(Ordering::SeqCst));
 
         let report = rig.service.sign_out("device-1").expect("sign out");
-        assert_eq!(report, SignOutReport { device_removed: true, server_session_ended: true });
+        assert_eq!(
+            report,
+            SignOutReport {
+                device_removed: true,
+                server_session_ended: true
+            }
+        );
         assert!(!flag.load(Ordering::SeqCst), "workers see the stop signal");
         assert_eq!(rig.secrets.get(SecretName::SupabaseRefreshToken), Ok(None));
         assert_eq!(rig.backend.device_count(), 0);
@@ -572,8 +699,17 @@ mod tests {
         let rig = rig();
         sign_in(&rig);
         rig.backend.set_outage(true);
-        let report = rig.service.sign_out("device-1").expect("local sign-out still works");
-        assert_eq!(report, SignOutReport { device_removed: false, server_session_ended: false });
+        let report = rig
+            .service
+            .sign_out("device-1")
+            .expect("local sign-out still works");
+        assert_eq!(
+            report,
+            SignOutReport {
+                device_removed: false,
+                server_session_ended: false
+            }
+        );
         assert_eq!(rig.secrets.get(SecretName::SupabaseRefreshToken), Ok(None));
         assert!(!rig.service.is_signed_in());
     }
@@ -590,7 +726,10 @@ mod tests {
         assert!(logs.contains("example.test"), "{logs}");
         assert!(!logs.contains("person@"), "{logs}");
         assert!(!logs.contains("000000"), "{logs}");
-        assert!(!logs.contains("fake-access") && !logs.contains("fake-refresh"), "{logs}");
+        assert!(
+            !logs.contains("fake-access") && !logs.contains("fake-refresh"),
+            "{logs}"
+        );
     }
 
     #[test]
@@ -606,8 +745,15 @@ mod tests {
     // ---- real adapter against recorded responses ----
 
     fn scripted(fixture: &str) -> (Arc<ScriptedTransport>, SupabaseAuth) {
-        let transport = Arc::new(ScriptedTransport::from_fixture(HostPolicy::configured(["proj.supabase.co"]), fixture).expect("fixture"));
-        let auth = SupabaseAuth::new("https://proj.supabase.co/", "anon-public-key", transport.clone());
+        let transport = Arc::new(
+            ScriptedTransport::from_fixture(HostPolicy::configured(["proj.supabase.co"]), fixture)
+                .expect("fixture"),
+        );
+        let auth = SupabaseAuth::new(
+            "https://proj.supabase.co/",
+            "anon-public-key",
+            transport.clone(),
+        );
         (transport, auth)
     }
 
@@ -615,8 +761,13 @@ mod tests {
     fn real_adapter_builds_gotrue_requests_and_parses_tokens() {
         let (transport, auth) = scripted(include_str!("../../../fixtures/http/auth-success.json"));
         auth.request_otp("person@example.test").expect("otp");
-        let tokens = auth.verify_otp("person@example.test", "123456").expect("verify");
-        assert_eq!((tokens.user_id.as_str(), tokens.expires_in_sec), ("8d2e5c1a-0000-4000-8000-000000000001", 3600));
+        let tokens = auth
+            .verify_otp("person@example.test", "123456")
+            .expect("verify");
+        assert_eq!(
+            (tokens.user_id.as_str(), tokens.expires_in_sec),
+            ("8d2e5c1a-0000-4000-8000-000000000001", 3600)
+        );
         auth.refresh("old-refresh").expect("refresh");
         auth.sign_out(&tokens.access_token).expect("logout");
 
@@ -631,29 +782,64 @@ mod tests {
                 "https://proj.supabase.co/auth/v1/logout",
             ]
         );
-        assert!(seen.iter().all(|r| r.headers.iter().any(|(k, v)| k == "apikey" && v == "anon-public-key")));
+        assert!(seen.iter().all(|r| {
+            r.headers
+                .iter()
+                .any(|(k, v)| k == "apikey" && v == "anon-public-key")
+        }));
         let verify_body: serde_json::Value = serde_json::from_slice(&seen[1].body).expect("json");
-        assert_eq!(verify_body, serde_json::json!({"email": "person@example.test", "token": "123456", "type": "email"}));
-        assert!(seen[3].headers.iter().any(|(k, v)| k == "authorization" && v.starts_with("Bearer ")));
+        assert_eq!(
+            verify_body,
+            serde_json::json!({"email": "person@example.test", "token": "123456", "type": "email"})
+        );
+        assert!(
+            seen[3]
+                .headers
+                .iter()
+                .any(|(k, v)| k == "authorization" && v.starts_with("Bearer "))
+        );
     }
 
     #[test]
     fn real_adapter_maps_failures() {
         let (_, auth) = scripted(include_str!("../../../fixtures/http/auth-failures.json"));
         // Order follows the fixture file.
-        assert_eq!(auth.verify_otp("person@example.test", "123456"), Err(AuthError::InvalidCode));
+        assert_eq!(
+            auth.verify_otp("person@example.test", "123456"),
+            Err(AuthError::InvalidCode)
+        );
         assert_eq!(auth.refresh("r"), Err(AuthError::Expired));
-        assert_eq!(auth.request_otp("person@example.test"), Err(AuthError::RateLimited { retry_after_ms: 42_000 }));
-        assert_eq!(auth.verify_otp("person@example.test", "123456"), Err(AuthError::Server { status: 503 }));
-        assert_eq!(auth.refresh("r"), Err(AuthError::Network(TransportError::Timeout)));
-        assert_eq!(auth.verify_otp("person@example.test", "123456"), Err(AuthError::Decode));
+        assert_eq!(
+            auth.request_otp("person@example.test"),
+            Err(AuthError::RateLimited {
+                retry_after_ms: 42_000
+            })
+        );
+        assert_eq!(
+            auth.verify_otp("person@example.test", "123456"),
+            Err(AuthError::Server { status: 503 })
+        );
+        assert_eq!(
+            auth.refresh("r"),
+            Err(AuthError::Network(TransportError::Timeout))
+        );
+        assert_eq!(
+            auth.verify_otp("person@example.test", "123456"),
+            Err(AuthError::Decode)
+        );
     }
 
     #[test]
     fn real_adapter_refuses_a_foreign_host_before_sending() {
-        let transport = Arc::new(ScriptedTransport::new(HostPolicy::configured(["proj.supabase.co"]), vec![]));
+        let transport = Arc::new(ScriptedTransport::new(
+            HostPolicy::configured(["proj.supabase.co"]),
+            vec![],
+        ));
         let auth = SupabaseAuth::new("https://evil.example.com", "anon", transport.clone());
-        assert_eq!(auth.request_otp("person@example.test"), Err(AuthError::Network(TransportError::HostDenied)));
+        assert_eq!(
+            auth.request_otp("person@example.test"),
+            Err(AuthError::Network(TransportError::HostDenied))
+        );
         assert!(transport.requests().is_empty());
     }
 }

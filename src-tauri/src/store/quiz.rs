@@ -2,7 +2,7 @@
 //! counters. Answers the user gave are not stored anywhere: an attempt row says right, wrong, or
 //! skipped.
 
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
@@ -63,17 +63,27 @@ pub fn insert_item(conn: &Connection, page_id: i64, item: &NewItem, at_ms: i64) 
 
 #[cfg(test)]
 pub fn count_for_page(conn: &Connection, page_id: i64) -> AppResult<i64> {
-    Ok(conn.query_row("SELECT COUNT(*) FROM quiz_items WHERE page_id = ?1", params![page_id], |r| r.get(0))?)
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM quiz_items WHERE page_id = ?1",
+        params![page_id],
+        |r| r.get(0),
+    )?)
 }
 
 pub fn get_item(conn: &Connection, id: i64) -> AppResult<Option<QuizItem>> {
     let sql = format!("SELECT {ITEM_COLUMNS} FROM quiz_items i WHERE i.id = ?1");
-    conn.query_row(&sql, params![id], |row| Ok(item_from(row))).optional()?.transpose()
+    conn.query_row(&sql, params![id], |row| Ok(item_from(row)))
+        .optional()?
+        .transpose()
 }
 
 pub fn bank_stats(conn: &Connection) -> AppResult<BankStats> {
     let drawable = drawable_count(conn)?;
-    let reported = conn.query_row("SELECT COUNT(*) FROM quiz_items WHERE disabled_at_ms IS NOT NULL", [], |r| r.get(0))?;
+    let reported = conn.query_row(
+        "SELECT COUNT(*) FROM quiz_items WHERE disabled_at_ms IS NOT NULL",
+        [],
+        |r| r.get(0),
+    )?;
     Ok(BankStats { drawable, reported })
 }
 
@@ -97,13 +107,22 @@ pub fn candidates(conn: &Connection, subject_id: Option<i64>) -> AppResult<Vec<C
     );
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params![subject_id], |row| {
-        let counts = (row.get::<_, i64>(6)?, row.get::<_, i64>(7)?, row.get::<_, Option<i64>>(8)?);
+        let counts = (
+            row.get::<_, i64>(6)?,
+            row.get::<_, i64>(7)?,
+            row.get::<_, Option<i64>>(8)?,
+        );
         Ok((item_from(row), counts))
     })?;
     let mut out = Vec::new();
     for row in rows {
         let (item, (total, correct, last)) = row?;
-        out.push(Candidate { item: item?, page_total: total, page_correct: correct, last_asked_ms: last });
+        out.push(Candidate {
+            item: item?,
+            page_total: total,
+            page_correct: correct,
+            last_asked_ms: last,
+        });
     }
     Ok(out)
 }
@@ -131,15 +150,25 @@ pub fn flag_item(conn: &Connection, item_id: i64, reason: &str, at_ms: i64) -> A
     if get_item(conn, item_id)?.is_none() {
         return Err(AppError::Invalid(format!("unknown quiz item {item_id}")));
     }
-    conn.execute("INSERT INTO quiz_flags (item_id, at_ms, reason_code) VALUES (?1, ?2, ?3)", params![item_id, at_ms, reason])?;
-    conn.execute("UPDATE quiz_items SET disabled_at_ms = COALESCE(disabled_at_ms, ?2) WHERE id = ?1", params![item_id, at_ms])?;
+    conn.execute(
+        "INSERT INTO quiz_flags (item_id, at_ms, reason_code) VALUES (?1, ?2, ?3)",
+        params![item_id, at_ms, reason],
+    )?;
+    conn.execute(
+        "UPDATE quiz_items SET disabled_at_ms = COALESCE(disabled_at_ms, ?2) WHERE id = ?1",
+        params![item_id, at_ms],
+    )?;
     Ok(())
 }
 
 /// `(attempts, last_attempt_ms)` of an early-release day.
 pub fn release_state(conn: &Connection, date: &str) -> AppResult<Option<(i64, i64)>> {
     Ok(conn
-        .query_row("SELECT attempts, last_attempt_ms FROM release_quiz_state WHERE date = ?1", params![date], |r| Ok((r.get(0)?, r.get(1)?)))
+        .query_row(
+            "SELECT attempts, last_attempt_ms FROM release_quiz_state WHERE date = ?1",
+            params![date],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
         .optional()?)
 }
 
@@ -155,7 +184,10 @@ pub fn open_release_attempt(conn: &Connection, date: &str, at_ms: i64) -> AppRes
 
 /// A failed attempt restarts the cooldown from the moment of failure.
 pub fn mark_release_failure(conn: &Connection, date: &str, at_ms: i64) -> AppResult<()> {
-    conn.execute("UPDATE release_quiz_state SET last_attempt_ms = MAX(last_attempt_ms, ?2) WHERE date = ?1", params![date, at_ms])?;
+    conn.execute(
+        "UPDATE release_quiz_state SET last_attempt_ms = MAX(last_attempt_ms, ?2) WHERE date = ?1",
+        params![date, at_ms],
+    )?;
     Ok(())
 }
 
@@ -171,21 +203,35 @@ pub fn session_end_stats(conn: &Connection, run_id: i64) -> AppResult<(i64, i64,
 
 /// Whether the session-end quiz of the run was already answered or skipped.
 pub fn session_end_done(conn: &Connection, run_id: i64) -> AppResult<bool> {
-    Ok(conn.query_row("SELECT COUNT(*) FROM quiz_attempts WHERE context = 'session_end' AND run_id = ?1", params![run_id], |r| r.get::<_, i64>(0))? > 0)
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM quiz_attempts WHERE context = 'session_end' AND run_id = ?1",
+        params![run_id],
+        |r| r.get::<_, i64>(0),
+    )? > 0)
 }
 
 /// Pages that have text indexed but no question yet: `(page_id, subject_id, page_name)`.
-pub fn pages_without_items(conn: &Connection, subject_id: i64) -> AppResult<Vec<(i64, i64, String)>> {
+pub fn pages_without_items(
+    conn: &Connection,
+    subject_id: i64,
+) -> AppResult<Vec<(i64, i64, String)>> {
     let mut stmt = conn.prepare(
         "SELECT p.id, p.subject_id, p.page_name FROM wiki_pages p
          WHERE p.subject_id = ?1 AND NOT EXISTS (SELECT 1 FROM quiz_items i WHERE i.page_id = p.id) ORDER BY p.page_name",
     )?;
-    let rows = stmt.query_map(params![subject_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+    let rows = stmt.query_map(params![subject_id], |r| {
+        Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+    })?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
 /// Sum of the bonus rows already posted in `[from_ms, to_ms)`, counted by number of rows.
-pub fn bonus_rows_between(conn: &Connection, reason: &str, from_ms: i64, to_ms: i64) -> AppResult<i64> {
+pub fn bonus_rows_between(
+    conn: &Connection,
+    reason: &str,
+    from_ms: i64,
+    to_ms: i64,
+) -> AppResult<i64> {
     Ok(conn.query_row(
         "SELECT COUNT(*) FROM point_ledger WHERE reason_code = ?1 AND at_ms >= ?2 AND at_ms < ?3",
         params![reason, from_ms, to_ms],

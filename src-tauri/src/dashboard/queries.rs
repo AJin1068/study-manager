@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use super::{AppCount, PostponedPlan};
 use crate::downtime::Interval;
@@ -62,7 +62,11 @@ pub fn run_facts(conn: &Connection, from: &str, to: &str) -> AppResult<Vec<RunFa
         segments.push(store::list_segments(conn, *run_id)?);
     }
     let from_ms = segments.iter().flatten().map(|s| s.started_at_ms).min();
-    let to_ms = segments.iter().flatten().filter_map(|s| s.ended_at_ms).max();
+    let to_ms = segments
+        .iter()
+        .flatten()
+        .filter_map(|s| s.ended_at_ms)
+        .max();
     let downtime = match (from_ms, to_ms) {
         (Some(from_ms), Some(to_ms)) => store::list_downtime_intervals(conn, from_ms, to_ms)?,
         _ => Vec::new(),
@@ -79,7 +83,8 @@ pub fn run_facts(conn: &Connection, from: &str, to: &str) -> AppResult<Vec<RunFa
 
 /// `(plan id, date)` of every run in the range: occurrences with a run are already counted.
 pub fn run_keys(conn: &Connection, from: &str, to: &str) -> AppResult<HashSet<(i64, String)>> {
-    let mut stmt = conn.prepare("SELECT plan_id, date FROM plan_runs WHERE date >= ?1 AND date <= ?2")?;
+    let mut stmt =
+        conn.prepare("SELECT plan_id, date FROM plan_runs WHERE date >= ?1 AND date <= ?2")?;
     let rows = stmt.query_map(params![from, to], |row| Ok((row.get(0)?, row.get(1)?)))?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
@@ -90,14 +95,23 @@ pub fn planned_windows(conn: &Connection, from_ms: i64, to_ms: i64) -> AppResult
         "SELECT planned_start_ms, planned_end_ms FROM plan_runs
          WHERE planned_end_ms > ?1 AND planned_start_ms < ?2 ORDER BY planned_start_ms",
     )?;
-    let rows =
-        stmt.query_map(params![from_ms, to_ms], |row| Ok(Interval { start: row.get(0)?, end: row.get(1)? }))?;
+    let rows = stmt.query_map(params![from_ms, to_ms], |row| {
+        Ok(Interval {
+            start: row.get(0)?,
+            end: row.get(1)?,
+        })
+    })?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
 /// Apps ranked by distraction attempts (a quit request, or a dry-run hit): the same events the
 /// point rules count. Sites are not ranked; their ids are hosts and stay out of the ranking.
-pub fn deviation_apps(conn: &Connection, from_ms: i64, to_ms: i64, limit: i64) -> AppResult<Vec<AppCount>> {
+pub fn deviation_apps(
+    conn: &Connection,
+    from_ms: i64,
+    to_ms: i64,
+    limit: i64,
+) -> AppResult<Vec<AppCount>> {
     let mut stmt = conn.prepare(
         "SELECT target_id, COUNT(*) AS n FROM block_events
          WHERE target_kind = 'app' AND action IN (?3, ?4) AND at_ms >= ?1 AND at_ms < ?2
@@ -111,7 +125,12 @@ pub fn deviation_apps(conn: &Connection, from_ms: i64, to_ms: i64, limit: i64) -
             BlockAction::WouldTerminate.as_str(),
             limit
         ],
-        |row| Ok(AppCount { app_id: row.get(0)?, count: row.get(1)? }),
+        |row| {
+            Ok(AppCount {
+                app_id: row.get(0)?,
+                count: row.get(1)?,
+            })
+        },
     )?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
@@ -138,12 +157,18 @@ pub fn deviation_times(conn: &Connection, from_ms: i64, to_ms: i64) -> AppResult
 }
 
 /// Ids and start times of study segments that began in the window.
-pub fn study_segment_starts(conn: &Connection, from_ms: i64, to_ms: i64) -> AppResult<Vec<(i64, i64)>> {
+pub fn study_segment_starts(
+    conn: &Connection,
+    from_ms: i64,
+    to_ms: i64,
+) -> AppResult<Vec<(i64, i64)>> {
     let mut stmt = conn.prepare(
         "SELECT id, started_at_ms FROM timer_segments
          WHERE kind = 'study' AND started_at_ms >= ?1 AND started_at_ms < ?2 ORDER BY started_at_ms",
     )?;
-    let rows = stmt.query_map(params![from_ms, to_ms], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    let rows = stmt.query_map(params![from_ms, to_ms], |row| {
+        Ok((row.get(0)?, row.get(1)?))
+    })?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
@@ -161,13 +186,22 @@ pub fn postponed_plans(
          GROUP BY p.id HAVING n >= ?3 ORDER BY n DESC, p.id LIMIT ?4",
     )?;
     let rows = stmt.query_map(params![from_ms, to_ms, min_count, limit], |row| {
-        Ok(PostponedPlan { plan_id: row.get(0)?, name: row.get(1)?, subject: row.get(2)?, count: row.get(3)? })
+        Ok(PostponedPlan {
+            plan_id: row.get(0)?,
+            name: row.get(1)?,
+            subject: row.get(2)?,
+            count: row.get(3)?,
+        })
     })?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
 /// Counts of `study_passes` by kind, plus aborted runs, in the window.
-pub fn release_counts(conn: &Connection, from_ms: i64, to_ms: i64) -> AppResult<(i64, i64, i64, i64)> {
+pub fn release_counts(
+    conn: &Connection,
+    from_ms: i64,
+    to_ms: i64,
+) -> AppResult<(i64, i64, i64, i64)> {
     let by_kind = |kind: &str| -> AppResult<i64> {
         Ok(conn.query_row(
             "SELECT COUNT(*) FROM study_passes WHERE kind = ?3 AND at_ms >= ?1 AND at_ms < ?2",
@@ -180,5 +214,10 @@ pub fn release_counts(conn: &Connection, from_ms: i64, to_ms: i64) -> AppResult<
         params![from_ms, to_ms],
         |row| row.get(0),
     )?;
-    Ok((by_kind("emergency_pass")?, by_kind("skip_today")?, by_kind("early_release")?, aborted))
+    Ok((
+        by_kind("emergency_pass")?,
+        by_kind("skip_today")?,
+        by_kind("early_release")?,
+        aborted,
+    ))
 }

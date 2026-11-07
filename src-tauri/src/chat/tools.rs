@@ -6,12 +6,12 @@
 use chrono::{Datelike, Duration, NaiveDate, NaiveTime, TimeZone};
 use rusqlite::Connection;
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::protocol::{FreeSlotArgs, RangeArgs, Tool};
 use crate::dashboard;
 use crate::error::{AppError, AppResult};
-use crate::plan::{self, fmt_date, local_to_ms, parse_date, Occurrence};
+use crate::plan::{self, Occurrence, fmt_date, local_to_ms, parse_date};
 use crate::store;
 use crate::store::chat as repo;
 use crate::store::wiki as wiki_repo;
@@ -49,7 +49,9 @@ pub fn hhmm(minutes: i64) -> String {
 fn range(from: &str, to: &str) -> AppResult<(NaiveDate, NaiveDate)> {
     let (from, to) = (parse_date(from)?, parse_date(to)?);
     if to < from || (to - from).num_days() >= MAX_RANGE_DAYS {
-        return Err(AppError::Invalid(format!("range must be 1-{MAX_RANGE_DAYS} days")));
+        return Err(AppError::Invalid(format!(
+            "range must be 1-{MAX_RANGE_DAYS} days"
+        )));
     }
     Ok((from, to))
 }
@@ -64,7 +66,10 @@ pub fn free_slots<Tz: TimeZone>(
     now_ms: i64,
     min_minutes: i64,
 ) -> AppResult<Vec<FreeSlot>> {
-    let mut spans: Vec<(i64, i64)> = occurrences.iter().map(|o| (o.planned_start_ms, o.planned_end_ms)).collect();
+    let mut spans: Vec<(i64, i64)> = occurrences
+        .iter()
+        .map(|o| (o.planned_start_ms, o.planned_end_ms))
+        .collect();
     spans.sort_unstable();
     let now_floor = (now_ms + MINUTE_MS - 1).div_euclid(MINUTE_MS) * MINUTE_MS;
     let mut out = Vec::new();
@@ -77,8 +82,15 @@ pub fn free_slots<Tz: TimeZone>(
         let mut cursor = window_start;
         let push = |start: i64, end: i64, out: &mut Vec<FreeSlot>| {
             if end - start >= min_minutes * MINUTE_MS {
-                let (start_min, end_min) = ((start - midnight) / MINUTE_MS, (end - midnight) / MINUTE_MS);
-                out.push(FreeSlot { date: fmt_date(day), start: hhmm(start_min), end: hhmm(end_min), start_min, end_min });
+                let (start_min, end_min) =
+                    ((start - midnight) / MINUTE_MS, (end - midnight) / MINUTE_MS);
+                out.push(FreeSlot {
+                    date: fmt_date(day),
+                    start: hhmm(start_min),
+                    end: hhmm(end_min),
+                    start_min,
+                    end_min,
+                });
             }
         };
         for &(span_start, span_end) in &spans {
@@ -99,11 +111,16 @@ pub fn free_slots<Tz: TimeZone>(
 }
 
 pub fn clamp_min_minutes(requested: Option<i64>) -> i64 {
-    requested.unwrap_or(DEFAULT_SLOT_MIN).clamp(MIN_SLOT_MIN, MAX_SLOT_MIN)
+    requested
+        .unwrap_or(DEFAULT_SLOT_MIN)
+        .clamp(MIN_SLOT_MIN, MAX_SLOT_MIN)
 }
 
 fn list_subjects(conn: &Connection) -> AppResult<Value> {
-    let mut names: Vec<String> = wiki_repo::list_subjects(conn, false)?.into_iter().map(|s| s.name).collect();
+    let mut names: Vec<String> = wiki_repo::list_subjects(conn, false)?
+        .into_iter()
+        .map(|s| s.name)
+        .collect();
     names.extend(repo::plan_subjects(conn)?);
     names.sort();
     names.dedup();
@@ -121,27 +138,52 @@ fn list_plans<Tz: TimeZone>(conn: &Connection, tz: &Tz, args: &RangeArgs) -> App
     Ok(json!({ "plans": plans }))
 }
 
-fn list_free_slots<Tz: TimeZone>(conn: &Connection, tz: &Tz, args: &FreeSlotArgs, now_ms: i64) -> AppResult<Value> {
+fn list_free_slots<Tz: TimeZone>(
+    conn: &Connection,
+    tz: &Tz,
+    args: &FreeSlotArgs,
+    now_ms: i64,
+) -> AppResult<Value> {
     let (from, to) = range(&args.from, &args.to)?;
     // A day before `from` can spill into it.
     let (occurrences, _) = plan::occurrences_in(conn, tz, from - Duration::days(1), to)?;
-    let slots = free_slots(tz, &occurrences, from, to, now_ms, clamp_min_minutes(args.min_minutes))?;
+    let slots = free_slots(
+        tz,
+        &occurrences,
+        from,
+        to,
+        now_ms,
+        clamp_min_minutes(args.min_minutes),
+    )?;
     Ok(json!({ "slots": slots.into_iter().take(MAX_SLOTS).collect::<Vec<_>>() }))
 }
 
 /// Deviation counts per weekday (Monday first), the share of focused time per hour, and how often
 /// plans were postponed from each weekday, over the last four weeks. Counts only.
 fn focus_summary<Tz: TimeZone>(conn: &Connection, tz: &Tz, now_ms: i64) -> AppResult<Value> {
-    let hours: Vec<Value> =
-        recommend::focus_hours(conn, tz, now_ms)?.into_iter().map(|h| json!({ "hour": h.hour, "focus_pct": h.score_pct })).collect();
+    let hours: Vec<Value> = recommend::focus_hours(conn, tz, now_ms)?
+        .into_iter()
+        .map(|h| json!({ "hour": h.hour, "focus_pct": h.score_pct }))
+        .collect();
     let weakness = dashboard::weakness(conn, tz, now_ms)?;
-    let deviations: Vec<i64> = weakness.heatmap.iter().map(|row| row.iter().sum()).collect();
+    let deviations: Vec<i64> = weakness
+        .heatmap
+        .iter()
+        .map(|row| row.iter().sum())
+        .collect();
     let mut postponed = vec![0_i64; 7];
     for raw in repo::postponed_before_json(conn, now_ms - FOCUS_WINDOW_DAYS * DAY_MS)? {
-        let Ok(value) = serde_json::from_str::<Value>(&raw) else { continue };
-        let date = value.get("date").or_else(|| value.get("startDate")).and_then(Value::as_str);
+        let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+            continue;
+        };
+        let date = value
+            .get("date")
+            .or_else(|| value.get("startDate"))
+            .and_then(Value::as_str);
         if let Some(day) = date.and_then(|d| parse_date(d).ok()) {
-            if let Some(slot) = postponed.get_mut(usize::try_from(day.weekday().num_days_from_monday()).unwrap_or(0)) {
+            if let Some(slot) = postponed
+                .get_mut(usize::try_from(day.weekday().num_days_from_monday()).unwrap_or(0))
+            {
                 *slot += 1;
             }
         }
@@ -167,7 +209,10 @@ fn weak_pages(conn: &Connection) -> AppResult<Value> {
         weak.sort();
         weak.truncate(WEAK_PER_SUBJECT);
         if !weak.is_empty() {
-            let pages: Vec<Value> = weak.into_iter().map(|(pct, name)| json!({ "page": name, "accuracy_pct": pct })).collect();
+            let pages: Vec<Value> = weak
+                .into_iter()
+                .map(|(pct, name)| json!({ "page": name, "accuracy_pct": pct }))
+                .collect();
             subjects.push(json!({ "subject": subject.name, "pages": pages }));
         }
     }
@@ -175,7 +220,12 @@ fn weak_pages(conn: &Connection) -> AppResult<Value> {
 }
 
 /// Runs a read-only tool. `Propose` is handled by the service and is not a read.
-pub fn run_read<Tz: TimeZone>(conn: &Connection, tz: &Tz, tool: &Tool, now_ms: i64) -> AppResult<Value> {
+pub fn run_read<Tz: TimeZone>(
+    conn: &Connection,
+    tz: &Tz,
+    tool: &Tool,
+    now_ms: i64,
+) -> AppResult<Value> {
     match tool {
         Tool::ListSubjects => list_subjects(conn),
         Tool::ListPlans(args) => list_plans(conn, tz, args),

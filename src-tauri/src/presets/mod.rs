@@ -50,7 +50,11 @@ pub const CATALOG: &[Category] = &[
         id: "messenger",
         label: "메신저",
         default_on: true,
-        apps: &["com.kakao.KakaoTalkMac", "com.hnc.Discord", "ru.keepcoder.Telegram"],
+        apps: &[
+            "com.kakao.KakaoTalkMac",
+            "com.hnc.Discord",
+            "ru.keepcoder.Telegram",
+        ],
         sites: &["web.kakao.com", "discord.com"],
     },
     Category {
@@ -107,16 +111,18 @@ struct Selection {
 
 fn read_selection(conn: &Connection) -> AppResult<Option<Selection>> {
     match store::get_setting(conn, SELECTION_KEY)? {
-        Some(raw) => serde_json::from_str(&raw)
-            .map(Some)
-            .map_err(|err| AppError::Internal(format!("{SELECTION_KEY} setting is invalid: {err}"))),
+        Some(raw) => serde_json::from_str(&raw).map(Some).map_err(|err| {
+            AppError::Internal(format!("{SELECTION_KEY} setting is invalid: {err}"))
+        }),
         None => Ok(None),
     }
 }
 
 /// What the stored choice says about a category, or the PLAN default for one never chosen.
 fn is_enabled(selection: Option<&Selection>, cat: &Category) -> bool {
-    selection.and_then(|s| s.enabled.get(cat.id).copied()).unwrap_or(cat.default_on)
+    selection
+        .and_then(|s| s.enabled.get(cat.id).copied())
+        .unwrap_or(cat.default_on)
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
@@ -161,11 +167,22 @@ pub fn status(conn: &Connection) -> AppResult<PresetStatus> {
 /// Inserts the category's rows that are missing, keeping existing rows as they are.
 fn materialize(conn: &Connection, cat: &Category, enabled: bool, at_ms: i64) -> AppResult<()> {
     for app in cat.apps {
-        store::insert_preset_entry(conn, EntryKind::App, &normalize_app_id(app), cat.id, enabled, at_ms)?;
+        store::insert_preset_entry(
+            conn,
+            EntryKind::App,
+            &normalize_app_id(app),
+            cat.id,
+            enabled,
+            at_ms,
+        )?;
     }
     for site in cat.sites {
-        let pattern = normalize_pattern(site)
-            .ok_or_else(|| AppError::Internal(format!("preset site {site:?} in {} is not a usable pattern", cat.id)))?;
+        let pattern = normalize_pattern(site).ok_or_else(|| {
+            AppError::Internal(format!(
+                "preset site {site:?} in {} is not a usable pattern",
+                cat.id
+            ))
+        })?;
         store::insert_preset_entry(conn, EntryKind::Site, &pattern, cat.id, enabled, at_ms)?;
     }
     Ok(())
@@ -175,28 +192,58 @@ fn materialize(conn: &Connection, cat: &Category, enabled: bool, at_ms: i64) -> 
 /// on/off; categories it leaves out keep their current state (the PLAN default before the first
 /// choice). Locked during study: the attempt is recorded and nothing changes. The first call is
 /// the first-run selection; later calls are the settings screen.
-pub fn set_categories(conn: &mut Connection, choice: &BTreeMap<String, bool>, at_ms: i64) -> AppResult<UpdateOutcome> {
+pub fn set_categories(
+    conn: &mut Connection,
+    choice: &BTreeMap<String, bool>,
+    at_ms: i64,
+) -> AppResult<UpdateOutcome> {
     if let Some(unknown) = choice.keys().find(|id| category(id).is_none()) {
-        return Err(AppError::Invalid(format!("unknown preset category {unknown:?}")));
+        return Err(AppError::Invalid(format!(
+            "unknown preset category {unknown:?}"
+        )));
     }
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let current = read_selection(&tx)?;
-    let mut next = Selection { version: PRESET_VERSION, enabled: BTreeMap::new() };
+    let mut next = Selection {
+        version: PRESET_VERSION,
+        enabled: BTreeMap::new(),
+    };
     for cat in CATALOG {
-        let wanted = choice.get(cat.id).copied().unwrap_or_else(|| is_enabled(current.as_ref(), cat));
+        let wanted = choice
+            .get(cat.id)
+            .copied()
+            .unwrap_or_else(|| is_enabled(current.as_ref(), cat));
         next.enabled.insert(cat.id.to_owned(), wanted);
     }
     let changed: Vec<String> = CATALOG
         .iter()
-        .filter(|cat| current.is_none() || is_enabled(current.as_ref(), cat) != next.enabled[cat.id])
-        .map(|cat| format!("{}:{}", cat.id, if next.enabled[cat.id] { "on" } else { "off" }))
+        .filter(|cat| {
+            current.is_none() || is_enabled(current.as_ref(), cat) != next.enabled[cat.id]
+        })
+        .map(|cat| {
+            format!(
+                "{}:{}",
+                cat.id,
+                if next.enabled[cat.id] { "on" } else { "off" }
+            )
+        })
         .collect();
     if crate::study::lock_held(&tx)? {
         for item in &changed {
-            store::append_history(&tx, at_ms, HISTORY_KEY, None, item, Reason::User, Outcome::RejectedLocked)?;
+            store::append_history(
+                &tx,
+                at_ms,
+                HISTORY_KEY,
+                None,
+                item,
+                Reason::User,
+                Outcome::RejectedLocked,
+            )?;
         }
         tx.commit()?;
-        return Ok(UpdateOutcome::RejectedLocked { key: HISTORY_KEY.into() });
+        return Ok(UpdateOutcome::RejectedLocked {
+            key: HISTORY_KEY.into(),
+        });
     }
     for cat in CATALOG {
         let enabled = next.enabled[cat.id];
@@ -206,10 +253,20 @@ pub fn set_categories(conn: &mut Connection, choice: &BTreeMap<String, bool>, at
     let json = serde_json::to_string(&next).map_err(|err| AppError::Internal(err.to_string()))?;
     store::put_setting(&tx, SELECTION_KEY, SETTING_CATEGORY, &json, at_ms)?;
     for item in &changed {
-        store::append_history(&tx, at_ms, HISTORY_KEY, None, item, Reason::User, Outcome::Applied)?;
+        store::append_history(
+            &tx,
+            at_ms,
+            HISTORY_KEY,
+            None,
+            item,
+            Reason::User,
+            Outcome::Applied,
+        )?;
     }
     tx.commit()?;
-    Ok(UpdateOutcome::Applied { key: HISTORY_KEY.into() })
+    Ok(UpdateOutcome::Applied {
+        key: HISTORY_KEY.into(),
+    })
 }
 
 /// Startup: after a catalog update, adds the entries the new version brings. Existing rows keep
@@ -217,17 +274,23 @@ pub fn set_categories(conn: &mut Connection, choice: &BTreeMap<String, bool>, at
 /// PLAN default. Does nothing before the first-run choice or when already current.
 pub fn refresh(conn: &mut Connection, at_ms: i64) -> AppResult<()> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let Some(mut selection) = read_selection(&tx)? else { return Ok(()) };
+    let Some(mut selection) = read_selection(&tx)? else {
+        return Ok(());
+    };
     if selection.version >= PRESET_VERSION {
         return Ok(());
     }
     for cat in CATALOG {
-        let enabled = *selection.enabled.entry(cat.id.to_owned()).or_insert(cat.default_on);
+        let enabled = *selection
+            .enabled
+            .entry(cat.id.to_owned())
+            .or_insert(cat.default_on);
         materialize(&tx, cat, enabled, at_ms)?;
     }
     let before = format!("version={}", selection.version);
     selection.version = PRESET_VERSION;
-    let json = serde_json::to_string(&selection).map_err(|err| AppError::Internal(err.to_string()))?;
+    let json =
+        serde_json::to_string(&selection).map_err(|err| AppError::Internal(err.to_string()))?;
     store::put_setting(&tx, SELECTION_KEY, SETTING_CATEGORY, &json, at_ms)?;
     store::append_history(
         &tx,

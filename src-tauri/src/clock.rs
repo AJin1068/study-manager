@@ -20,6 +20,9 @@ mod tests {
     #[test]
     fn now_is_after_2020_and_positive() {
         let now = now_ms().expect("clock");
-        assert!(now > 1_577_836_800_000, "expected a post-2020 timestamp, got {now}");
+        assert!(
+            now > 1_577_836_800_000,
+            "expected a post-2020 timestamp, got {now}"
+        );
     }
 }

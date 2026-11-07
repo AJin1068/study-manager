@@ -1,6 +1,6 @@
 //! `study_context`: short labels of what was open while studying (opt-in, 30 days).
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use crate::error::AppResult;
 
@@ -32,7 +32,10 @@ pub fn insert(conn: &Connection, row: &ContextRow) -> AppResult<()> {
 
 /// Removes rows older than `before_ms`; returns how many went.
 pub fn prune_before(conn: &Connection, before_ms: i64) -> AppResult<usize> {
-    Ok(conn.execute("DELETE FROM study_context WHERE at_ms < ?1", params![before_ms])?)
+    Ok(conn.execute(
+        "DELETE FROM study_context WHERE at_ms < ?1",
+        params![before_ms],
+    )?)
 }
 
 pub fn delete_all(conn: &Connection) -> AppResult<usize> {

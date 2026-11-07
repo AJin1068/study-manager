@@ -3,13 +3,20 @@
 //! in-memory `FakeBackend`, so both modes exercise the same code path.
 
 use super::model::{CreatedInvite, RoomError, RoomSummary, WireDistraction, WireSnapshot};
-use crate::remote::payload::{DailyReportArgs, FriendPrefsArgs, InventoryPublicArgs, ScheduleItemRow, StatusReportArgs};
+use crate::remote::payload::{
+    DailyReportArgs, FriendPrefsArgs, InventoryPublicArgs, ScheduleItemRow, StatusReportArgs,
+};
 
 /// Create, invite, join, leave, kick. Refusals come back as `RoomError::Rejected(code)`.
 pub trait RoomService: Send + Sync {
     /// Returns the new room's id.
     fn create_room(&self, name: &str, nickname: &str) -> Result<String, RoomError>;
-    fn create_invite(&self, room_id: &str, ttl_hours: i64, max_uses: i64) -> Result<CreatedInvite, RoomError>;
+    fn create_invite(
+        &self,
+        room_id: &str,
+        ttl_hours: i64,
+        max_uses: i64,
+    ) -> Result<CreatedInvite, RoomError>;
     fn revoke_invite(&self, room_id: &str, invite_id: &str) -> Result<(), RoomError>;
     /// `code` is already normalized. Returns the joined room's id (also for `already_member`
     /// the caller receives `Rejected(AlreadyMember)` and reads the room list).

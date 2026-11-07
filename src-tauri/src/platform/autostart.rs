@@ -20,10 +20,15 @@ use tauri_plugin_autostart::ManagerExt;
 use super::{AutostartBackend, PlatformError};
 
 /// Backend for the current OS. Fails if the macOS home directory or executable path is unknown.
-pub fn autostart_backend<R: Runtime>(app: &AppHandle<R>) -> Result<Arc<dyn AutostartBackend>, PlatformError> {
+pub fn autostart_backend<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<Arc<dyn AutostartBackend>, PlatformError> {
     #[cfg(target_os = "macos")]
     {
-        let home = app.path().home_dir().map_err(|e| PlatformError::Autostart(e.to_string()))?;
+        let home = app
+            .path()
+            .home_dir()
+            .map_err(|e| PlatformError::Autostart(e.to_string()))?;
         let exe = std::env::current_exe()
             .and_then(|path| path.canonicalize())
             .map_err(|e| PlatformError::Autostart(e.to_string()))?;
@@ -63,7 +68,11 @@ impl<R: Runtime> AutostartBackend for PluginAutostart<R> {
 
     fn set_enabled(&self, enabled: bool) -> Result<(), PlatformError> {
         let manager = self.app.autolaunch();
-        let result = if enabled { manager.enable() } else { manager.disable() };
+        let result = if enabled {
+            manager.enable()
+        } else {
+            manager.disable()
+        };
         result.map_err(|e| PlatformError::Autostart(e.to_string()))
     }
 }

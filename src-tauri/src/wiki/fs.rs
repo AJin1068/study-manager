@@ -31,7 +31,9 @@ fn io_error(op: &str, err: &io::Error) -> AppError {
 /// Refuses a path that is a symbolic link. A missing path is fine.
 pub fn reject_symlink(path: &Path) -> AppResult<()> {
     match fs::symlink_metadata(path) {
-        Ok(meta) if meta.file_type().is_symlink() => Err(AppError::Invalid("the wiki does not follow symbolic links".into())),
+        Ok(meta) if meta.file_type().is_symlink() => Err(AppError::Invalid(
+            "the wiki does not follow symbolic links".into(),
+        )),
         Ok(_) => Ok(()),
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(io_error("stat", &err)),
@@ -66,7 +68,11 @@ impl WikiFs {
 
     /// `llm.wiki_dir` as stored: empty means the default folder.
     pub fn from_setting(configured: &str) -> AppResult<Self> {
-        if configured.is_empty() { Ok(Self::new(default_root()?)) } else { Ok(Self::new(PathBuf::from(configured))) }
+        if configured.is_empty() {
+            Ok(Self::new(default_root()?))
+        } else {
+            Ok(Self::new(PathBuf::from(configured)))
+        }
     }
 
     pub fn root(&self) -> &Path {
@@ -119,7 +125,8 @@ impl WikiFs {
     }
 
     pub fn subject_dir_exists(&self, slug: &str) -> bool {
-        self.subject_path(slug).is_ok_and(|p| fs::symlink_metadata(p).is_ok_and(|m| m.is_dir()))
+        self.subject_path(slug)
+            .is_ok_and(|p| fs::symlink_metadata(p).is_ok_and(|m| m.is_dir()))
     }
 
     fn page_path(&self, slug: &str, name: &str) -> AppResult<PathBuf> {
@@ -133,14 +140,22 @@ impl WikiFs {
     pub fn read_page(&self, slug: &str, name: &str) -> AppResult<Option<String>> {
         let path = self.page_path(slug, name)?;
         match fs::symlink_metadata(&path) {
-            Ok(meta) if meta.file_type().is_symlink() => return Err(AppError::Invalid("the wiki does not follow symbolic links".into())),
-            Ok(meta) if meta.len() > MAX_READ_BYTES => return Err(AppError::Invalid("the page is too large to open".into())),
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(AppError::Invalid(
+                    "the wiki does not follow symbolic links".into(),
+                ));
+            }
+            Ok(meta) if meta.len() > MAX_READ_BYTES => {
+                return Err(AppError::Invalid("the page is too large to open".into()));
+            }
             Ok(_) => {}
             Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(err) => return Err(io_error("stat page", &err)),
         }
         match fs::read(&path) {
-            Ok(bytes) => String::from_utf8(bytes).map(Some).map_err(|_| AppError::Invalid("the page is not valid UTF-8 text".into())),
+            Ok(bytes) => String::from_utf8(bytes)
+                .map(Some)
+                .map_err(|_| AppError::Invalid("the page is not valid UTF-8 text".into())),
             Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(err) => Err(io_error("read page", &err)),
         }
@@ -163,14 +178,22 @@ impl WikiFs {
         reject_symlink(&versions)?;
         let path = versions.join(file_name);
         match fs::symlink_metadata(&path) {
-            Ok(meta) if meta.file_type().is_symlink() => return Err(AppError::Invalid("the wiki does not follow symbolic links".into())),
-            Ok(meta) if meta.len() > MAX_READ_BYTES => return Err(AppError::Invalid("the backup is too large to open".into())),
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(AppError::Invalid(
+                    "the wiki does not follow symbolic links".into(),
+                ));
+            }
+            Ok(meta) if meta.len() > MAX_READ_BYTES => {
+                return Err(AppError::Invalid("the backup is too large to open".into()));
+            }
             Ok(_) => {}
             Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(err) => return Err(io_error("stat backup", &err)),
         }
         match fs::read(&path) {
-            Ok(bytes) => String::from_utf8(bytes).map(Some).map_err(|_| AppError::Invalid("the backup is not valid UTF-8 text".into())),
+            Ok(bytes) => String::from_utf8(bytes)
+                .map(Some)
+                .map_err(|_| AppError::Invalid("the backup is not valid UTF-8 text".into())),
             Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(err) => Err(io_error("read backup", &err)),
         }
@@ -187,11 +210,17 @@ impl WikiFs {
         let mut found = Vec::new();
         for entry in entries {
             let entry = entry.map_err(|e| io_error("list pages", &e))?;
-            let Ok(kind) = entry.file_type() else { continue };
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
             if !kind.is_file() {
                 continue;
             }
-            if let Some(name) = entry.file_name().to_str().and_then(names::page_name_of_file) {
+            if let Some(name) = entry
+                .file_name()
+                .to_str()
+                .and_then(names::page_name_of_file)
+            {
                 found.push(name);
             }
         }
@@ -221,10 +250,14 @@ impl WikiFs {
         reject_symlink(&page)?;
         let existing = page.exists();
         if !existing && self.list_pages(slug)?.len() >= MAX_PAGES_PER_SUBJECT {
-            return Err(AppError::Invalid("this subject already has the most pages the wiki allows".into()));
+            return Err(AppError::Invalid(
+                "this subject already has the most pages the wiki allows".into(),
+            ));
         }
 
-        let temp = subject.join(PAGES_DIR).join(format!(".{}.tmp", uuid::Uuid::new_v4().simple()));
+        let temp = subject
+            .join(PAGES_DIR)
+            .join(format!(".{}.tmp", uuid::Uuid::new_v4().simple()));
         let write_temp = || -> io::Result<()> {
             let mut file = fs::File::create(&temp)?;
             file.write_all(content.as_bytes())?;
@@ -250,7 +283,10 @@ impl WikiFs {
             let _ = fs::remove_file(&temp);
             return Err(io_error("replace page", &err));
         }
-        Ok(WriteReport { bytes: content.len(), backup })
+        Ok(WriteReport {
+            bytes: content.len(),
+            backup,
+        })
     }
 
     fn backup(&self, subject: &Path, name: &str, page: &Path, at_ms: i64) -> AppResult<PathBuf> {
@@ -285,13 +321,20 @@ mod tests {
         let mut out = Vec::new();
         let mut stack = vec![dir.to_path_buf()];
         while let Some(current) = stack.pop() {
-            let Ok(entries) = fs::read_dir(&current) else { continue };
+            let Ok(entries) = fs::read_dir(&current) else {
+                continue;
+            };
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_dir() {
                     stack.push(path);
                 } else {
-                    out.push(path.strip_prefix(dir).expect("under dir").to_string_lossy().into_owned());
+                    out.push(
+                        path.strip_prefix(dir)
+                            .expect("under dir")
+                            .to_string_lossy()
+                            .into_owned(),
+                    );
                 }
             }
         }
@@ -311,7 +354,10 @@ mod tests {
         assert!(rules.contains("수학 위키 규칙"));
         fs::write(base.join("RULES.md"), "내가 고친 규칙").expect("edit");
         wiki.create_subject("수학", "수학").expect("again");
-        assert_eq!(fs::read_to_string(base.join("RULES.md")).expect("rules"), "내가 고친 규칙");
+        assert_eq!(
+            fs::read_to_string(base.join("RULES.md")).expect("rules"),
+            "내가 고친 규칙"
+        );
         assert!(wiki.subject_dir_exists("수학") && !wiki.subject_dir_exists("영어"));
     }
 
@@ -319,23 +365,42 @@ mod tests {
     fn hangul_and_emoji_names_work_for_folders_and_pages() {
         let (_dir, wiki) = wiki();
         wiki.create_subject("📚-영어", "📚 영어").expect("create");
-        wiki.write_page("📚-영어", "관계대명사 😀", "# 본문").expect("write");
+        wiki.write_page("📚-영어", "관계대명사 😀", "# 본문")
+            .expect("write");
         assert_eq!(wiki.list_pages("📚-영어").expect("list"), ["관계대명사 😀"]);
-        assert_eq!(wiki.read_page("📚-영어", "관계대명사 😀").expect("read").as_deref(), Some("# 본문"));
+        assert_eq!(
+            wiki.read_page("📚-영어", "관계대명사 😀")
+                .expect("read")
+                .as_deref(),
+            Some("# 본문")
+        );
     }
 
     #[test]
     fn rewriting_a_page_keeps_the_previous_version_and_new_pages_have_none() {
         let (_dir, wiki) = wiki();
         wiki.create_subject("s", "s").expect("create");
-        let first = wiki.write_page_with("s", "p", "v1", 100, || Ok(())).expect("first");
+        let first = wiki
+            .write_page_with("s", "p", "v1", 100, || Ok(()))
+            .expect("first");
         assert_eq!(first.backup, None);
-        let second = wiki.write_page_with("s", "p", "v2", 100, || Ok(())).expect("second");
+        let second = wiki
+            .write_page_with("s", "p", "v2", 100, || Ok(()))
+            .expect("second");
         let backup = second.backup.expect("backup of v1");
         assert_eq!(fs::read_to_string(&backup).expect("backup text"), "v1");
-        assert_eq!(wiki.read_page("s", "p").expect("read").as_deref(), Some("v2"));
-        let third = wiki.write_page_with("s", "p", "v3", 100, || Ok(())).expect("third, same millisecond");
-        assert_ne!(third.backup.as_ref(), Some(&backup), "a same-millisecond backup does not overwrite the earlier one");
+        assert_eq!(
+            wiki.read_page("s", "p").expect("read").as_deref(),
+            Some("v2")
+        );
+        let third = wiki
+            .write_page_with("s", "p", "v3", 100, || Ok(()))
+            .expect("third, same millisecond");
+        assert_ne!(
+            third.backup.as_ref(),
+            Some(&backup),
+            "a same-millisecond backup does not overwrite the earlier one"
+        );
         assert_eq!(fs::read_to_string(&backup).expect("still v1"), "v1");
     }
 
@@ -345,11 +410,19 @@ mod tests {
         wiki.create_subject("s", "s").expect("create");
         wiki.write_page("s", "p", "original").expect("write");
         let err = wiki
-            .write_page_with("s", "p", "half-done replacement", 5, || Err(io::Error::other("simulated crash")))
+            .write_page_with("s", "p", "half-done replacement", 5, || {
+                Err(io::Error::other("simulated crash"))
+            })
             .expect_err("aborted");
         assert!(err.to_string().contains("replace page"), "{err}");
-        assert_eq!(wiki.read_page("s", "p").expect("read").as_deref(), Some("original"));
-        let leftovers: Vec<_> = files_under(wiki.root()).into_iter().filter(|f| f.ends_with(".tmp")).collect();
+        assert_eq!(
+            wiki.read_page("s", "p").expect("read").as_deref(),
+            Some("original")
+        );
+        let leftovers: Vec<_> = files_under(wiki.root())
+            .into_iter()
+            .filter(|f| f.ends_with(".tmp"))
+            .collect();
         assert!(leftovers.is_empty(), "{leftovers:?}");
         assert_eq!(wiki.list_pages("s").expect("list"), ["p"]);
     }
@@ -366,7 +439,12 @@ mod tests {
             assert!(wiki.write_page("s", name, "x").is_err(), "name {name:?}");
             assert!(wiki.read_page("s", name).is_err(), "name {name:?}");
         }
-        assert!(files_under(dir.path()).iter().all(|f| f.starts_with("StudyWiki")), "nothing outside the wiki root");
+        assert!(
+            files_under(dir.path())
+                .iter()
+                .all(|f| f.starts_with("StudyWiki")),
+            "nothing outside the wiki root"
+        );
     }
 
     #[cfg(unix)]
@@ -384,8 +462,14 @@ mod tests {
         symlink(outside.join("secret.md"), pages.join("link.md")).expect("link");
         assert!(wiki.read_page("s", "link").is_err());
         assert!(wiki.write_page("s", "link", "overwrite").is_err());
-        assert_eq!(fs::read_to_string(outside.join("secret.md")).expect("secret"), "do not touch");
-        assert!(wiki.list_pages("s").expect("list").is_empty(), "the link is not a page");
+        assert_eq!(
+            fs::read_to_string(outside.join("secret.md")).expect("secret"),
+            "do not touch"
+        );
+        assert!(
+            wiki.list_pages("s").expect("list").is_empty(),
+            "the link is not a page"
+        );
 
         // A pages folder that is a link to a folder outside.
         wiki.create_subject("t", "t").expect("create");
@@ -406,17 +490,36 @@ mod tests {
     fn size_and_count_limits_hold() {
         let (_dir, wiki) = wiki();
         wiki.create_subject("s", "s").expect("create");
-        assert!(wiki.write_page("s", "big", &"x".repeat(MAX_PAGE_BYTES + 1)).is_err());
-        assert!(wiki.write_page("s", "ok", &"x".repeat(MAX_PAGE_BYTES)).is_ok());
+        assert!(
+            wiki.write_page("s", "big", &"x".repeat(MAX_PAGE_BYTES + 1))
+                .is_err()
+        );
+        assert!(
+            wiki.write_page("s", "ok", &"x".repeat(MAX_PAGE_BYTES))
+                .is_ok()
+        );
         let pages = wiki.root().join("s").join("pages");
         for i in 0..MAX_PAGES_PER_SUBJECT - 1 {
             fs::write(pages.join(format!("p{i}.md")), "x").expect("fill");
         }
-        assert_eq!(wiki.list_pages("s").expect("list").len(), MAX_PAGES_PER_SUBJECT);
+        assert_eq!(
+            wiki.list_pages("s").expect("list").len(),
+            MAX_PAGES_PER_SUBJECT
+        );
         assert!(wiki.write_page("s", "one-too-many", "x").is_err());
-        assert!(wiki.write_page("s", "ok", "rewriting an existing page is still fine").is_ok());
-        fs::write(pages.join("huge.md"), vec![b'x'; usize::try_from(MAX_READ_BYTES).expect("fits") + 1]).expect("huge");
-        assert!(wiki.read_page("s", "huge").is_err(), "oversized files are not read");
+        assert!(
+            wiki.write_page("s", "ok", "rewriting an existing page is still fine")
+                .is_ok()
+        );
+        fs::write(
+            pages.join("huge.md"),
+            vec![b'x'; usize::try_from(MAX_READ_BYTES).expect("fits") + 1],
+        )
+        .expect("huge");
+        assert!(
+            wiki.read_page("s", "huge").is_err(),
+            "oversized files are not read"
+        );
     }
 
     #[test]
@@ -428,8 +531,12 @@ mod tests {
         assert!(!wiki.subject_dir_exists("s"));
         assert!(wiki.list_pages("s").expect("list").is_empty());
         assert_eq!(wiki.read_page("s", "p").expect("read"), None);
-        wiki.write_page("s", "p", "again").expect("rebuild on write");
-        assert_eq!(wiki.read_page("s", "p").expect("read").as_deref(), Some("again"));
+        wiki.write_page("s", "p", "again")
+            .expect("rebuild on write");
+        assert_eq!(
+            wiki.read_page("s", "p").expect("read").as_deref(),
+            Some("again")
+        );
         fs::remove_dir_all(wiki.root()).expect("delete root");
         assert!(wiki.list_pages("s").expect("list").is_empty());
     }
@@ -440,7 +547,13 @@ mod tests {
         // The root is a file, so creating a folder under it fails with an OS error.
         fs::create_dir_all(wiki.root().parent().expect("parent")).expect("parent");
         fs::write(wiki.root(), "not a folder").expect("file");
-        let err = wiki.create_subject("s", "s").expect_err("fails").to_string();
-        assert!(err.contains("create folder") && !err.contains("StudyWiki"), "{err}");
+        let err = wiki
+            .create_subject("s", "s")
+            .expect_err("fails")
+            .to_string();
+        assert!(
+            err.contains("create folder") && !err.contains("StudyWiki"),
+            "{err}"
+        );
     }
 }

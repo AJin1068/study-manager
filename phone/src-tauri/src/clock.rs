@@ -14,7 +14,9 @@ pub struct BootClock {
 
 impl BootClock {
     pub fn new() -> Self {
-        Self { started: Instant::now() }
+        Self {
+            started: Instant::now(),
+        }
     }
 }
 
@@ -26,10 +28,17 @@ impl Default for BootClock {
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 fn boottime_ms() -> Option<i64> {
-    let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+    let mut ts = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
     // SAFETY: `ts` is a valid, writable timespec for the duration of the call.
     let rc = unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut ts) };
-    (rc == 0).then(|| i64::from(ts.tv_sec).saturating_mul(1000).saturating_add(i64::from(ts.tv_nsec) / 1_000_000))
+    (rc == 0).then(|| {
+        i64::from(ts.tv_sec)
+            .saturating_mul(1000)
+            .saturating_add(i64::from(ts.tv_nsec) / 1_000_000)
+    })
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
@@ -39,11 +48,17 @@ fn boottime_ms() -> Option<i64> {
 
 impl Clock for BootClock {
     fn mono_ms(&self) -> i64 {
-        boottime_ms().unwrap_or_else(|| i64::try_from(self.started.elapsed().as_millis()).unwrap_or(i64::MAX))
+        boottime_ms().unwrap_or_else(|| {
+            i64::try_from(self.started.elapsed().as_millis()).unwrap_or(i64::MAX)
+        })
     }
 
     fn wall_ms(&self) -> i64 {
-        SystemTime::now().duration_since(UNIX_EPOCH).ok().and_then(|d| i64::try_from(d.as_millis()).ok()).unwrap_or(0)
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .ok()
+            .and_then(|d| i64::try_from(d.as_millis()).ok())
+            .unwrap_or(0)
     }
 }
 

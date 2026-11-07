@@ -56,7 +56,9 @@ fn visible_chars(body: &str) -> usize {
             let mut rest = l;
             while let Some(start) = rest.find("[[") {
                 stripped.push_str(&rest[..start]);
-                rest = rest[start..].find("]]").map_or("", |end| &rest[start + end + 2..]);
+                rest = rest[start..]
+                    .find("]]")
+                    .map_or("", |end| &rest[start + end + 2..]);
             }
             stripped.push_str(rest);
             stripped.chars().filter(|c| c.is_alphanumeric()).count()
@@ -65,7 +67,10 @@ fn visible_chars(body: &str) -> usize {
 }
 
 fn fingerprint(body: &str) -> String {
-    body.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+    body.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 /// Findings sorted by kind, then page name.
@@ -76,7 +81,11 @@ pub fn lint_pages(pages: &[(String, String)]) -> Vec<LintFinding> {
 
     for (name, body) in pages {
         if visible_chars(body) < EMPTY_BELOW_CHARS {
-            findings.push(LintFinding { kind: LintKind::Empty, page_name: name.clone(), detail: None });
+            findings.push(LintFinding {
+                kind: LintKind::Empty,
+                page_name: name.clone(),
+                detail: None,
+            });
         }
         let mut seen = BTreeSet::new();
         for target in link_targets(body) {
@@ -89,7 +98,11 @@ pub fn lint_pages(pages: &[(String, String)]) -> Vec<LintFinding> {
                         *inbound.entry(known_name).or_default() += 1;
                     }
                 }
-                None => findings.push(LintFinding { kind: LintKind::BrokenLink, page_name: name.clone(), detail: Some(target) }),
+                None => findings.push(LintFinding {
+                    kind: LintKind::BrokenLink,
+                    page_name: name.clone(),
+                    detail: Some(target),
+                }),
             }
         }
     }
@@ -118,11 +131,16 @@ pub fn lint_pages(pages: &[(String, String)]) -> Vec<LintFinding> {
     if pages.len() > 1 {
         for (name, _) in pages {
             if inbound.get(name.as_str()).copied().unwrap_or(0) == 0 {
-                findings.push(LintFinding { kind: LintKind::Orphan, page_name: name.clone(), detail: None });
+                findings.push(LintFinding {
+                    kind: LintKind::Orphan,
+                    page_name: name.clone(),
+                    detail: None,
+                });
             }
         }
     }
-    findings.sort_by(|a, b| (a.kind, &a.page_name, &a.detail).cmp(&(b.kind, &b.page_name, &b.detail)));
+    findings
+        .sort_by(|a, b| (a.kind, &a.page_name, &a.detail).cmp(&(b.kind, &b.page_name, &b.detail)));
     findings
 }
 
@@ -154,17 +172,29 @@ mod tests {
     }
 
     fn kinds(findings: &[LintFinding]) -> Vec<(LintKind, &str, Option<&str>)> {
-        findings.iter().map(|f| (f.kind, f.page_name.as_str(), f.detail.as_deref())).collect()
+        findings
+            .iter()
+            .map(|f| (f.kind, f.page_name.as_str(), f.detail.as_deref()))
+            .collect()
     }
 
     #[test]
     fn finds_empty_broken_duplicate_and_orphan_pages_without_a_model() {
         let pages = vec![
-            page("개요", "# 개요\n\n미분과 적분의 관계를 설명한다. [[미분]] [[없는 페이지]]"),
+            page(
+                "개요",
+                "# 개요\n\n미분과 적분의 관계를 설명한다. [[미분]] [[없는 페이지]]",
+            ),
             page("미분", "# 미분\n\n도함수는 순간 변화율이다. [[개요]]"),
-            page("미분 복사본", "# 미분\n\n도함수는   순간 변화율이다. [[개요]]"),
+            page(
+                "미분 복사본",
+                "# 미분\n\n도함수는   순간 변화율이다. [[개요]]",
+            ),
             page("빈 페이지", "# 빈 페이지\n"),
-            page("외톨이", "# 외톨이\n\n아무도 링크하지 않는 충분히 긴 본문이다."),
+            page(
+                "외톨이",
+                "# 외톨이\n\n아무도 링크하지 않는 충분히 긴 본문이다.",
+            ),
         ];
         let found = lint_pages(&pages);
         assert_eq!(
@@ -182,15 +212,27 @@ mod tests {
 
     #[test]
     fn a_single_page_is_not_an_orphan_and_links_to_itself_do_not_count() {
-        assert!(lint_pages(&[page("혼자", "# 혼자\n\n충분히 긴 본문이 여기에 있다. [[혼자]]")]).is_empty());
-        let two = lint_pages(&[page("가", "# 가\n\n충분히 긴 본문이 여기에 있다. [[가]]"), page("나", "# 나\n\n충분히 긴 본문이 여기에 있다. [[가]]")]);
+        assert!(
+            lint_pages(&[page(
+                "혼자",
+                "# 혼자\n\n충분히 긴 본문이 여기에 있다. [[혼자]]"
+            )])
+            .is_empty()
+        );
+        let two = lint_pages(&[
+            page("가", "# 가\n\n충분히 긴 본문이 여기에 있다. [[가]]"),
+            page("나", "# 나\n\n충분히 긴 본문이 여기에 있다. [[가]]"),
+        ]);
         assert_eq!(kinds(&two), [(LintKind::Orphan, "나", None)]);
     }
 
     #[test]
     fn link_parsing_drops_aliases_sections_and_unclosed_brackets() {
         assert_eq!(link_targets("[[a|별칭]] [[b#절]] [[c"), ["a", "b"]);
-        assert_eq!(link_targets("[[bad/name]] [[줄\n바꿈]]"), Vec::<String>::new());
+        assert_eq!(
+            link_targets("[[bad/name]] [[줄\n바꿈]]"),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
@@ -199,7 +241,10 @@ mod tests {
         let first = lint_pages(&pages);
         assert_eq!(first, lint_pages(&pages));
         let lines = describe(&first);
-        assert!(lines.contains(&"깨진 링크: 가 -> 없음".to_string()), "{lines:?}");
+        assert!(
+            lines.contains(&"깨진 링크: 가 -> 없음".to_string()),
+            "{lines:?}"
+        );
         assert!(lines.iter().all(|l| !l.contains("본문")));
     }
 }

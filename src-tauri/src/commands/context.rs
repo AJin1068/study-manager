@@ -2,7 +2,7 @@
 
 use tauri::State;
 
-use super::{lock_db, AppState};
+use super::{AppState, lock_db};
 use crate::clock::now_ms;
 use crate::error::AppResult;
 use crate::settings::{SettingValue, UpdateOutcome};
@@ -15,7 +15,11 @@ pub fn get_context_status(state: State<'_, AppState>) -> AppResult<ContextStatus
 }
 
 #[tauri::command]
-pub fn update_context_setting(state: State<'_, AppState>, key: ContextSettingKey, value: SettingValue) -> AppResult<UpdateOutcome> {
+pub fn update_context_setting(
+    state: State<'_, AppState>,
+    key: ContextSettingKey,
+    value: SettingValue,
+) -> AppResult<UpdateOutcome> {
     let mut conn = lock_db(&state.db)?;
     study_context::update_setting(&mut conn, key, value, now_ms()?)
 }

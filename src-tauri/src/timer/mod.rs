@@ -32,7 +32,7 @@ pub mod summary;
 #[cfg(test)]
 mod tests;
 
-use derive::{derive, DeriveInput, Derived, RunDelta, RunTarget, RunWithSegments};
+use derive::{DeriveInput, Derived, RunDelta, RunTarget, RunWithSegments, derive};
 use model::{EndReason, RunStatus, TimerState};
 
 /// Days before today that are scanned for runs to catch up (missed marking, late closing).
@@ -81,21 +81,38 @@ fn load<Tz: TimeZone>(conn: &Connection, tz: &Tz, now_ms: i64) -> AppResult<Load
     let (occurrences, modes) = plan::occurrences_in(conn, tz, from, to)?;
     let mut runs = Vec::new();
     for run in store::list_runs_since(conn, &from.format(DATE_FMT).to_string())? {
-        let segments = if run.status == RunStatus::Active { store::list_segments(conn, run.id)? } else { Vec::new() };
+        let segments = if run.status == RunStatus::Active {
+            store::list_segments(conn, run.id)?
+        } else {
+            Vec::new()
+        };
         runs.push(RunWithSegments { run, segments });
     }
-    Ok(Loaded { occurrences, modes, runs })
+    Ok(Loaded {
+        occurrences,
+        modes,
+        runs,
+    })
 }
 
 /// Read-only derivation at `now_ms` (already an effective time). Writes nothing.
 fn project<Tz: TimeZone>(conn: &Connection, tz: &Tz, now_ms: i64) -> AppResult<Derived> {
     let loaded = load(conn, tz, now_ms)?;
-    derive(&DeriveInput { now_ms, occurrences: &loaded.occurrences, modes: &loaded.modes, runs: &loaded.runs })
+    derive(&DeriveInput {
+        now_ms,
+        occurrences: &loaded.occurrences,
+        modes: &loaded.modes,
+        runs: &loaded.runs,
+    })
 }
 
 /// Snapshot for `get_timer_state`. Read-only, so it is correct even while a reconcile is racing.
 /// The lock row must exist: an unknown lock is an error, never a quiet "idle".
-pub fn current_state<Tz: TimeZone>(conn: &Connection, tz: &Tz, effective_now_ms: i64) -> AppResult<TimerState> {
+pub fn current_state<Tz: TimeZone>(
+    conn: &Connection,
+    tz: &Tz,
+    effective_now_ms: i64,
+) -> AppResult<TimerState> {
     store::read_study_state(conn)?;
     Ok(project(conn, tz, effective_now_ms)?.state)
 }
@@ -112,7 +129,11 @@ fn apply_delta(conn: &Connection, delta: &RunDelta) -> AppResult<()> {
         RunTarget::Existing(id) => *id,
         RunTarget::New(run) => {
             let id = store::insert_run(conn, run)?;
-            tracing::info!(event = "run_created", run_id = id, status = run.status.as_str());
+            tracing::info!(
+                event = "run_created",
+                run_id = id,
+                status = run.status.as_str()
+            );
             id
         }
     };
@@ -140,8 +161,19 @@ fn apply_delta(conn: &Connection, delta: &RunDelta) -> AppResult<()> {
         );
     }
     if let Some(finish) = &delta.finish {
-        store::finish_run(conn, run_id, finish.status, finish.ended_at_ms, finish.detail_code)?;
-        tracing::info!(event = "run_finished", run_id, status = finish.status.as_str(), at_ms = finish.ended_at_ms);
+        store::finish_run(
+            conn,
+            run_id,
+            finish.status,
+            finish.ended_at_ms,
+            finish.detail_code,
+        )?;
+        tracing::info!(
+            event = "run_finished",
+            run_id,
+            status = finish.status.as_str(),
+            at_ms = finish.ended_at_ms
+        );
     }
     Ok(())
 }
@@ -150,11 +182,18 @@ fn apply_delta(conn: &Connection, delta: &RunDelta) -> AppResult<()> {
 /// state. A read-only pre-check keeps the idle ticks from taking the write lock; a change is then
 /// re-derived inside the transaction so it cannot act on a view another writer already changed.
 /// A missing lock row is an error before anything is written.
-pub fn reconcile<Tz: TimeZone>(conn: &mut Connection, tz: &Tz, effective_now_ms: i64) -> AppResult<Reconciled> {
+pub fn reconcile<Tz: TimeZone>(
+    conn: &mut Connection,
+    tz: &Tz,
+    effective_now_ms: i64,
+) -> AppResult<Reconciled> {
     let (lock_before, _) = store::read_study_state(conn)?;
     let pre = project(conn, tz, effective_now_ms)?;
     if pre.deltas.is_empty() && pre.lock_target == lock_before {
-        return Ok(Reconciled { changed: false, state: pre.state });
+        return Ok(Reconciled {
+            changed: false,
+            state: pre.state,
+        });
     }
 
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -165,11 +204,18 @@ pub fn reconcile<Tz: TimeZone>(conn: &mut Connection, tz: &Tz, effective_now_ms:
     }
     if plan.lock_target != lock_now {
         store::put_study_state(&tx, plan.lock_target, effective_now_ms)?;
-        tracing::info!(event = "lock_changed", lock_held = plan.lock_target, at_ms = effective_now_ms);
+        tracing::info!(
+            event = "lock_changed",
+            lock_held = plan.lock_target,
+            at_ms = effective_now_ms
+        );
     }
     let state = project(&tx, tz, effective_now_ms)?.state;
     tx.commit()?;
-    Ok(Reconciled { changed: !plan.deltas.is_empty() || plan.lock_target != lock_now, state })
+    Ok(Reconciled {
+        changed: !plan.deltas.is_empty() || plan.lock_target != lock_now,
+        state,
+    })
 }
 
 /// Ends every active run with `status`/`reason` and frees the lock, inside the caller's
@@ -191,11 +237,20 @@ fn end_active_runs(
         return Ok(false);
     }
     for run in &active {
-        for seg in store::list_segments(tx, run.id)?.into_iter().filter(|s| s.ended_at_ms.is_none()) {
+        for seg in store::list_segments(tx, run.id)?
+            .into_iter()
+            .filter(|s| s.ended_at_ms.is_none())
+        {
             store::close_segment(tx, seg.id, at_ms.max(seg.started_at_ms), reason)?;
         }
         store::finish_run(tx, run.id, status, at_ms, Some(detail))?;
-        tracing::info!(event = "run_released", run_id = run.id, status = status.as_str(), reason = detail, at_ms);
+        tracing::info!(
+            event = "run_released",
+            run_id = run.id,
+            status = status.as_str(),
+            reason = detail,
+            at_ms
+        );
     }
     if lock_held {
         store::put_study_state(tx, false, at_ms)?;
@@ -212,13 +267,25 @@ fn end_active_runs(
 /// everything before the first downtime record inside it is dropped. Without any record the
 /// whole remainder of the segment is reported, which can overcount its watched lead-in: the
 /// result is an upper bound there and exact for segments that were never watched.
-pub fn clock_jump_intervals(conn: &Connection, from_ms: i64, to_ms: i64) -> AppResult<Vec<Interval>> {
+pub fn clock_jump_intervals(
+    conn: &Connection,
+    from_ms: i64,
+    to_ms: i64,
+) -> AppResult<Vec<Interval>> {
     let covers = store::list_downtime_intervals(conn, from_ms, to_ms)?;
     let mut out = Vec::new();
     for (span, watched_at_start) in store::list_unwatched_spans(conn, from_ms, to_ms)? {
-        let mut clipped = Interval { start: span.start.max(from_ms), end: span.end.min(to_ms) };
+        let mut clipped = Interval {
+            start: span.start.max(from_ms),
+            end: span.end.min(to_ms),
+        };
         if watched_at_start {
-            if let Some(first) = covers.iter().map(|c| c.start).filter(|s| *s > clipped.start && *s < clipped.end).min() {
+            if let Some(first) = covers
+                .iter()
+                .map(|c| c.start)
+                .filter(|s| *s > clipped.start && *s < clipped.end)
+                .min()
+            {
                 clipped.start = first;
             }
         }
@@ -228,5 +295,8 @@ pub fn clock_jump_intervals(conn: &Connection, from_ms: i64, to_ms: i64) -> AppR
 }
 
 pub fn clock_jump_ms(conn: &Connection, from_ms: i64, to_ms: i64) -> AppResult<i64> {
-    Ok(clock_jump_intervals(conn, from_ms, to_ms)?.iter().map(|i| i.end - i.start).sum())
+    Ok(clock_jump_intervals(conn, from_ms, to_ms)?
+        .iter()
+        .map(|i| i.end - i.start)
+        .sum())
 }

@@ -73,7 +73,12 @@ pub struct PhoneSession {
 }
 
 impl PhoneSession {
-    pub fn new(endpoint: &str, anon_key: &str, transport: Arc<dyn HttpTransport>, clock: Arc<dyn Clock>) -> Self {
+    pub fn new(
+        endpoint: &str,
+        anon_key: &str,
+        transport: Arc<dyn HttpTransport>,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
         Self {
             endpoint: endpoint.trim_end_matches('/').to_string(),
             anon_key: anon_key.to_string(),
@@ -99,21 +104,29 @@ impl PhoneSession {
     }
 
     fn post(&self, path: &str, body: &[u8]) -> Result<(), AuthError> {
-        let request = HttpRequest::new(Method::Post, format!("{}{}", self.endpoint, path)).header("apikey", &self.anon_key).json_body(body.to_vec());
+        let request = HttpRequest::new(Method::Post, format!("{}{}", self.endpoint, path))
+            .header("apikey", &self.anon_key)
+            .json_body(body.to_vec());
         let response = self.transport.send(request).map_err(AuthError::Network)?;
         match response.status {
             200..=299 => {
-                let parsed: TokenResponse = serde_json::from_slice(&response.body).map_err(|_| AuthError::Decode)?;
+                let parsed: TokenResponse =
+                    serde_json::from_slice(&response.body).map_err(|_| AuthError::Decode)?;
                 *self.slot() = Some(Live {
                     access: parsed.access_token,
                     refresh: parsed.refresh_token,
-                    expires_at_ms: self.clock.wall_ms().saturating_add(parsed.expires_in.saturating_mul(1000)),
+                    expires_at_ms: self
+                        .clock
+                        .wall_ms()
+                        .saturating_add(parsed.expires_in.saturating_mul(1000)),
                     user_id: parsed.user.id,
                 });
                 Ok(())
             }
             400 | 401 | 403 => Err(AuthError::Expired),
-            429 => Err(AuthError::RateLimited { retry_after_ms: response.retry_after_ms().unwrap_or(30_000) }),
+            429 => Err(AuthError::RateLimited {
+                retry_after_ms: response.retry_after_ms().unwrap_or(30_000),
+            }),
             status => Err(AuthError::Server { status }),
         }
     }
@@ -131,7 +144,8 @@ impl PhoneSession {
     }
 
     fn renew(&self, refresh_token: &str) -> Result<(), AuthError> {
-        let body = serde_json::to_vec(&serde_json::json!({ "refresh_token": refresh_token })).map_err(|_| AuthError::Decode)?;
+        let body = serde_json::to_vec(&serde_json::json!({ "refresh_token": refresh_token }))
+            .map_err(|_| AuthError::Decode)?;
         self.post("/auth/v1/token?grant_type=refresh_token", &body)
     }
 
@@ -146,7 +160,11 @@ impl PhoneSession {
 
     pub fn access_token(&self) -> Result<String, AuthError> {
         let (access, refresh, expires_at) = match self.slot().as_ref() {
-            Some(live) => (live.access.clone(), live.refresh.clone(), live.expires_at_ms),
+            Some(live) => (
+                live.access.clone(),
+                live.refresh.clone(),
+                live.expires_at_ms,
+            ),
             None => return Err(AuthError::NotSignedIn),
         };
         if self.clock.wall_ms().saturating_add(EXPIRY_SKEW_MS) < expires_at {
@@ -164,6 +182,9 @@ impl PhoneSession {
     }
 
     fn current_access(&self) -> Result<String, AuthError> {
-        self.slot().as_ref().map(|live| live.access.clone()).ok_or(AuthError::NotSignedIn)
+        self.slot()
+            .as_ref()
+            .map(|live| live.access.clone())
+            .ok_or(AuthError::NotSignedIn)
     }
 }

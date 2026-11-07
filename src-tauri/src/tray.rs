@@ -48,12 +48,21 @@ pub struct TrayLabel {
 pub fn format_remaining(ms: i64) -> String {
     let total = (ms.max(0) + 999) / 1000;
     let (hours, minutes, seconds) = (total / 3600, (total % 3600) / 60, total % 60);
-    if hours > 0 { format!("{hours}:{minutes:02}") } else { format!("{minutes:02}:{seconds:02}") }
+    if hours > 0 {
+        format!("{hours}:{minutes:02}")
+    } else {
+        format!("{minutes:02}:{seconds:02}")
+    }
 }
 
 pub fn tray_label(state: &TimerState) -> TrayLabel {
     let name = match state.phase {
-        Phase::Idle => return TrayLabel { title: None, tooltip: IDLE_TOOLTIP.to_owned() },
+        Phase::Idle => {
+            return TrayLabel {
+                title: None,
+                tooltip: IDLE_TOOLTIP.to_owned(),
+            };
+        }
         Phase::Study => "공부",
         Phase::Break => "휴식",
         Phase::LongBreak => "긴 휴식",
@@ -61,7 +70,10 @@ pub fn tray_label(state: &TimerState) -> TrayLabel {
     let left = format_remaining(state.planned_end_ms.map_or(0, |end| end - state.now_ms));
     TrayLabel {
         title: Some(format!("{left} {name}")),
-        tooltip: format!("{name} · {left} 남음 ({}/{}세트)", state.set_index, state.sets_total),
+        tooltip: format!(
+            "{name} · {left} 남음 ({}/{}세트)",
+            state.set_index, state.sets_total
+        ),
     }
 }
 
@@ -106,11 +118,15 @@ static CHARACTER_LINE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(
 /// Shows the character in the menu bar menu (or removes the row). Rebuilds the menu only when the
 /// line changed.
 pub fn set_character_line(app: &AppHandle, line: Option<&str>) {
-    let Ok(mut shown) = CHARACTER_LINE.lock() else { return };
+    let Ok(mut shown) = CHARACTER_LINE.lock() else {
+        return;
+    };
     if shown.as_deref() == line {
         return;
     }
-    let Some(tray) = app.tray_by_id(TRAY_ID) else { return };
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return;
+    };
     match build_menu(app, line).and_then(|menu| tray.set_menu(Some(menu))) {
         Ok(()) => *shown = line.map(str::to_string),
         Err(err) => tracing::warn!(error = %err, "failed to update the tray character line"),
@@ -151,12 +167,16 @@ pub fn open_chat_window(app: &AppHandle) -> tauri::Result<()> {
         return Ok(());
     }
     let (width, height) = CHAT_WINDOW_SIZE;
-    let window = WebviewWindowBuilder::new(app, CHAT_WINDOW_LABEL, WebviewUrl::App(CHAT_WINDOW_URL.into()))
-        .title("챗봇 입력")
-        .inner_size(width, height)
-        .resizable(false)
-        .always_on_top(true)
-        .build()?;
+    let window = WebviewWindowBuilder::new(
+        app,
+        CHAT_WINDOW_LABEL,
+        WebviewUrl::App(CHAT_WINDOW_URL.into()),
+    )
+    .title("챗봇 입력")
+    .inner_size(width, height)
+    .resizable(false)
+    .always_on_top(true)
+    .build()?;
     window.set_focus()
 }
 
@@ -199,7 +219,10 @@ mod tests {
         assert_ne!(CHAT_WINDOW_LABEL, "main");
         assert!(CHAT_WINDOW_URL.ends_with(&format!("#{CHAT_WINDOW_LABEL}")));
         let capability = include_str!("../capabilities/default.json");
-        assert!(capability.contains(&format!("\"{CHAT_WINDOW_LABEL}\"")), "the quick window needs the app command permissions");
+        assert!(
+            capability.contains(&format!("\"{CHAT_WINDOW_LABEL}\"")),
+            "the quick window needs the app command permissions"
+        );
     }
 
     #[test]
@@ -249,6 +272,8 @@ mod tests {
             planned_end_ms: 1,
         });
         let label = tray_label(&s);
-        assert!(!label.tooltip.contains("비밀") && !label.title.unwrap_or_default().contains("비밀"));
+        assert!(
+            !label.tooltip.contains("비밀") && !label.title.unwrap_or_default().contains("비밀")
+        );
     }
 }

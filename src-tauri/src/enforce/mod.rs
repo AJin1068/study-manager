@@ -9,7 +9,7 @@ pub mod model;
 #[cfg(test)]
 mod tests;
 
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -23,13 +23,17 @@ use crate::clock::now_ms;
 use crate::commands::lock_db;
 use crate::error::{AppError, AppResult};
 use crate::platform::{self, AppIdentity, Notifier, PlatformError, ProcessControl};
-use crate::settings::{self, Outcome, Reason, SettingKey, SettingValue, UpdateOutcome, ENFORCEMENT_MODE};
+use crate::settings::{
+    self, ENFORCEMENT_MODE, Outcome, Reason, SettingKey, SettingValue, UpdateOutcome,
+};
 use crate::store;
 use crate::timer::model::{Phase, TimerState};
 use crate::timer::{self, HighWater};
 
 use decide::{Action, Config, Requested, Tracker};
-use model::{BlockAction, BlockEvent, EnforceMode, EntryKind, EntrySource, NewBlockEvent, TargetKind};
+use model::{
+    BlockAction, BlockEvent, EnforceMode, EntryKind, EntrySource, NewBlockEvent, TargetKind,
+};
 
 pub const BLOCK_ATTEMPT_EVENT: &str = "block_attempt";
 /// Seconds between polls while the app is running. Listing apps is cheap but not free.
@@ -46,11 +50,19 @@ pub fn read_config(conn: &Connection) -> AppResult<Config> {
     let mode = match settings::read_value(conn, &ENFORCEMENT_MODE)? {
         SettingValue::Text(raw) => EnforceMode::parse(&raw)
             .ok_or_else(|| AppError::Internal(format!("unknown enforcement mode {raw:?}")))?,
-        other => return Err(AppError::Internal(format!("enforcementMode is not text: {other:?}"))),
+        other => {
+            return Err(AppError::Internal(format!(
+                "enforcementMode is not text: {other:?}"
+            )));
+        }
     };
     let grace_secs = match settings::read_value(conn, &SettingKey::GraceWaitSec.spec())? {
         SettingValue::Int(secs) => secs,
-        other => return Err(AppError::Internal(format!("graceWaitSec is not an integer: {other:?}"))),
+        other => {
+            return Err(AppError::Internal(format!(
+                "graceWaitSec is not an integer: {other:?}"
+            )));
+        }
     };
     Ok(Config {
         mode,
@@ -61,11 +73,24 @@ pub fn read_config(conn: &Connection) -> AppResult<Config> {
 
 /// Switches the enforcement mode. Enforce needs the typed confirmation sentence (not stored);
 /// the change is rejected and recorded while the lock is held, like every other setting.
-pub fn set_mode(conn: &mut Connection, mode: EnforceMode, confirmation: &str, at_ms: i64) -> AppResult<UpdateOutcome> {
+pub fn set_mode(
+    conn: &mut Connection,
+    mode: EnforceMode,
+    confirmation: &str,
+    at_ms: i64,
+) -> AppResult<UpdateOutcome> {
     if mode == EnforceMode::Enforce && confirmation != ENFORCE_CONFIRMATION {
-        return Err(AppError::Invalid("the confirmation sentence does not match".into()));
+        return Err(AppError::Invalid(
+            "the confirmation sentence does not match".into(),
+        ));
     }
-    settings::apply_setting(conn, &ENFORCEMENT_MODE, &SettingValue::Text(mode.as_str().into()), at_ms, || Ok(()))
+    settings::apply_setting(
+        conn,
+        &ENFORCEMENT_MODE,
+        &SettingValue::Text(mode.as_str().into()),
+        at_ms,
+        || Ok(()),
+    )
 }
 
 // ---- block list ----
@@ -75,50 +100,111 @@ pub fn set_mode(conn: &mut Connection, mode: EnforceMode, confirmation: &str, at
 pub(crate) fn checked_app_id(raw: &str) -> AppResult<String> {
     let id = platform::normalize_app_id(raw);
     if id.is_empty() || id.chars().count() > MAX_PATTERN_CHARS || id.chars().any(char::is_control) {
-        return Err(AppError::Invalid("app id is empty, too long, or has control characters".into()));
+        return Err(AppError::Invalid(
+            "app id is empty, too long, or has control characters".into(),
+        ));
     }
     Ok(id)
 }
 
 /// Adds an app to the block list. Protected apps are refused up front. Locked during study: the
 /// attempt is recorded in the setting history and nothing changes.
-pub fn add_entry(conn: &mut Connection, raw_pattern: &str, category: Option<&str>, at_ms: i64) -> AppResult<UpdateOutcome> {
+pub fn add_entry(
+    conn: &mut Connection,
+    raw_pattern: &str,
+    category: Option<&str>,
+    at_ms: i64,
+) -> AppResult<UpdateOutcome> {
     let pattern = checked_app_id(raw_pattern)?;
     if platform::is_protected_id(&pattern) {
-        return Err(AppError::Invalid("system, security, and this app cannot be blocked".into()));
+        return Err(AppError::Invalid(
+            "system, security, and this app cannot be blocked".into(),
+        ));
     }
     let after = format!("add:{pattern}");
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     if crate::study::lock_held(&tx)? {
-        store::append_history(&tx, at_ms, BLOCK_LIST_KEY, None, &after, Reason::User, Outcome::RejectedLocked)?;
+        store::append_history(
+            &tx,
+            at_ms,
+            BLOCK_LIST_KEY,
+            None,
+            &after,
+            Reason::User,
+            Outcome::RejectedLocked,
+        )?;
         tx.commit()?;
-        return Ok(UpdateOutcome::RejectedLocked { key: BLOCK_LIST_KEY.into() });
+        return Ok(UpdateOutcome::RejectedLocked {
+            key: BLOCK_LIST_KEY.into(),
+        });
     }
-    if !store::insert_block_entry(&tx, EntryKind::App, &pattern, EntrySource::User, category, at_ms)? {
-        return Err(AppError::Invalid("this app is already on the block list".into()));
+    if !store::insert_block_entry(
+        &tx,
+        EntryKind::App,
+        &pattern,
+        EntrySource::User,
+        category,
+        at_ms,
+    )? {
+        return Err(AppError::Invalid(
+            "this app is already on the block list".into(),
+        ));
     }
-    store::append_history(&tx, at_ms, BLOCK_LIST_KEY, None, &after, Reason::User, Outcome::Applied)?;
+    store::append_history(
+        &tx,
+        at_ms,
+        BLOCK_LIST_KEY,
+        None,
+        &after,
+        Reason::User,
+        Outcome::Applied,
+    )?;
     tx.commit()?;
-    Ok(UpdateOutcome::Applied { key: BLOCK_LIST_KEY.into() })
+    Ok(UpdateOutcome::Applied {
+        key: BLOCK_LIST_KEY.into(),
+    })
 }
 
 /// Removes a user entry. Locked during study, like adding. Preset entries follow their category.
 pub fn remove_entry(conn: &mut Connection, id: i64, at_ms: i64) -> AppResult<UpdateOutcome> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let entry = store::get_block_entry(&tx, id)?.ok_or_else(|| AppError::Invalid("unknown block list entry".into()))?;
+    let entry = store::get_block_entry(&tx, id)?
+        .ok_or_else(|| AppError::Invalid("unknown block list entry".into()))?;
     if entry.source == EntrySource::Preset.as_str() {
-        return Err(AppError::Invalid("a preset entry is switched off with its category, not deleted".into()));
+        return Err(AppError::Invalid(
+            "a preset entry is switched off with its category, not deleted".into(),
+        ));
     }
     let before = format!("add:{}", entry.pattern);
     if crate::study::lock_held(&tx)? {
-        store::append_history(&tx, at_ms, BLOCK_LIST_KEY, Some(&before), "remove", Reason::User, Outcome::RejectedLocked)?;
+        store::append_history(
+            &tx,
+            at_ms,
+            BLOCK_LIST_KEY,
+            Some(&before),
+            "remove",
+            Reason::User,
+            Outcome::RejectedLocked,
+        )?;
         tx.commit()?;
-        return Ok(UpdateOutcome::RejectedLocked { key: BLOCK_LIST_KEY.into() });
+        return Ok(UpdateOutcome::RejectedLocked {
+            key: BLOCK_LIST_KEY.into(),
+        });
     }
     store::delete_block_entry(&tx, id)?;
-    store::append_history(&tx, at_ms, BLOCK_LIST_KEY, Some(&before), "remove", Reason::User, Outcome::Applied)?;
+    store::append_history(
+        &tx,
+        at_ms,
+        BLOCK_LIST_KEY,
+        Some(&before),
+        "remove",
+        Reason::User,
+        Outcome::Applied,
+    )?;
     tx.commit()?;
-    Ok(UpdateOutcome::Applied { key: BLOCK_LIST_KEY.into() })
+    Ok(UpdateOutcome::Applied {
+        key: BLOCK_LIST_KEY.into(),
+    })
 }
 
 // ---- status ----
@@ -160,7 +246,11 @@ pub fn running_apps(control: &dyn ProcessControl) -> AppResult<Vec<RunningApp>> 
     let mut apps: Vec<RunningApp> = Vec::new();
     for app in control.list_running()? {
         if apps.iter().all(|seen| seen.id != app.id) {
-            apps.push(RunningApp { id: app.id, display_name: app.display_name, is_protected: app.is_protected });
+            apps.push(RunningApp {
+                id: app.id,
+                display_name: app.display_name,
+                is_protected: app.is_protected,
+            });
         }
     }
     apps.sort_by_key(|a| a.display_name.to_lowercase());
@@ -178,8 +268,10 @@ pub struct StudyWindow {
 
 /// `Some` only for lock held during a study block; breaks, idle, and a free lock give `None`.
 pub fn study_window(state: &TimerState) -> Option<StudyWindow> {
-    decide::applies(state.phase, state.lock_held)
-        .then_some(StudyWindow { run_id: state.run_id, segment_id: state.segment_id })
+    decide::applies(state.phase, state.lock_held).then_some(StudyWindow {
+        run_id: state.run_id,
+        segment_id: state.segment_id,
+    })
 }
 
 /// What `block_attempt` carries to the UI.
@@ -220,13 +312,32 @@ impl Recorder<'_> {
         };
         store::insert_block_event(&*lock_db(self.db)?, &event)?;
         // One format for every action; the id is an app identifier, never a title.
-        let (mode, name, detail_code) = (self.mode.as_str(), action.as_str(), detail.unwrap_or("none"));
+        let (mode, name, detail_code) = (
+            self.mode.as_str(),
+            action.as_str(),
+            detail.unwrap_or("none"),
+        );
         if action == BlockAction::Failed {
-            tracing::warn!(event = name, target_kind = "app", target_id = id, mode, detail_code);
+            tracing::warn!(
+                event = name,
+                target_kind = "app",
+                target_id = id,
+                mode,
+                detail_code
+            );
         } else {
-            tracing::info!(event = name, target_kind = "app", target_id = id, mode, detail_code);
+            tracing::info!(
+                event = name,
+                target_kind = "app",
+                target_id = id,
+                mode,
+                detail_code
+            );
         }
-        self.out.push(Attempt { target_id: id.to_owned(), action: name.to_owned() });
+        self.out.push(Attempt {
+            target_id: id.to_owned(),
+            action: name.to_owned(),
+        });
         Ok(())
     }
 }
@@ -267,7 +378,10 @@ pub fn poll(
     tracker.enter((window.run_id, window.segment_id));
     let (cfg, blocklist) = {
         let conn = lock_db(db)?;
-        (read_config(&conn)?, store::list_enabled_patterns(&conn, EntryKind::App)?)
+        (
+            read_config(&conn)?,
+            store::list_enabled_patterns(&conn, EntryKind::App)?,
+        )
     };
     if blocklist.is_empty() {
         return Ok(Vec::new());
@@ -285,13 +399,23 @@ pub fn poll(
             return Ok(Vec::new());
         }
     };
-    let mut rec = Recorder { db, window, mode: cfg.mode, at_ms: now_ms, out: Vec::new() };
+    let mut rec = Recorder {
+        db,
+        window,
+        mode: cfg.mode,
+        at_ms: now_ms,
+        out: Vec::new(),
+    };
 
     // Apps we asked to quit that are gone now (or whose pid was reused by another app).
     let gone: Vec<u32> = tracker
         .requested
         .iter()
-        .filter(|(pid, request)| !running.iter().any(|a| a.pid == **pid && a.id == request.app.id))
+        .filter(|(pid, request)| {
+            !running
+                .iter()
+                .any(|a| a.pid == **pid && a.id == request.app.id)
+        })
         .map(|(pid, _)| *pid)
         .collect();
     for pid in gone {
@@ -303,7 +427,15 @@ pub fn poll(
         }
     }
 
-    for action in decide::decide(&running, &blocklist, Phase::Study, true, &cfg, tracker, now_ms) {
+    for action in decide::decide(
+        &running,
+        &blocklist,
+        Phase::Study,
+        true,
+        &cfg,
+        tracker,
+        now_ms,
+    ) {
         match action {
             Action::WouldTerminate(app) => {
                 tracker.first_report(app.pid, decide::KIND_WOULD_TERMINATE);
@@ -315,7 +447,11 @@ pub fn poll(
             }
             Action::ForceNotAllowed(app) => {
                 tracker.first_report(app.pid, decide::KIND_FORCE_NOT_ALLOWED);
-                rec.record(&app.id, BlockAction::Failed, Some("grace_expired_force_not_allowed"))?;
+                rec.record(
+                    &app.id,
+                    BlockAction::Failed,
+                    Some("grace_expired_force_not_allowed"),
+                )?;
             }
             Action::RequestQuit(app) => {
                 if !still_locked(db)? {
@@ -324,7 +460,14 @@ pub fn poll(
                 }
                 let result = control.request_quit(&app);
                 // Tracked even when the request failed: the grace clock still decides about a force kill.
-                tracker.requested.insert(app.pid, Requested { app: app.clone(), at_ms: now_ms, forced: false });
+                tracker.requested.insert(
+                    app.pid,
+                    Requested {
+                        app: app.clone(),
+                        at_ms: now_ms,
+                        forced: false,
+                    },
+                );
                 match result {
                     Ok(()) => rec.record(&app.id, BlockAction::TerminateRequested, None)?,
                     Err(err) => rec.record(&app.id, BlockAction::Failed, Some(detail_for(&err)))?,
@@ -369,7 +512,14 @@ fn pass<Tz: TimeZone>(
 ) -> AppResult<Vec<Attempt>> {
     let effective = high_water.observe(now_ms()?);
     let state = timer::current_state(&*lock_db(db)?, tz, effective)?;
-    poll(db, study_window(&state), control, notifier, tracker, effective)
+    poll(
+        db,
+        study_window(&state),
+        control,
+        notifier,
+        tracker,
+        effective,
+    )
 }
 
 /// Starts the enforcement thread. It reads the timer state every few seconds but lists processes
@@ -387,12 +537,22 @@ pub fn spawn(
         loop {
             thread::sleep(POLL);
             let result = catch_unwind(AssertUnwindSafe(|| {
-                pass(&db, &Local, &high_water, control.as_ref(), notifier.as_ref(), &mut tracker)
+                pass(
+                    &db,
+                    &Local,
+                    &high_water,
+                    control.as_ref(),
+                    notifier.as_ref(),
+                    &mut tracker,
+                )
             }));
             match result {
                 Ok(Ok(attempts)) => emit_attempts(&app, attempts),
                 Ok(Err(err)) => tracing::error!(event = "enforce_pass_failed", error = %err),
-                Err(_) => tracing::error!(event = "enforce_pass_panicked", "enforcement pass panicked; retrying"),
+                Err(_) => tracing::error!(
+                    event = "enforce_pass_panicked",
+                    "enforcement pass panicked; retrying"
+                ),
             }
         }
     });

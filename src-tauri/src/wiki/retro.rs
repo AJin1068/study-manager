@@ -101,15 +101,26 @@ pub struct DiffLine {
 pub fn diff_lines(old: &str, new: &str) -> Vec<DiffLine> {
     let a: Vec<&str> = old.lines().collect();
     let b: Vec<&str> = new.lines().collect();
-    let line = |kind, text: &str| DiffLine { kind, text: text.to_string() };
+    let line = |kind, text: &str| DiffLine {
+        kind,
+        text: text.to_string(),
+    };
     if a.len() > MAX_DIFF_LINES || b.len() > MAX_DIFF_LINES {
-        return a.iter().map(|t| line(DiffKind::Removed, t)).chain(b.iter().map(|t| line(DiffKind::Added, t))).collect();
+        return a
+            .iter()
+            .map(|t| line(DiffKind::Removed, t))
+            .chain(b.iter().map(|t| line(DiffKind::Added, t)))
+            .collect();
     }
     // lcs[i][j] = length of the common subsequence of a[i..] and b[j..].
     let mut lcs = vec![vec![0_u32; b.len() + 1]; a.len() + 1];
     for i in (0..a.len()).rev() {
         for j in (0..b.len()).rev() {
-            lcs[i][j] = if a[i] == b[j] { lcs[i + 1][j + 1] + 1 } else { lcs[i + 1][j].max(lcs[i][j + 1]) };
+            lcs[i][j] = if a[i] == b[j] {
+                lcs[i + 1][j + 1] + 1
+            } else {
+                lcs[i + 1][j].max(lcs[i][j + 1])
+            };
         }
     }
     let (mut i, mut j) = (0, 0);
@@ -163,7 +174,10 @@ pub fn parse_advice(answer: &str, offered: &[String]) -> Option<Vec<Suggestion>>
     for item in raw.suggestions {
         let page_name = names::page_name(&item.page_name)?;
         let advice = item.advice.split_whitespace().collect::<Vec<_>>().join(" ");
-        if advice.is_empty() || advice.chars().count() > MAX_ADVICE_CHARS || advice.chars().any(char::is_control) {
+        if advice.is_empty()
+            || advice.chars().count() > MAX_ADVICE_CHARS
+            || advice.chars().any(char::is_control)
+        {
             return None;
         }
         if offered.contains(&page_name) {
@@ -181,21 +195,48 @@ mod tests {
     fn merge_length_bounds_protect_the_original() {
         let original = "가".repeat(100);
         let note = "나".repeat(10);
-        assert_eq!(check_merge(&original, &"가".repeat(49), &note), Err(MergeRejected::TooShort));
-        assert!(check_merge(&original, &"가".repeat(50), &note).is_ok(), "exactly half is allowed");
+        assert_eq!(
+            check_merge(&original, &"가".repeat(49), &note),
+            Err(MergeRejected::TooShort)
+        );
+        assert!(
+            check_merge(&original, &"가".repeat(50), &note).is_ok(),
+            "exactly half is allowed"
+        );
         assert!(check_merge(&original, &"가".repeat(100 + 10 * 3 + 2_000), &note).is_ok());
-        assert_eq!(check_merge(&original, &"가".repeat(100 + 10 * 3 + 2_001), &note), Err(MergeRejected::TooLong));
-        assert_eq!(check_merge(&original, "   ", &note), Err(MergeRejected::Empty));
-        assert_eq!(check_merge(&original, &format!("{original}\0"), &note), Err(MergeRejected::BadText));
-        assert!(check_merge("", "새 페이지", &note).is_ok(), "a new page has no lower bound");
-        assert_eq!(check_merge("", &"가".repeat(MAX_PAGE_BYTES), "x"), Err(MergeRejected::TooLong));
+        assert_eq!(
+            check_merge(&original, &"가".repeat(100 + 10 * 3 + 2_001), &note),
+            Err(MergeRejected::TooLong)
+        );
+        assert_eq!(
+            check_merge(&original, "   ", &note),
+            Err(MergeRejected::Empty)
+        );
+        assert_eq!(
+            check_merge(&original, &format!("{original}\0"), &note),
+            Err(MergeRejected::BadText)
+        );
+        assert!(
+            check_merge("", "새 페이지", &note).is_ok(),
+            "a new page has no lower bound"
+        );
+        assert_eq!(
+            check_merge("", &"가".repeat(MAX_PAGE_BYTES), "x"),
+            Err(MergeRejected::TooLong)
+        );
     }
 
     #[test]
     fn answers_are_parsed_strictly() {
         assert_eq!(parse_merge("{\"markdown\":\"# a\"}"), Ok("# a".to_string()));
-        assert_eq!(parse_merge("```json\n{\"markdown\":\"x\"}\n```"), Ok("x".to_string()));
-        assert_eq!(parse_merge("{\"markdown\":\"x\",\"path\":\"../../etc\"}"), Err(MergeRejected::NotJson));
+        assert_eq!(
+            parse_merge("```json\n{\"markdown\":\"x\"}\n```"),
+            Ok("x".to_string())
+        );
+        assert_eq!(
+            parse_merge("{\"markdown\":\"x\",\"path\":\"../../etc\"}"),
+            Err(MergeRejected::NotJson)
+        );
         assert_eq!(parse_merge("no json"), Err(MergeRejected::NotJson));
     }
 
@@ -203,18 +244,45 @@ mod tests {
     fn the_diff_marks_added_and_removed_lines() {
         let diff = diff_lines("a\nb\nc", "a\nc\nd");
         let shown: Vec<(DiffKind, &str)> = diff.iter().map(|l| (l.kind, l.text.as_str())).collect();
-        assert_eq!(shown, [(DiffKind::Same, "a"), (DiffKind::Removed, "b"), (DiffKind::Same, "c"), (DiffKind::Added, "d")]);
-        assert!(diff_lines("x", "x").iter().all(|l| l.kind == DiffKind::Same));
+        assert_eq!(
+            shown,
+            [
+                (DiffKind::Same, "a"),
+                (DiffKind::Removed, "b"),
+                (DiffKind::Same, "c"),
+                (DiffKind::Added, "d")
+            ]
+        );
+        assert!(
+            diff_lines("x", "x")
+                .iter()
+                .all(|l| l.kind == DiffKind::Same)
+        );
         let huge = "l\n".repeat(MAX_DIFF_LINES + 1);
-        assert_eq!(diff_lines(&huge, "n").iter().filter(|l| l.kind == DiffKind::Added).count(), 1);
+        assert_eq!(
+            diff_lines(&huge, "n")
+                .iter()
+                .filter(|l| l.kind == DiffKind::Added)
+                .count(),
+            1
+        );
     }
 
     #[test]
     fn advice_for_pages_that_were_not_offered_is_dropped_and_oversized_advice_rejects_the_answer() {
         let offered = vec!["미분".to_string()];
         let ok = "{\"suggestions\":[{\"page_name\":\"미분\",\"advice\":\"예시를 더하세요\"},{\"page_name\":\"다른\",\"advice\":\"x\"}]}";
-        assert_eq!(parse_advice(ok, &offered), Some(vec![Suggestion { page_name: "미분".into(), advice: "예시를 더하세요".into() }]));
-        let long = format!("{{\"suggestions\":[{{\"page_name\":\"미분\",\"advice\":\"{}\"}}]}}", "가".repeat(MAX_ADVICE_CHARS + 1));
+        assert_eq!(
+            parse_advice(ok, &offered),
+            Some(vec![Suggestion {
+                page_name: "미분".into(),
+                advice: "예시를 더하세요".into()
+            }])
+        );
+        let long = format!(
+            "{{\"suggestions\":[{{\"page_name\":\"미분\",\"advice\":\"{}\"}}]}}",
+            "가".repeat(MAX_ADVICE_CHARS + 1)
+        );
         assert_eq!(parse_advice(&long, &offered), None);
         assert_eq!(parse_advice("{\"suggestions\":[],\"x\":1}", &offered), None);
     }

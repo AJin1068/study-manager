@@ -37,8 +37,12 @@ pub const REASON_GIFT_REFUND: &str = "gift_refund";
 pub const LEVEL_THRESHOLDS: [i64; 10] = [0, 20, 50, 90, 140, 200, 280, 380, 500, 640];
 
 /// Growth stages and the first level of each, in order.
-pub const STAGE_FIRST_LEVELS: [(Stage, i64); 4] =
-    [(Stage::Seed, 1), (Stage::Sprout, 3), (Stage::SmallTree, 6), (Stage::ForestSpirit, 9)];
+pub const STAGE_FIRST_LEVELS: [(Stage, i64); 4] = [
+    (Stage::Seed, 1),
+    (Stage::Sprout, 3),
+    (Stage::SmallTree, 6),
+    (Stage::ForestSpirit, 9),
+];
 
 #[derive(serde::Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -63,7 +67,10 @@ impl Stage {
 
 /// Level for `earned` total points (never below 1; capped at the last threshold).
 pub fn level_for(earned: i64) -> i64 {
-    let reached = LEVEL_THRESHOLDS.iter().take_while(|needed| earned >= **needed).count();
+    let reached = LEVEL_THRESHOLDS
+        .iter()
+        .take_while(|needed| earned >= **needed)
+        .count();
     i64::try_from(reached.max(1)).unwrap_or(1)
 }
 
@@ -77,5 +84,7 @@ pub fn stage_for_level(level: i64) -> Stage {
 
 /// Total points at which the next level starts; `None` at the top level.
 pub fn next_level_at(level: i64) -> Option<i64> {
-    usize::try_from(level).ok().and_then(|index| LEVEL_THRESHOLDS.get(index).copied())
+    usize::try_from(level)
+        .ok()
+        .and_then(|index| LEVEL_THRESHOLDS.get(index).copied())
 }

@@ -18,8 +18,8 @@ use serde_json::json;
 
 use crate::error::{AppError, AppResult};
 use crate::plan::{
-    self, fmt_date, first_date, is_base_date, plan_duration_min, plan_json, ExceptionKind, ModeLookup, Plan,
-    PlanChange, PlanException, Repeat, MAX_SETS, OVERLAP_HORIZON_DAYS,
+    self, ExceptionKind, MAX_SETS, ModeLookup, OVERLAP_HORIZON_DAYS, Plan, PlanChange,
+    PlanException, Repeat, first_date, fmt_date, is_base_date, plan_duration_min, plan_json,
 };
 use crate::plan_ics::{self, ExportEvent, IcsEvent, IcsRepeat, SkipReason};
 use crate::settings::{self, Outcome, SettingKey, SettingValue};
@@ -81,7 +81,9 @@ pub struct IcsExport {
 pub fn calendar_io_enabled(conn: &Connection) -> AppResult<bool> {
     match settings::read_value(conn, &SettingKey::CalendarIoEnabled.spec())? {
         SettingValue::Bool(on) => Ok(on),
-        other => Err(AppError::Internal(format!("calendarIoEnabled is not a boolean: {other:?}"))),
+        other => Err(AppError::Internal(format!(
+            "calendarIoEnabled is not a boolean: {other:?}"
+        ))),
     }
 }
 
@@ -89,7 +91,9 @@ fn require_enabled(conn: &Connection) -> AppResult<()> {
     if calendar_io_enabled(conn)? {
         Ok(())
     } else {
-        Err(AppError::Invalid("calendar import/export is turned off in settings".into()))
+        Err(AppError::Invalid(
+            "calendar import/export is turned off in settings".into(),
+        ))
     }
 }
 
@@ -98,7 +102,10 @@ fn skip_counts(skipped: &[SkipReason]) -> Vec<SkipCount> {
     for reason in skipped {
         *counts.entry(*reason).or_default() += 1;
     }
-    counts.into_iter().map(|(reason, count)| SkipCount { reason, count }).collect()
+    counts
+        .into_iter()
+        .map(|(reason, count)| SkipCount { reason, count })
+        .collect()
 }
 
 // ---- export ----
@@ -118,7 +125,9 @@ pub fn export_ics(conn: &Connection, at_ms: i64) -> AppResult<IcsExport> {
     let plans = store::list_live_plans(conn)?;
     let exceptions = store::list_plan_exceptions(conn)?;
     let modes = ModeLookup::load(conn)?;
-    let duration = |date: &str, sets: i64| -> AppResult<i64> { plan_duration_min(modes.config(modes.level_for(date))?, sets) };
+    let duration = |date: &str, sets: i64| -> AppResult<i64> {
+        plan_duration_min(modes.config(modes.level_for(date))?, sets)
+    };
 
     let mut events = Vec::new();
     for plan in &plans {
@@ -131,7 +140,9 @@ pub fn export_ics(conn: &Connection, at_ms: i64) -> AppResult<IcsExport> {
                 continue;
             }
             exdates.push(day);
-            if let (ExceptionKind::Moved, Some(new_date), Some(new_time)) = (ex.kind, &ex.new_date, &ex.new_time) {
+            if let (ExceptionKind::Moved, Some(new_date), Some(new_time)) =
+                (ex.kind, &ex.new_date, &ex.new_time)
+            {
                 moved.push(ExportEvent {
                     uid: uid(plan.id, Some(&ex.date)),
                     name: plan.name.clone(),
@@ -165,11 +176,19 @@ pub fn export_ics(conn: &Connection, at_ms: i64) -> AppResult<IcsExport> {
                 repeat: match plan.repeat_weekdays {
                     Some(weekdays) => Some(IcsRepeat {
                         weekdays,
-                        until: plan.repeat_until.as_deref().map(plan::parse_date).transpose()?,
+                        until: plan
+                            .repeat_until
+                            .as_deref()
+                            .map(plan::parse_date)
+                            .transpose()?,
                     }),
                     None => None,
                 },
-                exdates: if plan.repeat_weekdays.is_some() { exdates } else { Vec::new() },
+                exdates: if plan.repeat_weekdays.is_some() {
+                    exdates
+                } else {
+                    Vec::new()
+                },
             });
         }
         events.extend(moved);
@@ -179,7 +198,10 @@ pub fn export_ics(conn: &Connection, at_ms: i64) -> AppResult<IcsExport> {
         .naive_utc();
     let event_count = i64::try_from(events.len()).unwrap_or(i64::MAX);
     tracing::info!(event = "plans_ics_exported", events = event_count);
-    Ok(IcsExport { content: plan_ics::generate_ics(&events, now), event_count })
+    Ok(IcsExport {
+        content: plan_ics::generate_ics(&events, now),
+        event_count,
+    })
 }
 
 // ---- import classification ----
@@ -246,7 +268,9 @@ fn build_candidate(event: &IcsEvent, sets: i64, at_ms: i64) -> Candidate {
 fn overlap_days(plan: &Plan, today: NaiveDate) -> AppResult<Vec<NaiveDate>> {
     let start = plan::parse_date(&plan.start_date)?;
     let from = start.max(today);
-    let Some(mask) = plan.repeat_weekdays else { return Ok(vec![start]) };
+    let Some(mask) = plan.repeat_weekdays else {
+        return Ok(vec![start]);
+    };
     let mut to = from + Duration::days(OVERLAP_HORIZON_DAYS);
     if let Some(until) = &plan.repeat_until {
         to = to.min(plan::parse_date(until)?);
@@ -288,11 +312,19 @@ impl Busy {
     }
 
     fn overlaps(&self, start: i64, end: i64) -> bool {
-        self.0.range(..end).next_back().is_some_and(|(_, block_end)| *block_end > start)
+        self.0
+            .range(..end)
+            .next_back()
+            .is_some_and(|(_, block_end)| *block_end > start)
     }
 }
 
-fn classify<Tz: TimeZone>(conn: &Connection, tz: &Tz, content: &str, at_ms: i64) -> AppResult<Classified> {
+fn classify<Tz: TimeZone>(
+    conn: &Connection,
+    tz: &Tz,
+    content: &str,
+    at_ms: i64,
+) -> AppResult<Classified> {
     let parsed = plan_ics::parse_ics(content, tz)?;
     let mut skipped = parsed.skipped;
     let modes = ModeLookup::load(conn)?;
@@ -317,11 +349,23 @@ fn classify<Tz: TimeZone>(conn: &Connection, tz: &Tz, content: &str, at_ms: i64)
             skipped.push(SkipReason::Invalid);
             continue;
         }
-        let candidate = build_candidate(event, event.sets.map_or_else(|| sets_for(cfg, event.duration_min), Ok)?, at_ms);
+        let candidate = build_candidate(
+            event,
+            event
+                .sets
+                .map_or_else(|| sets_for(cfg, event.duration_min), Ok)?,
+            at_ms,
+        );
         let days = overlap_days(&candidate.plan, today)?;
         let mut intervals = Vec::new();
         for day in &days {
-            let found = plan::occurrences_on(tz, std::slice::from_ref(&candidate.plan), &candidate.exceptions, &modes, *day)?;
+            let found = plan::occurrences_on(
+                tz,
+                std::slice::from_ref(&candidate.plan),
+                &candidate.exceptions,
+                &modes,
+                *day,
+            )?;
             intervals.extend(found.iter().map(|o| (o.planned_start_ms, o.planned_end_ms)));
         }
         candidates.push((candidate, intervals, days));
@@ -373,13 +417,21 @@ fn preview_item(candidate: &Candidate) -> PreviewItem {
         start_date: plan.start_date.clone(),
         start_time: plan.start_time.clone(),
         sets: plan.sets,
-        repeat: plan.repeat_weekdays.map(|weekdays| Repeat { weekdays, until: plan.repeat_until.clone() }),
+        repeat: plan.repeat_weekdays.map(|weekdays| Repeat {
+            weekdays,
+            until: plan.repeat_until.clone(),
+        }),
         excluded_dates: i64::try_from(candidate.exceptions.len()).unwrap_or(i64::MAX),
     }
 }
 
 /// What apply would do with this file right now. Changes nothing and ignores the study lock.
-pub fn preview_ics_import<Tz: TimeZone>(conn: &Connection, tz: &Tz, content: &str, at_ms: i64) -> AppResult<IcsPreview> {
+pub fn preview_ics_import<Tz: TimeZone>(
+    conn: &Connection,
+    tz: &Tz,
+    content: &str,
+    at_ms: i64,
+) -> AppResult<IcsPreview> {
     require_enabled(conn)?;
     let classified = classify(conn, tz, content, at_ms)?;
     Ok(IcsPreview {
@@ -438,7 +490,13 @@ pub fn apply_ics_import<Tz: TimeZone>(
         );
         store::append_plan_history(&tx, &row)?;
         tx.commit()?;
-        return Ok(IcsApplyResult { change: PlanChange::rejected(None), batch_id: None, imported: 0, skipped: Vec::new(), skipped_total: 0 });
+        return Ok(IcsApplyResult {
+            change: PlanChange::rejected(None),
+            batch_id: None,
+            imported: 0,
+            skipped: Vec::new(),
+            skipped_total: 0,
+        });
     }
 
     let classified = classify(&tx, tz, content, at_ms)?;
@@ -449,9 +507,17 @@ pub fn apply_ics_import<Tz: TimeZone>(
     for candidate in &classified.accepted {
         let id = store::insert_plan(&tx, &candidate.plan)?;
         for exception in &candidate.exceptions {
-            store::put_plan_exception(&tx, &PlanException { plan_id: id, ..exception.clone() })?;
+            store::put_plan_exception(
+                &tx,
+                &PlanException {
+                    plan_id: id,
+                    ..exception.clone()
+                },
+            )?;
         }
-        let batch = batch_id.get_or_insert_with(|| format!("ics-{at_ms}-{id}")).clone();
+        let batch = batch_id
+            .get_or_insert_with(|| format!("ics-{at_ms}-{id}"))
+            .clone();
         first_id.get_or_insert(id);
         let row = history_row(
             Some(id),
@@ -468,12 +534,25 @@ pub fn apply_ics_import<Tz: TimeZone>(
     }
     tx.commit()?;
     let imported = i64::try_from(classified.accepted.len()).unwrap_or(i64::MAX);
-    tracing::info!(event = "plans_ics_imported", imported, skipped = skipped_total);
+    tracing::info!(
+        event = "plans_ics_imported",
+        imported,
+        skipped = skipped_total
+    );
     let change = match first_id {
         Some(id) => PlanChange::applied(id),
-        None => PlanChange { outcome: crate::settings::UpdateOutcome::Applied { key: "plan".into() }, plan_id: None },
+        None => PlanChange {
+            outcome: crate::settings::UpdateOutcome::Applied { key: "plan".into() },
+            plan_id: None,
+        },
     };
-    Ok(IcsApplyResult { change, batch_id, imported, skipped, skipped_total })
+    Ok(IcsApplyResult {
+        change,
+        batch_id,
+        imported,
+        skipped,
+        skipped_total,
+    })
 }
 
 /// Reverts one import batch: soft-deletes its plans and appends `undo` rows. Refused (and the
@@ -485,43 +564,84 @@ pub fn undo_ics_import(conn: &mut Connection, batch_id: &str, at_ms: i64) -> App
     let created: Vec<i64> = rows
         .iter()
         .filter(|r| {
-            r.action == plan::Action::Create.as_str() && r.outcome == "applied" && r.reason_text.as_deref() == Some(IMPORT_REASON)
+            r.action == plan::Action::Create.as_str()
+                && r.outcome == "applied"
+                && r.reason_text.as_deref() == Some(IMPORT_REASON)
         })
         .filter_map(|r| r.plan_id)
         .collect();
     let Some(&first) = created.first() else {
-        return Err(AppError::Invalid("no calendar import has that batch id".into()));
+        return Err(AppError::Invalid(
+            "no calendar import has that batch id".into(),
+        ));
     };
-    if rows.iter().any(|r| r.action == plan::Action::Undo.as_str() && r.outcome == "applied") {
-        return Err(AppError::Invalid("that calendar import was already undone".into()));
+    if rows
+        .iter()
+        .any(|r| r.action == plan::Action::Undo.as_str() && r.outcome == "applied")
+    {
+        return Err(AppError::Invalid(
+            "that calendar import was already undone".into(),
+        ));
     }
     let undo_row = |plan_id, before, after, outcome| {
-        history_row(plan_id, at_ms, plan::Action::Undo, plan::ReasonCode::Undo, None, before, after, outcome, Some(batch_id))
+        history_row(
+            plan_id,
+            at_ms,
+            plan::Action::Undo,
+            plan::ReasonCode::Undo,
+            None,
+            before,
+            after,
+            outcome,
+            Some(batch_id),
+        )
     };
     if study::lock_held(&tx)? {
-        store::append_plan_history(&tx, &undo_row(Some(first), None, None, Outcome::RejectedLocked))?;
+        store::append_plan_history(
+            &tx,
+            &undo_row(Some(first), None, None, Outcome::RejectedLocked),
+        )?;
         tx.commit()?;
         return Ok(PlanChange::rejected(Some(first)));
     }
 
-    let stale = || AppError::Invalid("an imported plan was changed since; undo no longer applies".into());
-    let started: BTreeSet<i64> = store::list_runs_since(&tx, "0000-00-00")?.into_iter().map(|r| r.plan_id).collect();
+    let stale =
+        || AppError::Invalid("an imported plan was changed since; undo no longer applies".into());
+    let started: BTreeSet<i64> = store::list_runs_since(&tx, "0000-00-00")?
+        .into_iter()
+        .map(|r| r.plan_id)
+        .collect();
     let mut plans = Vec::new();
     for id in &created {
-        let plan = store::get_plan(&tx, *id)?.filter(|p| p.deleted_at_ms.is_none()).ok_or_else(stale)?;
+        let plan = store::get_plan(&tx, *id)?
+            .filter(|p| p.deleted_at_ms.is_none())
+            .ok_or_else(stale)?;
         if started.contains(id) {
-            return Err(AppError::Invalid("an imported plan has already started; undo no longer applies".into()));
+            return Err(AppError::Invalid(
+                "an imported plan has already started; undo no longer applies".into(),
+            ));
         }
         // Only the batch's own create row may exist for it.
         let history = store::list_plan_history(&tx, Some(*id), i64::MAX)?;
-        if history.iter().any(|h| h.plan_id == Some(*id) && h.batch_id.as_deref() != Some(batch_id)) {
+        if history
+            .iter()
+            .any(|h| h.plan_id == Some(*id) && h.batch_id.as_deref() != Some(batch_id))
+        {
             return Err(stale());
         }
         plans.push(plan);
     }
     for plan in &plans {
         store::soft_delete_plan(&tx, plan.id, at_ms)?;
-        store::append_plan_history(&tx, &undo_row(Some(plan.id), Some(plan_json(plan)), Some(json!({ "deleted": true })), Outcome::Applied))?;
+        store::append_plan_history(
+            &tx,
+            &undo_row(
+                Some(plan.id),
+                Some(plan_json(plan)),
+                Some(json!({ "deleted": true })),
+                Outcome::Applied,
+            ),
+        )?;
     }
     tx.commit()?;
     tracing::info!(event = "plans_ics_import_undone", plans = plans.len());
@@ -532,14 +652,21 @@ pub fn undo_ics_import(conn: &mut Connection, batch_id: &str, at_ms: i64) -> App
 mod tests {
     use super::*;
     use crate::db::open_in_memory;
-    use crate::plan::{create_plan, list_occurrences, plan_history, CreatePlanInput, Occurrence};
+    use crate::plan::{CreatePlanInput, Occurrence, create_plan, list_occurrences, plan_history};
     use chrono::Utc;
 
     const NOW: i64 = 1_767_225_600_000; // 2026-01-01T00:00:00Z
 
     fn enable(conn: &mut Connection) {
         let os = crate::settings::tests::FakeAutostart::new(false);
-        settings::update_setting(conn, &os, SettingKey::CalendarIoEnabled, SettingValue::Bool(true), 1).expect("enable");
+        settings::update_setting(
+            conn,
+            &os,
+            SettingKey::CalendarIoEnabled,
+            SettingValue::Bool(true),
+            1,
+        )
+        .expect("enable");
     }
 
     fn db() -> Connection {
@@ -549,16 +676,34 @@ mod tests {
     }
 
     fn occurrences(conn: &Connection) -> Vec<(String, String, String, String, i64)> {
-        let all: Vec<Occurrence> = list_occurrences(conn, &Utc, "2026-01-01", "2026-12-31").expect("list");
-        all.into_iter().map(|o| (o.date, o.start_time, o.name, o.subject, o.sets)).collect()
+        let all: Vec<Occurrence> =
+            list_occurrences(conn, &Utc, "2026-01-01", "2026-12-31").expect("list");
+        all.into_iter()
+            .map(|o| (o.date, o.start_time, o.name, o.subject, o.sets))
+            .collect()
     }
 
-    fn input(name: &str, subject: &str, date: &str, time: &str, sets: i64, repeat: Option<Repeat>) -> CreatePlanInput {
-        CreatePlanInput { name: name.into(), subject: subject.into(), start_date: date.into(), start_time: time.into(), sets, repeat }
+    fn input(
+        name: &str,
+        subject: &str,
+        date: &str,
+        time: &str,
+        sets: i64,
+        repeat: Option<Repeat>,
+    ) -> CreatePlanInput {
+        CreatePlanInput {
+            name: name.into(),
+            subject: subject.into(),
+            start_date: date.into(),
+            start_time: time.into(),
+            sets,
+            repeat,
+        }
     }
 
     fn count(conn: &Connection, table: &str) -> i64 {
-        conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0)).expect("count")
+        conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+            .expect("count")
     }
 
     fn ics(events: &str) -> String {
@@ -582,12 +727,26 @@ mod tests {
     #[test]
     fn export_then_import_gives_the_same_occurrences() {
         let mut source = db();
-        let weekly = Some(Repeat { weekdays: 0b101, until: Some("2026-03-16".into()) });
-        let math = create_plan(&mut source, &Utc, input("수학, 심화", "수학", "2026-03-02", "20:00", 2, weekly), 1)
-            .expect("create")
-            .plan_id
-            .expect("id");
-        create_plan(&mut source, &Utc, input("국어", "국어", "2026-03-03", "09:05", 1, None), 2).expect("create");
+        let weekly = Some(Repeat {
+            weekdays: 0b101,
+            until: Some("2026-03-16".into()),
+        });
+        let math = create_plan(
+            &mut source,
+            &Utc,
+            input("수학, 심화", "수학", "2026-03-02", "20:00", 2, weekly),
+            1,
+        )
+        .expect("create")
+        .plan_id
+        .expect("id");
+        create_plan(
+            &mut source,
+            &Utc,
+            input("국어", "국어", "2026-03-03", "09:05", 1, None),
+            2,
+        )
+        .expect("create");
         let mut moved = plan::UpdatePlanInput {
             plan_id: math,
             scope: plan::Scope::Occurrence,
@@ -619,10 +778,16 @@ mod tests {
         let exported = export_ics(&source, NOW).expect("export");
         let mut target = db();
         let preview = preview_ics_import(&target, &Utc, &exported.content, NOW).expect("preview");
-        assert_eq!((preview.skipped_total, preview.items.len() as i64), (0, exported.event_count));
+        assert_eq!(
+            (preview.skipped_total, preview.items.len() as i64),
+            (0, exported.event_count)
+        );
         let applied = apply_ics_import(&mut target, &Utc, &exported.content, NOW).expect("apply");
         assert!(applied.change.is_applied());
-        assert_eq!((applied.imported, applied.skipped_total), (exported.event_count, 0));
+        assert_eq!(
+            (applied.imported, applied.skipped_total),
+            (exported.event_count, 0)
+        );
         assert_eq!(occurrences(&target), before);
     }
 
@@ -630,36 +795,78 @@ mod tests {
     fn unsupported_events_are_counted_by_reason_and_the_rest_imports() {
         let mut conn = db();
         let text = ics(&[
-            event("a", "DTSTART:20260310T200000\r\nDTEND:20260310T230000\r\nSUMMARY:좋은 일정\r\n"),
+            event(
+                "a",
+                "DTSTART:20260310T200000\r\nDTEND:20260310T230000\r\nSUMMARY:좋은 일정\r\n",
+            ),
             event("b", "DTSTART;VALUE=DATE:20260311\r\nSUMMARY:종일\r\n"),
-            event("c", "DTSTART;TZID=Asia/Seoul:20260312T200000\r\nSUMMARY:tz\r\n"),
-            event("d", "DTSTART:20260313T200000\r\nSUMMARY:daily\r\nRRULE:FREQ=DAILY\r\n"),
+            event(
+                "c",
+                "DTSTART;TZID=Asia/Seoul:20260312T200000\r\nSUMMARY:tz\r\n",
+            ),
+            event(
+                "d",
+                "DTSTART:20260313T200000\r\nSUMMARY:daily\r\nRRULE:FREQ=DAILY\r\n",
+            ),
             event("e", "DTSTART:20250313T200000\r\nSUMMARY:지난 일정\r\n"),
-        ].concat());
+        ]
+        .concat());
         let applied = apply_ics_import(&mut conn, &Utc, &text, NOW).expect("apply");
         assert_eq!((applied.imported, applied.skipped_total), (1, 4));
-        let reasons: Vec<(SkipReason, i64)> = applied.skipped.iter().map(|s| (s.reason, s.count)).collect();
+        let reasons: Vec<(SkipReason, i64)> = applied
+            .skipped
+            .iter()
+            .map(|s| (s.reason, s.count))
+            .collect();
         assert_eq!(
             reasons,
-            [(SkipReason::AllDay, 1), (SkipReason::Timezone, 1), (SkipReason::UnsupportedRule, 1), (SkipReason::Past, 1)]
+            [
+                (SkipReason::AllDay, 1),
+                (SkipReason::Timezone, 1),
+                (SkipReason::UnsupportedRule, 1),
+                (SkipReason::Past, 1)
+            ]
         );
         // 180 minutes of events with no X-SM-SETS: 3 medium sets.
-        assert_eq!(occurrences(&conn), [("2026-03-10".into(), "20:00".into(), "좋은 일정".into(), "좋은 일정".into(), 3)]);
+        assert_eq!(
+            occurrences(&conn),
+            [(
+                "2026-03-10".into(),
+                "20:00".into(),
+                "좋은 일정".into(),
+                "좋은 일정".into(),
+                3
+            )]
+        );
     }
 
     #[test]
     fn overlaps_with_the_calendar_and_between_events_are_skipped() {
         let mut conn = db();
-        create_plan(&mut conn, &Utc, input("기존", "기존", "2026-03-10", "20:00", 3, None), 1).expect("create");
+        create_plan(
+            &mut conn,
+            &Utc,
+            input("기존", "기존", "2026-03-10", "20:00", 3, None),
+            1,
+        )
+        .expect("create");
         let text = ics(&[
             event("a", "DTSTART:20260310T210000\r\nSUMMARY:겹침\r\n"),
             event("b", "DTSTART:20260311T080000\r\nSUMMARY:앞\r\n"),
             event("c", "DTSTART:20260311T081000\r\nSUMMARY:뒤 겹침\r\n"),
             event("d", "DTSTART:20260310T230000\r\nSUMMARY:맞닿음\r\n"),
-        ].concat());
+        ]
+        .concat());
         let applied = apply_ics_import(&mut conn, &Utc, &text, NOW).expect("apply");
-        let reasons: Vec<(SkipReason, i64)> = applied.skipped.iter().map(|s| (s.reason, s.count)).collect();
-        assert_eq!((applied.imported, reasons), (2, vec![(SkipReason::Overlap, 2)]));
+        let reasons: Vec<(SkipReason, i64)> = applied
+            .skipped
+            .iter()
+            .map(|s| (s.reason, s.count))
+            .collect();
+        assert_eq!(
+            (applied.imported, reasons),
+            (2, vec![(SkipReason::Overlap, 2)])
+        );
         // Importing the same file again changes nothing.
         let again = apply_ics_import(&mut conn, &Utc, &text, NOW).expect("again");
         assert_eq!((again.imported, again.skipped_total), (0, 4));
@@ -676,7 +883,13 @@ mod tests {
         assert_eq!((result.imported, count(&conn, "plans")), (0, 0));
         let history = plan_history(&conn, None, 10).expect("history");
         assert_eq!(history.len(), 1);
-        assert_eq!((history[0].outcome.as_str(), history[0].reason_text.as_deref()), ("rejected_locked", Some(IMPORT_REASON)));
+        assert_eq!(
+            (
+                history[0].outcome.as_str(),
+                history[0].reason_text.as_deref()
+            ),
+            ("rejected_locked", Some(IMPORT_REASON))
+        );
     }
 
     #[test]
@@ -685,27 +898,49 @@ mod tests {
         let text = ics(&[
             event("a", "DTSTART:20260310T200000\r\nSUMMARY:하나\r\n"),
             event("b", "DTSTART:20260311T200000\r\nSUMMARY:둘\r\n"),
-        ].concat());
+        ]
+        .concat());
         let applied = apply_ics_import(&mut conn, &Utc, &text, NOW).expect("apply");
         let batch = applied.batch_id.clone().expect("batch");
         let history = plan_history(&conn, None, 10).expect("history");
         assert_eq!(history.len(), 2);
         for row in &history {
             assert_eq!(
-                (row.action.as_str(), row.reason_code.as_str(), row.reason_text.as_deref(), row.batch_id.as_deref()),
-                ("create", "custom", Some(IMPORT_REASON), Some(batch.as_str()))
+                (
+                    row.action.as_str(),
+                    row.reason_code.as_str(),
+                    row.reason_text.as_deref(),
+                    row.batch_id.as_deref()
+                ),
+                (
+                    "create",
+                    "custom",
+                    Some(IMPORT_REASON),
+                    Some(batch.as_str())
+                )
             );
         }
         assert_eq!(occurrences(&conn).len(), 2);
 
         crate::testutil::set_lock_for_test(&conn, true);
-        assert!(!undo_ics_import(&mut conn, &batch, NOW + 1).expect("locked").is_applied());
+        assert!(
+            !undo_ics_import(&mut conn, &batch, NOW + 1)
+                .expect("locked")
+                .is_applied()
+        );
         assert_eq!(occurrences(&conn).len(), 2, "lock keeps the plans");
         crate::testutil::set_lock_for_test(&conn, false);
 
-        assert!(undo_ics_import(&mut conn, &batch, NOW + 2).expect("undo").is_applied());
+        assert!(
+            undo_ics_import(&mut conn, &batch, NOW + 2)
+                .expect("undo")
+                .is_applied()
+        );
         assert!(occurrences(&conn).is_empty());
-        assert!(undo_ics_import(&mut conn, &batch, NOW + 3).is_err(), "second undo is refused");
+        assert!(
+            undo_ics_import(&mut conn, &batch, NOW + 3).is_err(),
+            "second undo is refused"
+        );
         assert!(undo_ics_import(&mut conn, "ics-0-0", NOW + 3).is_err());
     }
 
@@ -741,22 +976,37 @@ mod tests {
             let hour = 5 + (i % 10) * 2;
             body.push_str(&event(
                 &format!("e{i}"),
-                &format!("DTSTART:{}T{hour:02}0000\r\nDTEND:{}T{hour:02}2500\r\nSUMMARY:일정 {i}\r\n", day.format("%Y%m%d"), day.format("%Y%m%d")),
+                &format!(
+                    "DTSTART:{}T{hour:02}0000\r\nDTEND:{}T{hour:02}2500\r\nSUMMARY:일정 {i}\r\n",
+                    day.format("%Y%m%d"),
+                    day.format("%Y%m%d")
+                ),
             ));
         }
         let text = ics(&body);
         let started = std::time::Instant::now();
         let preview = preview_ics_import(&conn, &Utc, &text, NOW).expect("preview");
         let applied = apply_ics_import(&mut conn, &Utc, &text, NOW).expect("apply");
-        assert_eq!((preview.items.len(), applied.imported, applied.skipped_total), (1000, 1000, 0));
+        assert_eq!(
+            (preview.items.len(), applied.imported, applied.skipped_total),
+            (1000, 1000, 0)
+        );
         assert_eq!(count(&conn, "plan_history"), 1000);
-        assert!(started.elapsed() < std::time::Duration::from_secs(20), "took {:?}", started.elapsed());
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(20),
+            "took {:?}",
+            started.elapsed()
+        );
     }
 
     #[test]
     fn serialized_shapes_match_the_shared_fixture() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../src/api/fixtures/ics-contract.json");
-        let expected: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../src/api/fixtures/ics-contract.json"
+        );
+        let expected: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
         let preview = IcsPreview {
             items: vec![PreviewItem {
                 name: "수학".into(),
@@ -764,20 +1014,32 @@ mod tests {
                 start_date: "2026-03-02".into(),
                 start_time: "20:00".into(),
                 sets: 3,
-                repeat: Some(Repeat { weekdays: 5, until: Some("2026-12-31".into()) }),
+                repeat: Some(Repeat {
+                    weekdays: 5,
+                    until: Some("2026-12-31".into()),
+                }),
                 excluded_dates: 1,
             }],
-            skipped: vec![SkipCount { reason: SkipReason::AllDay, count: 2 }],
+            skipped: vec![SkipCount {
+                reason: SkipReason::AllDay,
+                count: 2,
+            }],
             skipped_total: 2,
         };
         let applied = IcsApplyResult {
             change: PlanChange::applied(7),
             batch_id: Some("ics-1767225600000-7".into()),
             imported: 3,
-            skipped: vec![SkipCount { reason: SkipReason::Overlap, count: 1 }],
+            skipped: vec![SkipCount {
+                reason: SkipReason::Overlap,
+                count: 1,
+            }],
             skipped_total: 1,
         };
-        let export = IcsExport { content: "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n".into(), event_count: 0 };
+        let export = IcsExport {
+            content: "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n".into(),
+            event_count: 0,
+        };
         let actual = json!({ "preview": preview, "applyResult": applied, "export": export });
         assert_eq!(actual, expected);
     }

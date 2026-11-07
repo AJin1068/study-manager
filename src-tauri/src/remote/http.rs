@@ -55,7 +55,13 @@ pub struct HttpRequest {
 
 impl HttpRequest {
     pub fn new(tag: RequestTag, method: Method, url: String) -> Self {
-        Self { tag, method, url, headers: Vec::new(), body: None }
+        Self {
+            tag,
+            method,
+            url,
+            headers: Vec::new(),
+            body: None,
+        }
     }
 
     pub fn header(mut self, name: &str, value: &str) -> Self {
@@ -88,7 +94,11 @@ pub struct HttpResponse {
 
 impl HttpResponse {
     pub fn ok_json(status: u16, body: &str) -> Self {
-        Self { status, headers: Vec::new(), body: body.as_bytes().to_vec() }
+        Self {
+            status,
+            headers: Vec::new(),
+            body: body.as_bytes().to_vec(),
+        }
     }
 
     pub fn is_success(&self) -> bool {
@@ -96,7 +106,10 @@ impl HttpResponse {
     }
 
     pub fn header(&self, name: &str) -> Option<&str> {
-        self.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str())
+        self.headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
     }
 
     /// `Retry-After` in seconds form, as milliseconds. HTTP-date form is not honored (the
@@ -109,7 +122,10 @@ impl HttpResponse {
 
 impl fmt::Debug for HttpResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("HttpResponse").field("status", &self.status).field("bytes", &self.body.len()).finish()
+        f.debug_struct("HttpResponse")
+            .field("status", &self.status)
+            .field("bytes", &self.body.len())
+            .finish()
     }
 }
 
@@ -164,7 +180,12 @@ pub enum HostPolicy {
 
 impl HostPolicy {
     pub fn configured<I: IntoIterator<Item = S>, S: AsRef<str>>(hosts: I) -> Self {
-        HostPolicy::Configured { hosts: hosts.into_iter().map(|h| h.as_ref().to_ascii_lowercase()).collect() }
+        HostPolicy::Configured {
+            hosts: hosts
+                .into_iter()
+                .map(|h| h.as_ref().to_ascii_lowercase())
+                .collect(),
+        }
     }
 
     /// Checks a URL before any connection exists. Returns the host for logging.
@@ -201,14 +222,23 @@ fn is_loopback_host(host: &Host<&str>) -> bool {
 
 /// Host part of a URL, for logs. `None` when the URL does not parse.
 pub fn host_of(raw: &str) -> Option<String> {
-    Url::parse(raw).ok()?.host_str().map(str::to_ascii_lowercase)
+    Url::parse(raw)
+        .ok()?
+        .host_str()
+        .map(str::to_ascii_lowercase)
 }
 
 /// Shape check for an endpoint setting: `https://host[/path]`, or `http://` to a loopback host.
 /// No credentials, query, or fragment (a key placed in a URL would be logged or stored in history).
 pub fn is_valid_endpoint(raw: &str) -> bool {
-    let Ok(url) = Url::parse(raw) else { return false };
-    if !url.username().is_empty() || url.password().is_some() || url.query().is_some() || url.fragment().is_some() {
+    let Ok(url) = Url::parse(raw) else {
+        return false;
+    };
+    if !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
         return false;
     }
     let Some(host) = url.host() else { return false };
@@ -242,7 +272,10 @@ impl UreqTransport {
             // A proxy environment variable must not carry a loopback-only test off the machine.
             builder = builder.proxy(None);
         }
-        Self { policy, agent: builder.build().into() }
+        Self {
+            policy,
+            agent: builder.build().into(),
+        }
     }
 }
 
@@ -267,7 +300,9 @@ impl HttpTransport for UreqTransport {
 
 impl UreqTransport {
     fn execute(&self, request: HttpRequest) -> Result<HttpResponse, TransportError> {
-        let mut builder = ureq::http::Request::builder().method(request.method.as_str()).uri(request.url.as_str());
+        let mut builder = ureq::http::Request::builder()
+            .method(request.method.as_str())
+            .uri(request.url.as_str());
         for (name, value) in &request.headers {
             builder = builder.header(name.as_str(), value.as_str());
         }
@@ -278,13 +313,20 @@ impl UreqTransport {
         if let Some(content_type) = content_type {
             builder = builder.header("content-type", content_type);
         }
-        let built = builder.body(bytes).map_err(|_| TransportError::InvalidUrl)?;
+        let built = builder
+            .body(bytes)
+            .map_err(|_| TransportError::InvalidUrl)?;
         let mut response = self.agent.run(built).map_err(map_ureq_error)?;
         let status = response.status().as_u16();
         let headers = response
             .headers()
             .iter()
-            .filter_map(|(name, value)| value.to_str().ok().map(|v| (name.as_str().to_string(), v.to_string())))
+            .filter_map(|(name, value)| {
+                value
+                    .to_str()
+                    .ok()
+                    .map(|v| (name.as_str().to_string(), v.to_string()))
+            })
             .collect();
         let body = response
             .body_mut()
@@ -292,7 +334,11 @@ impl UreqTransport {
             .limit(MAX_RESPONSE_BYTES)
             .read_to_vec()
             .map_err(map_ureq_error)?;
-        Ok(HttpResponse { status, headers, body })
+        Ok(HttpResponse {
+            status,
+            headers,
+            body,
+        })
     }
 }
 
@@ -328,14 +374,19 @@ pub struct ScriptedTransport {
 
 impl ScriptedTransport {
     pub fn new(policy: HostPolicy, steps: Vec<Result<HttpResponse, TransportError>>) -> Self {
-        Self { policy, steps: Mutex::new(steps.into()), seen: Mutex::new(Vec::new()) }
+        Self {
+            policy,
+            steps: Mutex::new(steps.into()),
+            seen: Mutex::new(Vec::new()),
+        }
     }
 
     /// Builds the script from a recorded fixture: a JSON array of
     /// `{ "status": 200, "headers": {"retry-after": "3"}, "body": <json or string> }`
     /// or `{ "error": "timeout" | "connect_failed" | "io_error" }`.
     pub fn from_fixture(policy: HostPolicy, fixture: &str) -> Result<Self, String> {
-        let entries: Vec<serde_json::Value> = serde_json::from_str(fixture).map_err(|e| e.to_string())?;
+        let entries: Vec<serde_json::Value> =
+            serde_json::from_str(fixture).map_err(|e| e.to_string())?;
         let mut steps = Vec::with_capacity(entries.len());
         for entry in entries {
             if let Some(code) = entry.get("error").and_then(|v| v.as_str()) {
@@ -355,14 +406,22 @@ impl ScriptedTransport {
             let headers = entry
                 .get("headers")
                 .and_then(|v| v.as_object())
-                .map(|map| map.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect())
+                .map(|map| {
+                    map.iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                        .collect()
+                })
                 .unwrap_or_default();
             let body = match entry.get("body") {
                 None | Some(serde_json::Value::Null) => Vec::new(),
                 Some(serde_json::Value::String(text)) => text.clone().into_bytes(),
                 Some(other) => other.to_string().into_bytes(),
             };
-            steps.push(Ok(HttpResponse { status, headers, body }));
+            steps.push(Ok(HttpResponse {
+                status,
+                headers,
+                body,
+            }));
         }
         Ok(Self::new(policy, steps))
     }
@@ -389,7 +448,11 @@ impl HttpTransport for ScriptedTransport {
                 content_type,
             });
         }
-        self.steps.lock().map_err(|_| TransportError::Io)?.pop_front().unwrap_or(Err(TransportError::ScriptExhausted))
+        self.steps
+            .lock()
+            .map_err(|_| TransportError::Io)?
+            .pop_front()
+            .unwrap_or(Err(TransportError::ScriptExhausted))
     }
 }
 
@@ -414,12 +477,30 @@ mod tests {
     #[test]
     fn product_policy_is_https_and_exact_host_with_loopback_allowed() {
         let policy = HostPolicy::configured(["abc.supabase.co"]);
-        assert_eq!(policy.check("https://abc.supabase.co/rest/v1/x").as_deref(), Ok("abc.supabase.co"));
-        assert_eq!(policy.check("http://abc.supabase.co/x"), Err(TransportError::HostDenied));
-        assert_eq!(policy.check("https://evil.supabase.co/x"), Err(TransportError::HostDenied));
-        assert_eq!(policy.check("https://abc.supabase.co.evil.test/x"), Err(TransportError::HostDenied));
-        assert_eq!(policy.check("https://abc.supabase.co@evil.test/x"), Err(TransportError::HostDenied));
-        assert_eq!(policy.check("https://user:pw@abc.supabase.co/x"), Err(TransportError::HostDenied));
+        assert_eq!(
+            policy.check("https://abc.supabase.co/rest/v1/x").as_deref(),
+            Ok("abc.supabase.co")
+        );
+        assert_eq!(
+            policy.check("http://abc.supabase.co/x"),
+            Err(TransportError::HostDenied)
+        );
+        assert_eq!(
+            policy.check("https://evil.supabase.co/x"),
+            Err(TransportError::HostDenied)
+        );
+        assert_eq!(
+            policy.check("https://abc.supabase.co.evil.test/x"),
+            Err(TransportError::HostDenied)
+        );
+        assert_eq!(
+            policy.check("https://abc.supabase.co@evil.test/x"),
+            Err(TransportError::HostDenied)
+        );
+        assert_eq!(
+            policy.check("https://user:pw@abc.supabase.co/x"),
+            Err(TransportError::HostDenied)
+        );
         assert!(policy.check("http://127.0.0.1:9/x").is_ok());
         assert!(policy.check("http://[::1]:9/x").is_ok());
         assert_eq!(policy.check("not a url"), Err(TransportError::InvalidUrl));
@@ -430,8 +511,14 @@ mod tests {
         let policy = HostPolicy::LoopbackOnly;
         assert!(policy.check("http://127.0.0.1:8080/a").is_ok());
         assert!(policy.check("http://localhost:8080/a").is_ok());
-        assert_eq!(policy.check("https://example.com/"), Err(TransportError::HostDenied));
-        assert_eq!(policy.check("http://10.0.0.5/"), Err(TransportError::HostDenied));
+        assert_eq!(
+            policy.check("https://example.com/"),
+            Err(TransportError::HostDenied)
+        );
+        assert_eq!(
+            policy.check("http://10.0.0.5/"),
+            Err(TransportError::HostDenied)
+        );
     }
 
     #[test]
@@ -448,7 +535,10 @@ mod tests {
     #[test]
     fn backoff_doubles_to_the_cap_and_honors_retry_after() {
         let delays: Vec<u64> = (1..=9).map(|n| backoff_ms(n, None, 0)).collect();
-        assert_eq!(delays, vec![1000, 2000, 4000, 8000, 16000, 32000, 60000, 60000, 60000]);
+        assert_eq!(
+            delays,
+            vec![1000, 2000, 4000, 8000, 16000, 32000, 60000, 60000, 60000]
+        );
         assert_eq!(backoff_ms(1, Some(30_000), 0), 30_000);
         assert_eq!(backoff_ms(7, Some(1_000), 0), 60_000);
         assert_eq!(backoff_ms(3, None, 1000), 3200);
@@ -459,9 +549,15 @@ mod tests {
     fn scripted_transport_replays_in_order_and_records_requests() {
         let script = ScriptedTransport::new(
             HostPolicy::LoopbackOnly,
-            vec![Ok(HttpResponse::ok_json(200, "{}")), Err(TransportError::Timeout)],
+            vec![
+                Ok(HttpResponse::ok_json(200, "{}")),
+                Err(TransportError::Timeout),
+            ],
         );
-        let tag = RequestTag { port: "supabase", kind: "probe" };
+        let tag = RequestTag {
+            port: "supabase",
+            kind: "probe",
+        };
         let make = || HttpRequest::new(tag, Method::Get, "http://127.0.0.1:1/p".into());
         assert_eq!(script.send(make()).map(|r| r.status), Ok(200));
         assert_eq!(script.send(make()), Err(TransportError::Timeout));
@@ -471,21 +567,37 @@ mod tests {
 
     #[test]
     fn scripted_transport_still_applies_the_host_policy() {
-        let script = ScriptedTransport::new(HostPolicy::LoopbackOnly, vec![Ok(HttpResponse::ok_json(200, "{}"))]);
-        let tag = RequestTag { port: "supabase", kind: "probe" };
-        let denied = script.send(HttpRequest::new(tag, Method::Get, "https://example.com/".into()));
+        let script = ScriptedTransport::new(
+            HostPolicy::LoopbackOnly,
+            vec![Ok(HttpResponse::ok_json(200, "{}"))],
+        );
+        let tag = RequestTag {
+            port: "supabase",
+            kind: "probe",
+        };
+        let denied = script.send(HttpRequest::new(
+            tag,
+            Method::Get,
+            "https://example.com/".into(),
+        ));
         assert_eq!(denied, Err(TransportError::HostDenied));
         assert!(script.requests().is_empty());
     }
 
     #[test]
     fn request_debug_hides_path_headers_and_body() {
-        let tag = RequestTag { port: "notify", kind: "ntfy_publish" };
+        let tag = RequestTag {
+            port: "notify",
+            kind: "ntfy_publish",
+        };
         let request = HttpRequest::new(tag, Method::Post, "https://ntfy.sh/SECRETTOPIC123".into())
             .header("Authorization", "Bearer SECRETTOKEN");
         let shown = format!("{request:?}");
         assert!(shown.contains("ntfy.sh"));
-        assert!(!shown.contains("SECRETTOPIC123") && !shown.contains("SECRETTOKEN"), "{shown}");
+        assert!(
+            !shown.contains("SECRETTOPIC123") && !shown.contains("SECRETTOKEN"),
+            "{shown}"
+        );
     }
 
     #[test]

@@ -15,7 +15,9 @@ pub fn platform_blocker(_bridge: Arc<dyn PluginBridge>) -> Arc<dyn PhoneBlocker>
 
 #[cfg(not(target_os = "ios"))]
 pub fn platform_blocker(bridge: Arc<dyn PluginBridge>) -> Arc<dyn PhoneBlocker> {
-    Arc::new(crate::android_blocker::AndroidAccessibilityBlocker::new(bridge))
+    Arc::new(crate::android_blocker::AndroidAccessibilityBlocker::new(
+        bridge,
+    ))
 }
 
 #[cfg(test)]
@@ -27,10 +29,16 @@ mod tests {
     #[test]
     fn a_non_ios_build_asks_the_plugin() {
         // On iOS this test would not apply: the blocker there never reads the bridge.
-        let bridge = Arc::new(ScriptedBridge::new(vec![Ok(serde_json::json!({ "kind": "active" })), Err(BridgeFailure::Unavailable)]));
+        let bridge = Arc::new(ScriptedBridge::new(vec![
+            Ok(serde_json::json!({ "kind": "active" })),
+            Err(BridgeFailure::Unavailable),
+        ]));
         let blocker = platform_blocker(bridge.clone());
         if cfg!(target_os = "ios") {
-            assert!(matches!(blocker.status(), BlockerStatus::Unsupported { .. }));
+            assert!(matches!(
+                blocker.status(),
+                BlockerStatus::Unsupported { .. }
+            ));
         } else {
             assert_eq!(blocker.status(), BlockerStatus::Active);
             assert_eq!(blocker.status(), BlockerStatus::Unreachable);

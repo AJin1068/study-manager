@@ -6,7 +6,7 @@ use std::os::windows::process::CommandExt;
 use std::process::Command;
 use std::sync::mpsc::Sender;
 
-use super::process::{is_protected_id, normalize_app_id, AppIdentity, ProcessControl};
+use super::process::{AppIdentity, ProcessControl, is_protected_id, normalize_app_id};
 use super::{PlatformError, PowerEvent, PowerEventSource};
 
 pub struct WindowsPowerSource;
@@ -36,15 +36,29 @@ pub struct WindowsProcessControl;
 fn parse_listing(output: &str, self_pid: u32) -> Vec<AppIdentity> {
     let mut apps = Vec::new();
     for line in output.lines() {
-        let Some((pid, path)) = line.trim().split_once('\t') else { continue };
-        let Ok(pid) = pid.trim().parse::<u32>() else { continue };
+        let Some((pid, path)) = line.trim().split_once('\t') else {
+            continue;
+        };
+        let Ok(pid) = pid.trim().parse::<u32>() else {
+            continue;
+        };
         let id = normalize_app_id(path);
         if id.is_empty() {
             continue;
         }
-        let display_name = id.rsplit('/').next().unwrap_or(&id).trim_end_matches(".exe").to_owned();
+        let display_name = id
+            .rsplit('/')
+            .next()
+            .unwrap_or(&id)
+            .trim_end_matches(".exe")
+            .to_owned();
         let is_protected = pid == self_pid || is_protected_id(&id);
-        apps.push(AppIdentity { id, display_name, pid, is_protected });
+        apps.push(AppIdentity {
+            id,
+            display_name,
+            pid,
+            is_protected,
+        });
     }
     apps
 }
@@ -59,7 +73,9 @@ fn run(program: &str, args: &[&str]) -> Result<std::process::Output, PlatformErr
 
 fn taskkill(app: &AppIdentity, force: bool) -> Result<(), PlatformError> {
     if app.is_protected {
-        return Err(PlatformError::Process("refusing to end a protected app".into()));
+        return Err(PlatformError::Process(
+            "refusing to end a protected app".into(),
+        ));
     }
     // The pid may have been recycled since listing: confirm it still runs the same executable.
     let still_same = WindowsProcessControl
@@ -70,12 +86,19 @@ fn taskkill(app: &AppIdentity, force: bool) -> Result<(), PlatformError> {
         return Err(PlatformError::Process("app is no longer running".into()));
     }
     let pid = app.pid.to_string();
-    let args: Vec<&str> = if force { vec!["/F", "/PID", pid.as_str()] } else { vec!["/PID", pid.as_str()] };
+    let args: Vec<&str> = if force {
+        vec!["/F", "/PID", pid.as_str()]
+    } else {
+        vec!["/PID", pid.as_str()]
+    };
     let output = run("taskkill", &args)?;
     if output.status.success() {
         Ok(())
     } else {
-        Err(PlatformError::Process(format!("taskkill exited with {}", output.status)))
+        Err(PlatformError::Process(format!(
+            "taskkill exited with {}",
+            output.status
+        )))
     }
 }
 
@@ -83,11 +106,20 @@ impl ProcessControl for WindowsProcessControl {
     fn list_running(&self) -> Result<Vec<AppIdentity>, PlatformError> {
         let script = "Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.Path } | \
              ForEach-Object { \"$($_.Id)`t$($_.Path)\" }";
-        let output = run("powershell", &["-NoProfile", "-NonInteractive", "-Command", script])?;
+        let output = run(
+            "powershell",
+            &["-NoProfile", "-NonInteractive", "-Command", script],
+        )?;
         if !output.status.success() {
-            return Err(PlatformError::Process(format!("process listing exited with {}", output.status)));
+            return Err(PlatformError::Process(format!(
+                "process listing exited with {}",
+                output.status
+            )));
         }
-        Ok(parse_listing(&String::from_utf8_lossy(&output.stdout), std::process::id()))
+        Ok(parse_listing(
+            &String::from_utf8_lossy(&output.stdout),
+            std::process::id(),
+        ))
     }
 
     fn request_quit(&self, app: &AppIdentity) -> Result<(), PlatformError> {

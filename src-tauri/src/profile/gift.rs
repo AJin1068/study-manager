@@ -57,7 +57,12 @@ pub struct SendOutcome {
 }
 
 fn refuse(code: ProfileCode, conn: &Connection) -> AppResult<SendOutcome> {
-    Ok(SendOutcome { code, gift_id: None, state: None, balance: store::ledger_sums(conn)?.0 })
+    Ok(SendOutcome {
+        code,
+        gift_id: None,
+        state: None,
+        balance: store::ledger_sums(conn)?.0,
+    })
 }
 
 fn ledger_key(gift_id: &str) -> String {
@@ -82,10 +87,15 @@ pub fn send(
 ) -> AppResult<SendOutcome> {
     let message = message.trim();
     let name = recipient_name.trim();
-    if message.chars().count() > MESSAGE_MAX_CHARS || recipient_user.is_empty() || !(1..=20).contains(&name.chars().count()) {
+    if message.chars().count() > MESSAGE_MAX_CHARS
+        || recipient_user.is_empty()
+        || !(1..=20).contains(&name.chars().count())
+    {
         return refuse(ProfileCode::InvalidInput, &*lock_db(db)?);
     }
-    let Some(item) = items::item(item_id)? else { return refuse(ProfileCode::UnknownItem, &*lock_db(db)?) };
+    let Some(item) = items::item(item_id)? else {
+        return refuse(ProfileCode::UnknownItem, &*lock_db(db)?);
+    };
     if !giftable(item) {
         return refuse(ProfileCode::NotGiftable, &*lock_db(db)?);
     }
@@ -99,7 +109,13 @@ pub fn send(
         if balance < item.price {
             return refuse(ProfileCode::InsufficientPoints, &tx);
         }
-        if !store::insert_ledger_entry(&tx, now_ms, -item.price, REASON_GIFT_SENT, &ledger_key(gift_id))? {
+        if !store::insert_ledger_entry(
+            &tx,
+            now_ms,
+            -item.price,
+            REASON_GIFT_SENT,
+            &ledger_key(gift_id),
+        )? {
             return refuse(ProfileCode::KeyConflict, &tx);
         }
         repo::insert_outbox(
@@ -130,11 +146,21 @@ pub fn send(
 fn outcome(db: &Mutex<Connection>, gift_id: &str, code: ProfileCode) -> AppResult<SendOutcome> {
     let conn = lock_db(db)?;
     let state = repo::outbox(&conn, gift_id)?.map(|r| r.state);
-    Ok(SendOutcome { code, gift_id: Some(gift_id.to_string()), state, balance: store::ledger_sums(&conn)?.0 })
+    Ok(SendOutcome {
+        code,
+        gift_id: Some(gift_id.to_string()),
+        state,
+        balance: store::ledger_sums(&conn)?.0,
+    })
 }
 
 /// Sends the queued gift once and settles the row according to how the attempt ended.
-fn deliver(db: &Mutex<Connection>, api: &dyn ProfileApi, row: &OutboxRow, now_ms: i64) -> AppResult<SendOutcome> {
+fn deliver(
+    db: &Mutex<Connection>,
+    api: &dyn ProfileApi,
+    row: &OutboxRow,
+    now_ms: i64,
+) -> AppResult<SendOutcome> {
     let args = SendGiftArgs {
         idem_key: row.gift_id.clone(),
         recipient: row.recipient_user.clone(),
@@ -170,7 +196,13 @@ fn resolve(db: &Mutex<Connection>, row: &OutboxRow, state: &str, now_ms: i64) ->
     let mut conn = lock_db(db)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     if repo::resolve_outbox(&tx, &row.gift_id, state, now_ms)? && state == "refunded" {
-        store::insert_ledger_entry(&tx, now_ms, row.price, REASON_GIFT_REFUND, &refund_key(&row.gift_id))?;
+        store::insert_ledger_entry(
+            &tx,
+            now_ms,
+            row.price,
+            REASON_GIFT_REFUND,
+            &refund_key(&row.gift_id),
+        )?;
     }
     tx.commit()?;
     Ok(())
@@ -210,7 +242,14 @@ pub struct ReceiveOutcome {
 }
 
 /// Puts an accepted gift into the inventory once and remembers it.
-fn apply_accepted(db: &Mutex<Connection>, gift_id: &str, item_id: &str, sender: &str, message: &str, now_ms: i64) -> AppResult<bool> {
+fn apply_accepted(
+    db: &Mutex<Connection>,
+    gift_id: &str,
+    item_id: &str,
+    sender: &str,
+    message: &str,
+    now_ms: i64,
+) -> AppResult<bool> {
     let conn = lock_db(db)?;
     let known = items::item(item_id)?.is_some_and(giftable);
     let added = known && store::shop::insert_inventory(&conn, item_id, "gift", now_ms, None)?;
@@ -218,18 +257,44 @@ fn apply_accepted(db: &Mutex<Connection>, gift_id: &str, item_id: &str, sender: 
     Ok(!added)
 }
 
-pub fn accept(db: &Mutex<Connection>, api: &dyn ProfileApi, gift_id: &str, message: &str, now_ms: i64) -> AppResult<ReceiveOutcome> {
+pub fn accept(
+    db: &Mutex<Connection>,
+    api: &dyn ProfileApi,
+    gift_id: &str,
+    message: &str,
+    now_ms: i64,
+) -> AppResult<ReceiveOutcome> {
     match api.accept_gift(gift_id) {
         Ok(accepted) => {
-            let already_owned = apply_accepted(db, gift_id, &accepted.item_id, &accepted.sender_name, message, now_ms)?;
-            Ok(ReceiveOutcome { code: ProfileCode::Ok, item_id: Some(accepted.item_id), already_owned })
+            let already_owned = apply_accepted(
+                db,
+                gift_id,
+                &accepted.item_id,
+                &accepted.sender_name,
+                message,
+                now_ms,
+            )?;
+            Ok(ReceiveOutcome {
+                code: ProfileCode::Ok,
+                item_id: Some(accepted.item_id),
+                already_owned,
+            })
         }
-        Err(ProfileError::Rejected(code)) => Ok(ReceiveOutcome { code, item_id: None, already_owned: false }),
+        Err(ProfileError::Rejected(code)) => Ok(ReceiveOutcome {
+            code,
+            item_id: None,
+            already_owned: false,
+        }),
         Err(other) => Err(other.into()),
     }
 }
 
-pub fn decline(db: &Mutex<Connection>, api: &dyn ProfileApi, gift_id: &str, now_ms: i64) -> AppResult<ProfileCode> {
+pub fn decline(
+    db: &Mutex<Connection>,
+    api: &dyn ProfileApi,
+    gift_id: &str,
+    now_ms: i64,
+) -> AppResult<ProfileCode> {
     match api.decline_gift(gift_id) {
         Ok(()) => {
             repo::record_received(&*lock_db(db)?, gift_id, "", "", "", "declined", now_ms)?;
@@ -242,16 +307,26 @@ pub fn decline(db: &Mutex<Connection>, api: &dyn ProfileApi, gift_id: &str, now_
 
 /// Reads the gift box. A gift the server shows as accepted but this PC has not applied (the
 /// answer to an accept was lost) is applied now, so an accept is never half done.
-pub fn sync_inbox(db: &Mutex<Connection>, api: &dyn ProfileApi, now_ms: i64) -> AppResult<Vec<InboxGift>> {
+pub fn sync_inbox(
+    db: &Mutex<Connection>,
+    api: &dyn ProfileApi,
+    now_ms: i64,
+) -> AppResult<Vec<InboxGift>> {
     let gifts = api.gift_inbox()?;
     let mut waiting = Vec::new();
     for gift in gifts {
         match gift.status.as_str() {
             "pending" => waiting.push(gift),
-            "accepted"
-                if repo::received_outcome(&*lock_db(db)?, &gift.gift_id)?.is_none() => {
-                    apply_accepted(db, &gift.gift_id, &gift.item_id, &gift.sender_name, &gift.message, now_ms)?;
-                }
+            "accepted" if repo::received_outcome(&*lock_db(db)?, &gift.gift_id)?.is_none() => {
+                apply_accepted(
+                    db,
+                    &gift.gift_id,
+                    &gift.item_id,
+                    &gift.sender_name,
+                    &gift.message,
+                    now_ms,
+                )?;
+            }
             _ => {}
         }
     }

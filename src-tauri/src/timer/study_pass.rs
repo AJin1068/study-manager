@@ -21,7 +21,7 @@
 //! columns stay satisfied without rebuilding the append-only table.
 
 use chrono::TimeZone;
-use rusqlite::{params, Connection, TransactionBehavior};
+use rusqlite::{Connection, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
@@ -29,7 +29,7 @@ use crate::settings::{self, SettingKey, SettingValue};
 use crate::store;
 
 use super::model::{EndReason, NewRun, RunStatus};
-use super::{end_active_runs, load, local_date, DATE_FMT};
+use super::{DATE_FMT, end_active_runs, load, local_date};
 
 pub const EMERGENCY_PASS_MS: i64 = 10 * 60 * 1000;
 /// Points deducted for one emergency pass. Recorded here; `points::settle` posts it to the ledger.
@@ -45,7 +45,11 @@ pub enum PassKind {
 
 impl PassKind {
     #[cfg(test)]
-    pub const ALL: [PassKind; 3] = [PassKind::EmergencyPass, PassKind::SkipToday, PassKind::EarlyRelease];
+    pub const ALL: [PassKind; 3] = [
+        PassKind::EmergencyPass,
+        PassKind::SkipToday,
+        PassKind::EarlyRelease,
+    ];
 
     /// The value stored in `study_passes.kind` (matches the CHECK list).
     pub fn as_str(self) -> &'static str {
@@ -124,11 +128,17 @@ impl ReleaseProof {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Grant {
-    Granted { expires_at_ms: Option<i64> },
+    Granted {
+        expires_at_ms: Option<i64>,
+    },
     /// Nothing to release: no lock for a pass or early release, nothing left today to skip.
     NothingToRelease,
-    LimitReached { limit: i64 },
-    AlreadyActive { expires_at_ms: i64 },
+    LimitReached {
+        limit: i64,
+    },
+    AlreadyActive {
+        expires_at_ms: i64,
+    },
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
@@ -167,7 +177,9 @@ pub(crate) fn date_of<Tz: TimeZone>(tz: &Tz, at_ms: i64) -> AppResult<String> {
 pub fn daily_limit(conn: &Connection) -> AppResult<i64> {
     match settings::read_value(conn, &SettingKey::EmergencyPassDailyLimit.spec())? {
         SettingValue::Int(limit) => Ok(limit),
-        other => Err(AppError::Internal(format!("emergencyPassDailyLimit is not an integer: {other:?}"))),
+        other => Err(AppError::Internal(format!(
+            "emergencyPassDailyLimit is not an integer: {other:?}"
+        ))),
     }
 }
 
@@ -204,10 +216,17 @@ pub fn status<Tz: TimeZone>(conn: &Connection, tz: &Tz, now_ms: i64) -> AppResul
 /// The refusal that would stop `kind` right now, or `None` when it could be granted. Used before
 /// a challenge is issued so the user is not made to type for nothing; `grant` re-checks inside
 /// its transaction.
-pub fn refusal<Tz: TimeZone>(conn: &Connection, tz: &Tz, kind: PassKind, at_ms: i64) -> AppResult<Option<Grant>> {
+pub fn refusal<Tz: TimeZone>(
+    conn: &Connection,
+    tz: &Tz,
+    kind: PassKind,
+    at_ms: i64,
+) -> AppResult<Option<Grant>> {
     match kind {
         PassKind::SkipToday => Ok(None),
-        PassKind::EarlyRelease => Ok((!store::read_study_state(conn)?.0).then_some(Grant::NothingToRelease)),
+        PassKind::EarlyRelease => {
+            Ok((!store::read_study_state(conn)?.0).then_some(Grant::NothingToRelease))
+        }
         PassKind::EmergencyPass => {
             if !store::read_study_state(conn)?.0 {
                 return Ok(Some(Grant::NothingToRelease));
@@ -231,7 +250,10 @@ fn skip_remaining_today<Tz: TimeZone>(tx: &Connection, tz: &Tz, at_ms: i64) -> A
     let loaded = load(tx, tz, at_ms)?;
     let mut added = 0;
     for o in &loaded.occurrences {
-        let has_run = loaded.runs.iter().any(|r| r.run.plan_id == o.plan_id && r.run.date == o.date);
+        let has_run = loaded
+            .runs
+            .iter()
+            .any(|r| r.run.plan_id == o.plan_id && r.run.date == o.date);
         // An occurrence that began before its plan existed was never the user's commitment.
         if o.date != today || has_run || !o.eligible_for_missed || o.planned_end_ms <= at_ms {
             continue;
@@ -270,7 +292,9 @@ pub fn grant<Tz: TimeZone>(
     proof: ReleaseProof,
 ) -> AppResult<Grant> {
     if proof.kind() == ProofKind::Quiz && kind != PassKind::EarlyRelease {
-        return Err(AppError::Invalid("a quiz proof is valid for early release only".into()));
+        return Err(AppError::Invalid(
+            "a quiz proof is valid for early release only".into(),
+        ));
     }
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     if let Some(refused) = refusal(&tx, tz, kind, at_ms)? {
@@ -285,12 +309,24 @@ pub fn grant<Tz: TimeZone>(
             penalty_points = Some(EMERGENCY_PASS_PENALTY_POINTS);
         }
         PassKind::EarlyRelease => {
-            if !end_active_runs(&tx, at_ms, RunStatus::Aborted, EndReason::EarlyRelease, "early_release")? {
+            if !end_active_runs(
+                &tx,
+                at_ms,
+                RunStatus::Aborted,
+                EndReason::EarlyRelease,
+                "early_release",
+            )? {
                 return Ok(Grant::NothingToRelease);
             }
         }
         PassKind::SkipToday => {
-            let ended = end_active_runs(&tx, at_ms, RunStatus::Skipped, EndReason::Skipped, "skip_today")?;
+            let ended = end_active_runs(
+                &tx,
+                at_ms,
+                RunStatus::Skipped,
+                EndReason::Skipped,
+                "skip_today",
+            )?;
             let skipped = skip_remaining_today(&tx, tz, at_ms)?;
             if !ended && skipped == 0 {
                 return Ok(Grant::NothingToRelease);

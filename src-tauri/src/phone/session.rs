@@ -7,10 +7,10 @@ use std::sync::{Arc, Mutex};
 
 use serde::Deserialize;
 
+use crate::remote::Clock;
 use crate::remote::auth::{AccessTokenSource, AuthError, AuthTokens, EXPIRY_SKEW_MS};
 use crate::remote::http::{HttpRequest, HttpTransport, Method, RequestTag};
 use crate::remote::payload::{Body, NoArgs, RefreshRequest};
-use crate::remote::Clock;
 
 /// Anonymous sign-in and renewal.
 pub trait AnonymousAuth: Send + Sync {
@@ -40,16 +40,26 @@ struct TokenUser {
 
 impl SupabaseAnonymousAuth {
     pub fn new(endpoint: &str, anon_key: &str, transport: Arc<dyn HttpTransport>) -> Self {
-        Self { endpoint: endpoint.trim_end_matches('/').to_string(), anon_key: anon_key.to_string(), transport }
+        Self {
+            endpoint: endpoint.trim_end_matches('/').to_string(),
+            anon_key: anon_key.to_string(),
+            transport,
+        }
     }
 
     fn post(&self, kind: &'static str, path: &str, body: Body) -> Result<AuthTokens, AuthError> {
-        let tag = RequestTag { port: "supabase", kind };
-        let request = HttpRequest::new(tag, Method::Post, format!("{}{}", self.endpoint, path)).header("apikey", &self.anon_key).with_body(body);
+        let tag = RequestTag {
+            port: "supabase",
+            kind,
+        };
+        let request = HttpRequest::new(tag, Method::Post, format!("{}{}", self.endpoint, path))
+            .header("apikey", &self.anon_key)
+            .with_body(body);
         let response = self.transport.send(request).map_err(AuthError::Network)?;
         match response.status {
             200..=299 => {
-                let parsed: TokenResponse = serde_json::from_slice(&response.body).map_err(|_| AuthError::Decode)?;
+                let parsed: TokenResponse =
+                    serde_json::from_slice(&response.body).map_err(|_| AuthError::Decode)?;
                 Ok(AuthTokens {
                     access_token: parsed.access_token,
                     refresh_token: parsed.refresh_token,
@@ -58,7 +68,9 @@ impl SupabaseAnonymousAuth {
                 })
             }
             400 | 401 | 403 => Err(AuthError::Expired),
-            429 => Err(AuthError::RateLimited { retry_after_ms: response.retry_after_ms().unwrap_or(30_000) }),
+            429 => Err(AuthError::RateLimited {
+                retry_after_ms: response.retry_after_ms().unwrap_or(30_000),
+            }),
             status => Err(AuthError::Server { status }),
         }
     }
@@ -71,8 +83,15 @@ impl AnonymousAuth for SupabaseAnonymousAuth {
     }
 
     fn refresh(&self, refresh_token: &str) -> Result<AuthTokens, AuthError> {
-        let body = Body::from_payload(&RefreshRequest { refresh_token: refresh_token.to_string() }).map_err(|_| AuthError::Decode)?;
-        self.post("auth_refresh", "/auth/v1/token?grant_type=refresh_token", body)
+        let body = Body::from_payload(&RefreshRequest {
+            refresh_token: refresh_token.to_string(),
+        })
+        .map_err(|_| AuthError::Decode)?;
+        self.post(
+            "auth_refresh",
+            "/auth/v1/token?grant_type=refresh_token",
+            body,
+        )
     }
 }
 
@@ -93,7 +112,11 @@ pub struct PhoneSession {
 
 impl PhoneSession {
     pub fn new(auth: Arc<dyn AnonymousAuth>, clock: Arc<dyn Clock>) -> Self {
-        Self { auth, clock, live: Mutex::new(None) }
+        Self {
+            auth,
+            clock,
+            live: Mutex::new(None),
+        }
     }
 
     fn slot(&self) -> std::sync::MutexGuard<'_, Option<Live>> {
@@ -145,7 +168,11 @@ impl AccessTokenSource for PhoneSession {
     fn access_token(&self) -> Result<String, AuthError> {
         let now = self.clock.now_ms().map_err(|_| AuthError::Decode)?;
         let (access, refresh, expires_at) = match self.slot().as_ref() {
-            Some(live) => (live.access.clone(), live.refresh.clone(), live.expires_at_ms),
+            Some(live) => (
+                live.access.clone(),
+                live.refresh.clone(),
+                live.expires_at_ms,
+            ),
             None => return Err(AuthError::NotSignedIn),
         };
         if now + EXPIRY_SKEW_MS < expires_at {
@@ -155,7 +182,11 @@ impl AccessTokenSource for PhoneSession {
     }
 
     fn force_refresh(&self) -> Result<String, AuthError> {
-        let refresh = self.slot().as_ref().map(|live| live.refresh.clone()).ok_or(AuthError::NotSignedIn)?;
+        let refresh = self
+            .slot()
+            .as_ref()
+            .map(|live| live.refresh.clone())
+            .ok_or(AuthError::NotSignedIn)?;
         self.store(self.auth.refresh(&refresh)?)
     }
 }

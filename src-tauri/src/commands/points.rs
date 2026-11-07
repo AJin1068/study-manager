@@ -2,7 +2,7 @@
 
 use tauri::State;
 
-use super::{lock_db, AppState};
+use super::{AppState, lock_db};
 use crate::clock::now_ms;
 use crate::error::AppResult;
 use crate::points::{self, LedgerEntry, PointsStatus};
@@ -26,15 +26,19 @@ pub fn list_point_ledger(state: State<'_, AppState>, limit: i64) -> AppResult<Ve
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     use crate::points::rewards::Stage;
     use crate::points::{self, LedgerEntry};
 
     #[test]
     fn points_wire_shapes_match_the_shared_fixture() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../src/api/fixtures/points-contract.json");
-        let expected: Value = serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../src/api/fixtures/points-contract.json"
+        );
+        let expected: Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
         let actual = json!({
             "status": points::status_for(60, 90),
             "entry": LedgerEntry {

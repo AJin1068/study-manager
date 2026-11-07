@@ -10,7 +10,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use chrono::{DateTime, NaiveDate};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use super::{Caller, DataError, FakeBackend, State};
 
@@ -123,11 +123,16 @@ fn text_len(s: &str) -> usize {
 }
 
 fn trimmed<'a>(args: &'a Map<String, Value>, key: &str) -> &'a str {
-    args.get(key).and_then(Value::as_str).unwrap_or_default().trim()
+    args.get(key)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
 }
 
 fn valid_item_id(s: &str) -> bool {
-    (1..=40).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+    (1..=40).contains(&s.len())
+        && s.bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
 fn date_of(ms: i64) -> Option<NaiveDate> {
@@ -146,7 +151,11 @@ struct Prefs {
 
 fn prefs_of(state: &State, user: &str) -> Prefs {
     let row = find(state, "friend_prefs", user);
-    let flag = |key: &str, default: bool| row.and_then(|r| r.get(key)).and_then(Value::as_bool).unwrap_or(default);
+    let flag = |key: &str, default: bool| {
+        row.and_then(|r| r.get(key))
+            .and_then(Value::as_bool)
+            .unwrap_or(default)
+    };
     Prefs {
         level: flag("share_level", true),
         status: flag("share_status", true),
@@ -157,33 +166,62 @@ fn prefs_of(state: &State, user: &str) -> Prefs {
     }
 }
 
-pub(super) fn find<'a>(state: &'a State, table: &str, user: &str) -> Option<&'a Map<String, Value>> {
-    state.tables.get(table)?.iter().find(|r| r.get("user_id").and_then(Value::as_str) == Some(user))
+pub(super) fn find<'a>(
+    state: &'a State,
+    table: &str,
+    user: &str,
+) -> Option<&'a Map<String, Value>> {
+    state
+        .tables
+        .get(table)?
+        .iter()
+        .find(|r| r.get("user_id").and_then(Value::as_str) == Some(user))
 }
 
 fn put_row(state: &mut State, table: &str, keys: &[&str], row: Map<String, Value>) {
     let rows = state.tables.entry(table.to_string()).or_default();
-    match rows.iter_mut().find(|e| keys.iter().all(|k| e.get(*k) == row.get(*k))) {
+    match rows
+        .iter_mut()
+        .find(|e| keys.iter().all(|k| e.get(*k) == row.get(*k)))
+    {
         Some(existing) => *existing = row,
         None => rows.push(row),
     }
 }
 
 pub(super) fn is_member(state: &State, room: &str, user: &str) -> bool {
-    state.rooms.members.iter().any(|m| m.room_id == room && m.user_id == user)
+    state
+        .rooms
+        .members
+        .iter()
+        .any(|m| m.room_id == room && m.user_id == user)
 }
 
 /// The nickname a member uses in a room, in join order position `(joined_ms, user)` for sorting.
 pub(super) fn member_nickname(state: &State, room: &str, user: &str) -> Option<(String, i64)> {
-    state.rooms.members.iter().find(|m| m.room_id == room && m.user_id == user).map(|m| (m.nickname.clone(), m.joined_ms))
+    state
+        .rooms
+        .members
+        .iter()
+        .find(|m| m.room_id == room && m.user_id == user)
+        .map(|m| (m.nickname.clone(), m.joined_ms))
 }
 
 fn is_owner(state: &State, room: &str, user: &str) -> bool {
-    state.rooms.members.iter().any(|m| m.room_id == room && m.user_id == user && m.owner)
+    state
+        .rooms
+        .members
+        .iter()
+        .any(|m| m.room_id == room && m.user_id == user && m.owner)
 }
 
 fn ensure_owner(state: &mut State, room: &str) {
-    if state.rooms.members.iter().any(|m| m.room_id == room && m.owner) {
+    if state
+        .rooms
+        .members
+        .iter()
+        .any(|m| m.room_id == room && m.owner)
+    {
         return;
     }
     let first = state
@@ -191,14 +229,22 @@ fn ensure_owner(state: &mut State, room: &str) {
         .members
         .iter_mut()
         .filter(|m| m.room_id == room)
-        .min_by(|a, b| a.joined_ms.cmp(&b.joined_ms).then_with(|| a.user_id.cmp(&b.user_id)));
+        .min_by(|a, b| {
+            a.joined_ms
+                .cmp(&b.joined_ms)
+                .then_with(|| a.user_id.cmp(&b.user_id))
+        });
     if let Some(member) = first {
         member.owner = true;
     }
 }
 
 pub(super) fn shares_room(state: &State, a: &str, b: &str) -> bool {
-    state.rooms.members.iter().any(|m| m.user_id == a && is_member(state, &m.room_id, b))
+    state
+        .rooms
+        .members
+        .iter()
+        .any(|m| m.user_id == a && is_member(state, &m.room_id, b))
 }
 
 /// The nickname `user` uses in the earliest room they share with `other` (profiles and gifts show
@@ -214,7 +260,12 @@ pub(super) fn shared_nickname(state: &State, user: &str, other: &str) -> Option<
 }
 
 impl FakeBackend {
-    pub(super) fn room_rpc(&self, caller: &Caller, name: &str, args: &Map<String, Value>) -> Result<Value, DataError> {
+    pub(super) fn room_rpc(
+        &self,
+        caller: &Caller,
+        name: &str,
+        args: &Map<String, Value>,
+    ) -> Result<Value, DataError> {
         let user = Self::user_of(caller)?.to_string();
         let now = self.now();
         let mut state = self.lock();
@@ -241,7 +292,12 @@ impl FakeBackend {
 
     /// Test and diagnostics helper: how many members a room has.
     pub fn room_member_count(&self, room_id: &str) -> usize {
-        self.lock().rooms.members.iter().filter(|m| m.room_id == room_id).count()
+        self.lock()
+            .rooms
+            .members
+            .iter()
+            .filter(|m| m.room_id == room_id)
+            .count()
     }
 
     /// Test helper: number of stored invites whose plain code could be recovered (always zero:
@@ -262,19 +318,44 @@ fn create_room(state: &mut State, user: &str, now: i64, args: &Map<String, Value
     if !(1..=40).contains(&text_len(&name)) || !(1..=20).contains(&text_len(&nick)) {
         return code("invalid_input");
     }
-    if state.rooms.members.iter().filter(|m| m.user_id == user && m.owner).count() >= 5 {
+    if state
+        .rooms
+        .members
+        .iter()
+        .filter(|m| m.user_id == user && m.owner)
+        .count()
+        >= 5
+    {
         return code("room_limit");
     }
     let id = state.rooms.next_id();
     let created_seq = state.rooms.seq;
-    state.rooms.rooms.push(RoomRow { id: id.clone(), name, capacity: 8, created_seq });
-    state.rooms.members.push(MemberRow { room_id: id.clone(), user_id: user.to_string(), owner: true, nickname: nick, joined_ms: now });
+    state.rooms.rooms.push(RoomRow {
+        id: id.clone(),
+        name,
+        capacity: 8,
+        created_seq,
+    });
+    state.rooms.members.push(MemberRow {
+        room_id: id.clone(),
+        user_id: user.to_string(),
+        owner: true,
+        nickname: nick,
+        joined_ms: now,
+    });
     json!({"code": "ok", "room_id": id})
 }
 
 fn create_invite(state: &mut State, user: &str, now: i64, args: &Map<String, Value>) -> Value {
-    let room = args.get("p_room_id").and_then(Value::as_str).unwrap_or_default().to_string();
-    let (Some(ttl), Some(max_uses)) = (args.get("p_ttl_hours").and_then(Value::as_i64), args.get("p_max_uses").and_then(Value::as_i64)) else {
+    let room = args
+        .get("p_room_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let (Some(ttl), Some(max_uses)) = (
+        args.get("p_ttl_hours").and_then(Value::as_i64),
+        args.get("p_max_uses").and_then(Value::as_i64),
+    ) else {
         return code("invalid_input");
     };
     if !(1..=168).contains(&ttl) || !(1..=50).contains(&max_uses) {
@@ -283,7 +364,12 @@ fn create_invite(state: &mut State, user: &str, now: i64, args: &Map<String, Val
     if !is_owner(state, &room, user) {
         return code("not_owner");
     }
-    let active = state.rooms.invites.iter().filter(|i| i.room_id == room && !i.revoked && i.expires_ms > now && i.uses < i.max_uses).count();
+    let active = state
+        .rooms
+        .invites
+        .iter()
+        .filter(|i| i.room_id == room && !i.revoked && i.expires_ms > now && i.uses < i.max_uses)
+        .count();
     if active >= 10 {
         return code("too_many_invites");
     }
@@ -295,17 +381,37 @@ fn create_invite(state: &mut State, user: &str, now: i64, args: &Map<String, Val
     let id = state.rooms.next_id();
     let created_seq = state.rooms.seq;
     let expires_ms = now + ttl * 3_600_000;
-    state.rooms.invites.push(InviteRow { id: id.clone(), room_id: room, hash: hash_code(&plain), expires_ms, max_uses, uses: 0, revoked: false, created_seq });
+    state.rooms.invites.push(InviteRow {
+        id: id.clone(),
+        room_id: room,
+        hash: hash_code(&plain),
+        expires_ms,
+        max_uses,
+        uses: 0,
+        revoked: false,
+        created_seq,
+    });
     json!({"code": "ok", "invite_id": id, "invite_code": plain, "expires_at_ms": expires_ms})
 }
 
 fn revoke_invite(state: &mut State, user: &str, args: &Map<String, Value>) -> Value {
-    let room = args.get("p_room_id").and_then(Value::as_str).unwrap_or_default();
-    let invite = args.get("p_invite_id").and_then(Value::as_str).unwrap_or_default();
+    let room = args
+        .get("p_room_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let invite = args
+        .get("p_invite_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     if !is_owner(state, room, user) {
         return code("not_owner");
     }
-    match state.rooms.invites.iter_mut().find(|i| i.id == invite && i.room_id == room && !i.revoked) {
+    match state
+        .rooms
+        .invites
+        .iter_mut()
+        .find(|i| i.id == invite && i.room_id == room && !i.revoked)
+    {
         Some(row) => {
             row.revoked = true;
             code("ok")
@@ -316,7 +422,12 @@ fn revoke_invite(state: &mut State, user: &str, args: &Map<String, Value>) -> Va
 
 fn join_room(state: &mut State, user: &str, now: i64, args: &Map<String, Value>) -> Value {
     state.rooms.attempts.retain(|(_, at)| *at > now - DAY_MS);
-    let recent = state.rooms.attempts.iter().filter(|(u, at)| u == user && *at > now - 60_000).count();
+    let recent = state
+        .rooms
+        .attempts
+        .iter()
+        .filter(|(u, at)| u == user && *at > now - 60_000)
+        .count();
     if recent >= 5 {
         return code("rate_limited");
     }
@@ -326,11 +437,17 @@ fn join_room(state: &mut State, user: &str, now: i64, args: &Map<String, Value>)
     if !(1..=20).contains(&text_len(&nick)) {
         return code("invalid_input");
     }
-    let Some(plain) = normalize(args.get("p_code").and_then(Value::as_str).unwrap_or_default()) else {
+    let Some(plain) = normalize(
+        args.get("p_code")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    ) else {
         return code("invalid_code");
     };
     let hash = hash_code(&plain);
-    let Some(invite) = state.rooms.invites.iter().find(|i| i.hash == hash) else { return code("invalid_code") };
+    let Some(invite) = state.rooms.invites.iter().find(|i| i.hash == hash) else {
+        return code("invalid_code");
+    };
     let (invite_id, room) = (invite.id.clone(), invite.room_id.clone());
     if invite.revoked {
         return code("revoked");
@@ -341,17 +458,40 @@ fn join_room(state: &mut State, user: &str, now: i64, args: &Map<String, Value>)
     if invite.uses >= invite.max_uses {
         return code("exhausted");
     }
-    if state.rooms.bans.iter().any(|(r, u)| *r == room && u == user) {
+    if state
+        .rooms
+        .bans
+        .iter()
+        .any(|(r, u)| *r == room && u == user)
+    {
         return code("banned");
     }
     if is_member(state, &room, user) {
         return json!({"code": "already_member", "room_id": room});
     }
-    let capacity = state.rooms.rooms.iter().find(|r| r.id == room).map_or(0, |r| r.capacity);
-    if state.rooms.members.iter().filter(|m| m.room_id == room).count() >= capacity {
+    let capacity = state
+        .rooms
+        .rooms
+        .iter()
+        .find(|r| r.id == room)
+        .map_or(0, |r| r.capacity);
+    if state
+        .rooms
+        .members
+        .iter()
+        .filter(|m| m.room_id == room)
+        .count()
+        >= capacity
+    {
         return code("room_full");
     }
-    state.rooms.members.push(MemberRow { room_id: room.clone(), user_id: user.to_string(), owner: false, nickname: nick, joined_ms: now });
+    state.rooms.members.push(MemberRow {
+        room_id: room.clone(),
+        user_id: user.to_string(),
+        owner: false,
+        nickname: nick,
+        joined_ms: now,
+    });
     if let Some(row) = state.rooms.invites.iter_mut().find(|i| i.id == invite_id) {
         row.uses += 1;
     }
@@ -359,8 +499,17 @@ fn join_room(state: &mut State, user: &str, now: i64, args: &Map<String, Value>)
 }
 
 fn leave_room(state: &mut State, user: &str, args: &Map<String, Value>) -> Value {
-    let room = args.get("p_room_id").and_then(Value::as_str).unwrap_or_default().to_string();
-    let Some(position) = state.rooms.members.iter().position(|m| m.room_id == room && m.user_id == user) else {
+    let room = args
+        .get("p_room_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let Some(position) = state
+        .rooms
+        .members
+        .iter()
+        .position(|m| m.room_id == room && m.user_id == user)
+    else {
         return code("not_member");
     };
     let was_owner = state.rooms.members.remove(position).owner;
@@ -376,8 +525,16 @@ fn leave_room(state: &mut State, user: &str, args: &Map<String, Value>) -> Value
 }
 
 fn kick_member(state: &mut State, user: &str, args: &Map<String, Value>) -> Value {
-    let room = args.get("p_room_id").and_then(Value::as_str).unwrap_or_default().to_string();
-    let target = args.get("p_target_user").and_then(Value::as_str).unwrap_or_default().to_string();
+    let room = args
+        .get("p_room_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let target = args
+        .get("p_target_user")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
     if !is_owner(state, &room, user) {
         return code("not_owner");
     }
@@ -387,19 +544,38 @@ fn kick_member(state: &mut State, user: &str, args: &Map<String, Value>) -> Valu
     if !is_member(state, &room, &target) {
         return code("not_member");
     }
-    state.rooms.members.retain(|m| !(m.room_id == room && m.user_id == target));
-    if !state.rooms.bans.iter().any(|(r, u)| *r == room && *u == target) {
+    state
+        .rooms
+        .members
+        .retain(|m| !(m.room_id == room && m.user_id == target));
+    if !state
+        .rooms
+        .bans
+        .iter()
+        .any(|(r, u)| *r == room && *u == target)
+    {
         state.rooms.bans.push((room, target));
     }
     code("ok")
 }
 
 fn list_my_rooms(state: &mut State, user: &str) -> Value {
-    let mine: Vec<String> = state.rooms.members.iter().filter(|m| m.user_id == user).map(|m| m.room_id.clone()).collect();
+    let mine: Vec<String> = state
+        .rooms
+        .members
+        .iter()
+        .filter(|m| m.user_id == user)
+        .map(|m| m.room_id.clone())
+        .collect();
     for room in &mine {
         ensure_owner(state, room);
     }
-    let mut rooms: Vec<&RoomRow> = state.rooms.rooms.iter().filter(|r| mine.contains(&r.id)).collect();
+    let mut rooms: Vec<&RoomRow> = state
+        .rooms
+        .rooms
+        .iter()
+        .filter(|r| mine.contains(&r.id))
+        .collect();
     rooms.sort_by_key(|r| r.created_seq);
     let list: Vec<Value> = rooms
         .iter()
@@ -413,17 +589,38 @@ fn list_my_rooms(state: &mut State, user: &str) -> Value {
 }
 
 fn room_snapshot(state: &mut State, user: &str, now: i64, args: &Map<String, Value>) -> Value {
-    let room_id = args.get("p_room_id").and_then(Value::as_str).unwrap_or_default().to_string();
+    let room_id = args
+        .get("p_room_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
     if !is_member(state, &room_id, user) {
         return code("not_member");
     }
     ensure_owner(state, &room_id);
-    let Some(room) = state.rooms.rooms.iter().find(|r| r.id == room_id) else { return code("not_member") };
-    let role = if is_owner(state, &room_id, user) { "owner" } else { "member" };
-    let first_day = date_of(now - 16 * DAY_MS).map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default();
+    let Some(room) = state.rooms.rooms.iter().find(|r| r.id == room_id) else {
+        return code("not_member");
+    };
+    let role = if is_owner(state, &room_id, user) {
+        "owner"
+    } else {
+        "member"
+    };
+    let first_day = date_of(now - 16 * DAY_MS)
+        .map(|d| d.format("%Y-%m-%d").to_string())
+        .unwrap_or_default();
 
-    let mut members: Vec<&MemberRow> = state.rooms.members.iter().filter(|m| m.room_id == room_id).collect();
-    members.sort_by(|a, b| a.joined_ms.cmp(&b.joined_ms).then_with(|| a.user_id.cmp(&b.user_id)));
+    let mut members: Vec<&MemberRow> = state
+        .rooms
+        .members
+        .iter()
+        .filter(|m| m.room_id == room_id)
+        .collect();
+    members.sort_by(|a, b| {
+        a.joined_ms
+            .cmp(&b.joined_ms)
+            .then_with(|| a.user_id.cmp(&b.user_id))
+    });
     let member_json: Vec<Value> = members
         .iter()
         .map(|m| {
@@ -476,7 +673,12 @@ fn room_snapshot(state: &mut State, user: &str, now: i64, args: &Map<String, Val
         .collect();
 
     let invites: Vec<Value> = if role == "owner" {
-        let mut rows: Vec<&InviteRow> = state.rooms.invites.iter().filter(|i| i.room_id == room_id).collect();
+        let mut rows: Vec<&InviteRow> = state
+            .rooms
+            .invites
+            .iter()
+            .filter(|i| i.room_id == room_id)
+            .collect();
         rows.sort_by_key(|i| std::cmp::Reverse(i.created_seq));
         rows.iter()
             .map(|i| json!({"invite_id": i.id, "expires_at_ms": i.expires_ms, "max_uses": i.max_uses, "uses": i.uses, "revoked": i.revoked}))
@@ -489,7 +691,10 @@ fn room_snapshot(state: &mut State, user: &str, now: i64, args: &Map<String, Val
         .schedules
         .iter()
         .find(|(r, _, _)| *r == room_id)
-        .map_or(Value::Null, |(_, items, at)| json!({"items": items, "updated_at_ms": at}));
+        .map_or(
+            Value::Null,
+            |(_, items, at)| json!({"items": items, "updated_at_ms": at}),
+        );
 
     json!({
         "code": "ok",
@@ -503,12 +708,19 @@ fn room_snapshot(state: &mut State, user: &str, now: i64, args: &Map<String, Val
 
 fn report_status(state: &mut State, user: &str, now: i64, args: &Map<String, Value>) -> Value {
     let status = args.get("p_state").and_then(Value::as_str);
-    let (Some(remaining), Some(level)) = (args.get("p_remaining_sec").and_then(Value::as_i64), args.get("p_level").and_then(Value::as_i64)) else {
+    let (Some(remaining), Some(level)) = (
+        args.get("p_remaining_sec").and_then(Value::as_i64),
+        args.get("p_level").and_then(Value::as_i64),
+    ) else {
         return code("invalid_input");
     };
     let attempts = args.get("p_attempts_today").filter(|v| !v.is_null());
     let attempts_ok = attempts.is_none_or(|v| v.as_i64().is_some_and(|n| n >= 0));
-    if !matches!(status, Some("studying" | "break" | "idle")) || !(0..=86_400).contains(&remaining) || !(1..=999).contains(&level) || !attempts_ok {
+    if !matches!(status, Some("studying" | "break" | "idle"))
+        || !(0..=86_400).contains(&remaining)
+        || !(1..=999).contains(&level)
+        || !attempts_ok
+    {
         return code("invalid_input");
     }
     let share_attempts = prefs_of(state, user).attempts;
@@ -517,21 +729,36 @@ fn report_status(state: &mut State, user: &str, now: i64, args: &Map<String, Val
     row.insert("state".into(), json!(status));
     row.insert("remaining_sec".into(), json!(remaining));
     row.insert("level".into(), json!(level));
-    row.insert("attempts_today".into(), if share_attempts { attempts.cloned().unwrap_or(Value::Null) } else { Value::Null });
+    row.insert(
+        "attempts_today".into(),
+        if share_attempts {
+            attempts.cloned().unwrap_or(Value::Null)
+        } else {
+            Value::Null
+        },
+    );
     row.insert("updated_at_ms".into(), json!(now));
     put_row(state, "member_status", &["user_id"], row);
     code("ok")
 }
 
 fn report_daily(state: &mut State, user: &str, now: i64, args: &Map<String, Value>) -> Value {
-    let day = args.get("p_day").and_then(Value::as_str).and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
-    let (Some(day), Some(study), Some(plan)) =
-        (day, args.get("p_study_min").and_then(Value::as_i64), args.get("p_plan_min").and_then(Value::as_i64))
-    else {
+    let day = args
+        .get("p_day")
+        .and_then(Value::as_str)
+        .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
+    let (Some(day), Some(study), Some(plan)) = (
+        day,
+        args.get("p_study_min").and_then(Value::as_i64),
+        args.get("p_plan_min").and_then(Value::as_i64),
+    ) else {
         return code("invalid_input");
     };
-    let (Some(earliest), Some(latest)) = (date_of(now - 8 * DAY_MS), date_of(now + DAY_MS)) else { return code("invalid_input") };
-    if !(0..=1440).contains(&study) || !(0..=1440).contains(&plan) || day < earliest || day > latest {
+    let (Some(earliest), Some(latest)) = (date_of(now - 8 * DAY_MS), date_of(now + DAY_MS)) else {
+        return code("invalid_input");
+    };
+    if !(0..=1440).contains(&study) || !(0..=1440).contains(&plan) || day < earliest || day > latest
+    {
         return code("invalid_input");
     }
     if !prefs_of(state, user).week {
@@ -542,9 +769,19 @@ fn report_daily(state: &mut State, user: &str, now: i64, args: &Map<String, Valu
         .tables
         .get("daily_summaries")
         .and_then(|rows| {
-            rows.iter().find(|r| r.get("user_id").and_then(Value::as_str) == Some(user) && r.get("day").and_then(Value::as_str) == Some(day_text.as_str()))
+            rows.iter().find(|r| {
+                r.get("user_id").and_then(Value::as_str) == Some(user)
+                    && r.get("day").and_then(Value::as_str) == Some(day_text.as_str())
+            })
         })
-        .map(|r| (r.get("study_min").and_then(Value::as_i64).unwrap_or(0), r.get("updated_at_ms").and_then(Value::as_i64).unwrap_or(now)));
+        .map(|r| {
+            (
+                r.get("study_min").and_then(Value::as_i64).unwrap_or(0),
+                r.get("updated_at_ms")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(now),
+            )
+        });
     if let Some((old_study, updated)) = old {
         let elapsed_min = ((now - updated) / 1000 / 60).max(0);
         if study - old_study > elapsed_min + 5 {
@@ -558,22 +795,37 @@ fn report_daily(state: &mut State, user: &str, now: i64, args: &Map<String, Valu
     row.insert("plan_min".into(), json!(plan));
     row.insert("updated_at_ms".into(), json!(now));
     put_row(state, "daily_summaries", &["user_id", "day"], row);
-    if let (Some(cutoff), Some(rows)) = (date_of(now - 60 * DAY_MS), state.tables.get_mut("daily_summaries")) {
+    if let (Some(cutoff), Some(rows)) = (
+        date_of(now - 60 * DAY_MS),
+        state.tables.get_mut("daily_summaries"),
+    ) {
         let cutoff = cutoff.format("%Y-%m-%d").to_string();
         rows.retain(|r| {
-            r.get("user_id").and_then(Value::as_str) != Some(user) || r.get("day").and_then(Value::as_str).unwrap_or_default() >= cutoff.as_str()
+            r.get("user_id").and_then(Value::as_str) != Some(user)
+                || r.get("day").and_then(Value::as_str).unwrap_or_default() >= cutoff.as_str()
         });
     }
     code("ok")
 }
 
 fn set_friend_prefs(state: &mut State, user: &str, now: i64, args: &Map<String, Value>) -> Value {
-    let flags = ["p_share_level", "p_share_status", "p_share_week_time", "p_share_attempts", "p_distraction_publish", "p_distraction_receive"];
-    let values: Vec<Option<bool>> = flags.iter().map(|k| args.get(*k).and_then(Value::as_bool)).collect();
+    let flags = [
+        "p_share_level",
+        "p_share_status",
+        "p_share_week_time",
+        "p_share_attempts",
+        "p_distraction_publish",
+        "p_distraction_receive",
+    ];
+    let values: Vec<Option<bool>> = flags
+        .iter()
+        .map(|k| args.get(*k).and_then(Value::as_bool))
+        .collect();
     if values.iter().any(Option::is_none) {
         return code("invalid_input");
     }
-    let [level, status, week, attempts, publish, receive] = [0, 1, 2, 3, 4, 5].map(|i| values[i].unwrap_or(false));
+    let [level, status, week, attempts, publish, receive] =
+        [0, 1, 2, 3, 4, 5].map(|i| values[i].unwrap_or(false));
     let mut row = Map::new();
     row.insert("user_id".into(), json!(user));
     row.insert("share_level".into(), json!(level));
@@ -614,7 +866,12 @@ fn set_friend_prefs(state: &mut State, user: &str, now: i64, args: &Map<String, 
     code("ok")
 }
 
-fn set_inventory_public(state: &mut State, user: &str, now: i64, args: &Map<String, Value>) -> Value {
+fn set_inventory_public(
+    state: &mut State,
+    user: &str,
+    now: i64,
+    args: &Map<String, Value>,
+) -> Value {
     let species = args.get("p_species").and_then(Value::as_str);
     let slot = |key: &str| -> Result<Option<String>, ()> {
         match args.get(key) {
@@ -623,9 +880,13 @@ fn set_inventory_public(state: &mut State, user: &str, now: i64, args: &Map<Stri
             _ => Err(()),
         }
     };
-    let (Some(species), Ok(hat), Ok(top), Ok(accessory), Ok(hand)) =
-        (species.filter(|s| valid_item_id(s)), slot("p_hat"), slot("p_top"), slot("p_accessory"), slot("p_hand"))
-    else {
+    let (Some(species), Ok(hat), Ok(top), Ok(accessory), Ok(hand)) = (
+        species.filter(|s| valid_item_id(s)),
+        slot("p_hat"),
+        slot("p_top"),
+        slot("p_accessory"),
+        slot("p_hand"),
+    ) else {
         return code("invalid_input");
     };
     let mut row = Map::new();
@@ -645,17 +906,30 @@ fn report_distraction(state: &mut State, user: &str, now: i64) -> Value {
         return code("disabled");
     }
     state.rooms.events.retain(|(_, _, at)| *at > now - DAY_MS);
-    if state.rooms.events.iter().any(|(_, u, at)| u == user && *at > now - 10_000) {
+    if state
+        .rooms
+        .events
+        .iter()
+        .any(|(_, u, at)| u == user && *at > now - 10_000)
+    {
         return code("throttled");
     }
-    let id = i64::try_from(state.rooms.events.len()).unwrap_or(0) + i64::try_from(state.rooms.seq).unwrap_or(0) + 1;
+    let id = i64::try_from(state.rooms.events.len()).unwrap_or(0)
+        + i64::try_from(state.rooms.seq).unwrap_or(0)
+        + 1;
     state.rooms.seq += 1;
     state.rooms.events.push((id, user.to_string(), now));
     code("ok")
 }
 
 fn poll_distraction_events(state: &mut State, user: &str, args: &Map<String, Value>) -> Value {
-    let Some(since) = args.get("p_since_ms").and_then(Value::as_i64).filter(|s| *s >= 0) else { return code("invalid_input") };
+    let Some(since) = args
+        .get("p_since_ms")
+        .and_then(Value::as_i64)
+        .filter(|s| *s >= 0)
+    else {
+        return code("invalid_input");
+    };
     if !prefs_of(state, user).receive {
         return json!({"code": "disabled", "events": []});
     }
@@ -663,7 +937,12 @@ fn poll_distraction_events(state: &mut State, user: &str, args: &Map<String, Val
         .rooms
         .events
         .iter()
-        .filter(|(_, sender, at)| sender != user && *at > since && prefs_of(state, sender).publish && shares_room(state, user, sender))
+        .filter(|(_, sender, at)| {
+            sender != user
+                && *at > since
+                && prefs_of(state, sender).publish
+                && shares_room(state, user, sender)
+        })
         .collect();
     events.sort_by_key(|(id, _, at)| (*at, *id));
     let list: Vec<Value> = events
@@ -684,24 +963,45 @@ fn poll_distraction_events(state: &mut State, user: &str, args: &Map<String, Val
 }
 
 fn share_schedule(state: &mut State, user: &str, now: i64, args: &Map<String, Value>) -> Value {
-    let room = args.get("p_room_id").and_then(Value::as_str).unwrap_or_default().to_string();
+    let room = args
+        .get("p_room_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
     if !is_owner(state, &room, user) {
         return code("not_owner");
     }
-    let Some(items) = args.get("p_items").and_then(Value::as_array).filter(|a| a.len() <= 20) else { return code("invalid_input") };
+    let Some(items) = args
+        .get("p_items")
+        .and_then(Value::as_array)
+        .filter(|a| a.len() <= 20)
+    else {
+        return code("invalid_input");
+    };
     for item in items {
         let ok = item.as_object().is_some_and(|o| {
             o.get("start_at_utc_ms").and_then(Value::as_i64).is_some()
-                && o.get("name").and_then(Value::as_str).is_some_and(|s| (1..=60).contains(&text_len(s)))
-                && o.get("subject").and_then(Value::as_str).is_some_and(|s| (1..=40).contains(&text_len(s)))
-                && o.get("sets").and_then(Value::as_i64).is_some_and(|n| (1..=12).contains(&n))
+                && o.get("name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|s| (1..=60).contains(&text_len(s)))
+                && o.get("subject")
+                    .and_then(Value::as_str)
+                    .is_some_and(|s| (1..=40).contains(&text_len(s)))
+                && o.get("sets")
+                    .and_then(Value::as_i64)
+                    .is_some_and(|n| (1..=12).contains(&n))
         });
         if !ok {
             return code("invalid_input");
         }
     }
     let value = Value::Array(items.clone());
-    match state.rooms.schedules.iter_mut().find(|(r, _, _)| *r == room) {
+    match state
+        .rooms
+        .schedules
+        .iter_mut()
+        .find(|(r, _, _)| *r == room)
+    {
         Some(entry) => {
             entry.1 = value;
             entry.2 = now;

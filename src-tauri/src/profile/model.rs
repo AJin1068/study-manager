@@ -93,8 +93,12 @@ impl ProfileError {
     pub fn is_certain_refusal(self) -> bool {
         match self {
             ProfileError::Rejected(_) => true,
-            ProfileError::Remote(RemoteError::NotSignedIn | RemoteError::AuthExpired | RemoteError::Encode) => true,
-            ProfileError::Remote(RemoteError::Http { status }) => (400..500).contains(&status) && status != 408 && status != 429,
+            ProfileError::Remote(
+                RemoteError::NotSignedIn | RemoteError::AuthExpired | RemoteError::Encode,
+            ) => true,
+            ProfileError::Remote(RemoteError::Http { status }) => {
+                (400..500).contains(&status) && status != 408 && status != 429
+            }
             ProfileError::Remote(RemoteError::Transport(_) | RemoteError::Decode) => false,
         }
     }
@@ -300,14 +304,22 @@ impl ProfileView {
 
     /// Decodes a server answer. An unreadable section is a decode error, not a silent blank.
     pub fn from_wire(wire: WireProfile) -> Result<Self, ProfileError> {
-        fn part<T: serde::de::DeserializeOwned>(sections: &Map<String, Value>, key: &str) -> Result<Option<T>, ProfileError> {
+        fn part<T: serde::de::DeserializeOwned>(
+            sections: &Map<String, Value>,
+            key: &str,
+        ) -> Result<Option<T>, ProfileError> {
             match sections.get(key) {
                 None | Some(Value::Null) => Ok(None),
-                Some(value) => serde_json::from_value(value.clone()).map(Some).map_err(|_| ProfileError::Remote(RemoteError::Decode)),
+                Some(value) => serde_json::from_value(value.clone())
+                    .map(Some)
+                    .map_err(|_| ProfileError::Remote(RemoteError::Decode)),
             }
         }
         let s = &wire.sections;
-        let visible = Section::ALL.into_iter().filter(|section| s.contains_key(section.as_str())).collect();
+        let visible = Section::ALL
+            .into_iter()
+            .filter(|section| s.contains_key(section.as_str()))
+            .collect();
         Ok(Self {
             code: ProfileCode::Ok,
             name: Some(wire.name.clone()),

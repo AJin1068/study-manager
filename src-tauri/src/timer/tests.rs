@@ -9,7 +9,7 @@ use chrono_tz::America::New_York;
 use rusqlite::Connection;
 
 use super::derive::LATE_TOLERANCE_MS;
-use super::engine::{tick_once, Emission, EngineHealth, Supervised, WakeReason, DEGRADED_AFTER};
+use super::engine::{DEGRADED_AFTER, Emission, EngineHealth, Supervised, WakeReason, tick_once};
 use super::model::{EndReason, Phase, RunRow, RunStatus, SegmentRow};
 use super::release::{ReleaseDesk, ReleaseOutcome};
 use super::study_pass::{self, Grant, PassKind, ReleaseProof, Typing};
@@ -17,15 +17,19 @@ use super::*;
 use crate::commands::{exit_decision, lock_db};
 use crate::db::open_in_memory;
 use crate::downtime::{DowntimeKind, Interval};
-use crate::plan::{create_plan, BlockKind, CreatePlanInput};
+use crate::plan::{BlockKind, CreatePlanInput, create_plan};
 use crate::study::{ModeConfig, StudyLevel};
-use crate::testutil::{set_lock_for_test, FakeNotifier};
+use crate::testutil::{FakeNotifier, set_lock_for_test};
 
 const DAY: i64 = 24 * 3600 * 1000;
 
 /// Midnight UTC on 2026-11-05 plus the given clock time; `h` may pass 24 for the next day.
 fn t(h: i64, m: i64, s: i64) -> i64 {
-    let base = Utc.with_ymd_and_hms(2026, 11, 5, 0, 0, 0).single().expect("date").timestamp_millis();
+    let base = Utc
+        .with_ymd_and_hms(2026, 11, 5, 0, 0, 0)
+        .single()
+        .expect("date")
+        .timestamp_millis();
     base + (h * 3600 + m * 60 + s) * 1000
 }
 
@@ -38,7 +42,10 @@ fn new_plan(conn: &mut Connection, date: &str, time: &str, sets: i64, created_at
         sets,
         repeat: None,
     };
-    create_plan(conn, &Utc, input, created_at).expect("create").plan_id.expect("id")
+    create_plan(conn, &Utc, input, created_at)
+        .expect("create")
+        .plan_id
+        .expect("id")
 }
 
 /// The usual fixture: a 3-set medium plan on 2026-11-05 20:00 created the day before.
@@ -65,7 +72,8 @@ fn lock(conn: &Connection) -> bool {
 }
 
 fn count(conn: &Connection, table: &str) -> i64 {
-    conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0)).expect("count")
+    conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+        .expect("count")
 }
 
 fn set_medium(conn: &Connection, study: i64, brk: i64) {
@@ -86,19 +94,38 @@ fn transitions_happen_on_planned_boundaries_and_lock_spans_the_breaks() {
     let (mut conn, _) = db_with_plan();
 
     let idle = tick(&mut conn, t(19, 59, 59));
-    assert_eq!((idle.state.phase, idle.state.lock_held), (Phase::Idle, false));
-    assert_eq!(idle.state.next.as_ref().map(|n| n.planned_start_ms), Some(t(20, 0, 0)));
+    assert_eq!(
+        (idle.state.phase, idle.state.lock_held),
+        (Phase::Idle, false)
+    );
+    assert_eq!(
+        idle.state.next.as_ref().map(|n| n.planned_start_ms),
+        Some(t(20, 0, 0))
+    );
     assert!(!lock(&conn) && runs(&conn).is_empty());
 
     // One second late: the segment still starts on the planned boundary.
     let started = tick(&mut conn, t(20, 0, 1));
-    assert_eq!((started.state.phase, started.state.set_index, started.state.sets_total), (Phase::Study, 1, 3));
+    assert_eq!(
+        (
+            started.state.phase,
+            started.state.set_index,
+            started.state.sets_total
+        ),
+        (Phase::Study, 1, 3)
+    );
     assert_eq!(started.state.planned_end_ms, Some(t(20, 50, 0)));
     assert!(lock(&conn));
     let run = &runs(&conn)[0];
-    assert_eq!((run.status, run.planned_start_ms, run.planned_end_ms), (RunStatus::Active, t(20, 0, 0), t(23, 0, 0)));
+    assert_eq!(
+        (run.status, run.planned_start_ms, run.planned_end_ms),
+        (RunStatus::Active, t(20, 0, 0), t(23, 0, 0))
+    );
     let first = &segs(&conn, run.id)[0];
-    assert_eq!((first.kind, first.started_at_ms, first.late_join), (BlockKind::Study, t(20, 0, 0), false));
+    assert_eq!(
+        (first.kind, first.started_at_ms, first.late_join),
+        (BlockKind::Study, t(20, 0, 0), false)
+    );
 
     // (now, phase, set, planned end of the open segment); the lock must be 1 in every row.
     let table = [
@@ -111,20 +138,42 @@ fn transitions_happen_on_planned_boundaries_and_lock_spans_the_breaks() {
     ];
     for (now, phase, set, end) in table {
         let r = tick(&mut conn, now);
-        assert_eq!((r.state.phase, r.state.set_index, r.state.planned_end_ms), (phase, set, Some(end)), "{now}");
+        assert_eq!(
+            (r.state.phase, r.state.set_index, r.state.planned_end_ms),
+            (phase, set, Some(end)),
+            "{now}"
+        );
         assert!(r.state.lock_held && lock(&conn), "lock must hold at {now}");
     }
 
     let done = tick(&mut conn, t(23, 0, 1));
-    assert_eq!((done.state.phase, done.state.lock_held), (Phase::Idle, false));
+    assert_eq!(
+        (done.state.phase, done.state.lock_held),
+        (Phase::Idle, false)
+    );
     assert!(!lock(&conn));
     let run = &runs(&conn)[0];
-    assert_eq!((run.status, run.ended_at_ms), (RunStatus::Completed, Some(t(23, 0, 0))));
+    assert_eq!(
+        (run.status, run.ended_at_ms),
+        (RunStatus::Completed, Some(t(23, 0, 0)))
+    );
     let all = segs(&conn, run.id);
     assert_eq!(all.len(), 5);
     let boundaries: Vec<i64> = all.iter().map(|s| s.started_at_ms).collect();
-    assert_eq!(boundaries, [t(20, 0, 0), t(20, 50, 0), t(21, 5, 0), t(21, 55, 0), t(22, 10, 0)]);
-    assert!(all.iter().all(|s| s.end_reason == Some(EndReason::Elapsed) && !s.late_join));
+    assert_eq!(
+        boundaries,
+        [
+            t(20, 0, 0),
+            t(20, 50, 0),
+            t(21, 5, 0),
+            t(21, 55, 0),
+            t(22, 10, 0)
+        ]
+    );
+    assert!(
+        all.iter()
+            .all(|s| s.end_reason == Some(EndReason::Elapsed) && !s.late_join)
+    );
     assert_eq!(all[4].ended_at_ms, Some(t(23, 0, 0)));
 }
 
@@ -132,12 +181,19 @@ fn transitions_happen_on_planned_boundaries_and_lock_spans_the_breaks() {
 fn easy_mode_long_break_comes_from_the_run_snapshot_not_the_live_config() {
     // Easy: 25/5, long break 20 after 4 sets; 5 sets put the long break after the 4th set.
     let mut conn = open_in_memory().expect("db");
-    conn.execute("INSERT INTO daily_mode (date, level, selected_at_ms) VALUES ('2026-11-05', 'easy', 0)", [])
-        .expect("daily mode");
+    conn.execute(
+        "INSERT INTO daily_mode (date, level, selected_at_ms) VALUES ('2026-11-05', 'easy', 0)",
+        [],
+    )
+    .expect("daily mode");
     new_plan(&mut conn, "2026-11-05", "08:00", 5, t(0, 0, 0) - DAY);
     tick(&mut conn, t(8, 0, 1));
     // A mode edit after the run started must not change it.
-    conn.execute("UPDATE study_mode_config SET study_min = 99 WHERE level = 'easy'", []).expect("edit");
+    conn.execute(
+        "UPDATE study_mode_config SET study_min = 99 WHERE level = 'easy'",
+        [],
+    )
+    .expect("edit");
     // 4 studies of 25 plus 3 short breaks of 5 = 115 minutes, then the long break.
     let at = tick(&mut conn, t(8, 0, 0) + 116 * 60_000);
     assert_eq!((at.state.phase, at.state.set_index), (Phase::LongBreak, 4));
@@ -155,10 +211,17 @@ fn applying_the_same_time_twice_changes_nothing() {
     let snapshot: Vec<SegmentRow> = segs(&conn, runs(&conn)[0].id);
     let second = tick(&mut conn, t(21, 20, 0));
     assert!(!second.changed);
-    assert_eq!((count(&conn, "plan_runs"), count(&conn, "timer_segments")), counts);
+    assert_eq!(
+        (count(&conn, "plan_runs"), count(&conn, "timer_segments")),
+        counts
+    );
     assert_eq!(segs(&conn, runs(&conn)[0].id), snapshot);
     assert_eq!(first.state.phase, second.state.phase);
-    assert_eq!(second.state.run_id, runs(&conn).first().map(|r| r.id), "second pass sees written ids");
+    assert_eq!(
+        second.state.run_id,
+        runs(&conn).first().map(|r| r.id),
+        "second pass sees written ids"
+    );
 }
 
 // ---- AC4: recovery scenarios 1-9 ----
@@ -169,8 +232,15 @@ fn scenario_1_sleep_inside_a_block_continues_the_same_segment() {
     tick(&mut conn, t(20, 10, 0));
     let before = segs(&conn, runs(&conn)[0].id);
     let woke = tick(&mut conn, t(20, 40, 0));
-    assert_eq!((woke.state.phase, woke.state.lock_held), (Phase::Study, true));
-    assert_eq!(segs(&conn, runs(&conn)[0].id), before, "no row is rewritten for a sleep inside a block");
+    assert_eq!(
+        (woke.state.phase, woke.state.lock_held),
+        (Phase::Study, true)
+    );
+    assert_eq!(
+        segs(&conn, runs(&conn)[0].id),
+        before,
+        "no row is rewritten for a sleep inside a block"
+    );
 }
 
 #[test]
@@ -184,9 +254,19 @@ fn scenario_2_wake_after_blocks_ended_marks_elapsed_while_down_and_joins_late() 
     assert_eq!(all.len(), 3);
     assert_eq!(all[0].end_reason, Some(EndReason::ElapsedWhileDown));
     assert_eq!(all[0].ended_at_ms, Some(t(20, 50, 0)));
-    assert_eq!((all[1].end_reason, all[1].late_join), (Some(EndReason::ElapsedWhileDown), true));
+    assert_eq!(
+        (all[1].end_reason, all[1].late_join),
+        (Some(EndReason::ElapsedWhileDown), true)
+    );
     // The segment found already running starts when it was found.
-    assert_eq!((all[2].started_at_ms, all[2].planned_start_ms, all[2].late_join), (t(21, 20, 0), t(21, 5, 0), true));
+    assert_eq!(
+        (
+            all[2].started_at_ms,
+            all[2].planned_start_ms,
+            all[2].late_join
+        ),
+        (t(21, 20, 0), t(21, 5, 0), true)
+    );
     assert!(all[2].ended_at_ms.is_none());
     assert!(lock(&conn));
 }
@@ -198,7 +278,10 @@ fn scenario_2_wake_after_the_whole_run_completes_it_and_frees_the_lock() {
     let woke = tick(&mut conn, t(23, 30, 0));
     assert!(!woke.state.lock_held && !lock(&conn));
     let run = &runs(&conn)[0];
-    assert_eq!((run.status, run.detail_code.as_deref()), (RunStatus::Completed, Some("ended_while_down")));
+    assert_eq!(
+        (run.status, run.detail_code.as_deref()),
+        (RunStatus::Completed, Some("ended_while_down"))
+    );
     assert!(segs(&conn, run.id).iter().all(|s| s.ended_at_ms.is_some()));
 }
 
@@ -218,7 +301,11 @@ fn scenario_3_restart_resumes_the_active_run() {
     assert_eq!((r.state.phase, r.state.set_index), (Phase::Break, 1));
     let run = &runs(&reopened)[0];
     assert_eq!((run.plan_id, run.status), (id, RunStatus::Active));
-    assert_eq!(count(&reopened, "plan_runs"), 1, "no duplicate run after a restart");
+    assert_eq!(
+        count(&reopened, "plan_runs"),
+        1,
+        "no duplicate run after a restart"
+    );
 }
 
 #[test]
@@ -227,7 +314,10 @@ fn scenario_4_first_launch_after_the_start_joins_late_and_keeps_both_start_times
     let r = tick(&mut conn, t(20, 30, 0));
     assert_eq!(r.state.phase, Phase::Study);
     let run = &runs(&conn)[0];
-    assert_eq!((run.planned_start_ms, run.actual_start_ms), (t(20, 0, 0), Some(t(20, 30, 0))));
+    assert_eq!(
+        (run.planned_start_ms, run.actual_start_ms),
+        (t(20, 0, 0), Some(t(20, 30, 0)))
+    );
     assert_eq!(run.detail_code.as_deref(), Some("joined_late"));
     assert!(segs(&conn, run.id)[0].late_join);
     assert!(lock(&conn));
@@ -239,7 +329,10 @@ fn scenario_4_a_run_nobody_saw_is_missed_once_and_never_locks() {
     let r = tick(&mut conn, t(23, 30, 0));
     assert!(!r.state.lock_held && !lock(&conn));
     let run = &runs(&conn)[0];
-    assert_eq!((run.status, run.actual_start_ms, run.detail_code.as_deref()), (RunStatus::Missed, None, Some("not_started")));
+    assert_eq!(
+        (run.status, run.actual_start_ms, run.detail_code.as_deref()),
+        (RunStatus::Missed, None, Some("not_started"))
+    );
     assert_eq!(count(&conn, "timer_segments"), 0);
     tick(&mut conn, t(23, 31, 0));
     assert_eq!(count(&conn, "plan_runs"), 1, "missed is recorded once");
@@ -261,19 +354,50 @@ fn scenario_5_a_clock_set_backwards_neither_frees_the_lock_nor_rewinds() {
     let db = Mutex::new(conn);
     let hw = HighWater::new(0);
     let mut last = None;
-    tick_once(&db, &Utc, &hw, t(20, 30, 0), WakeReason::Tick, &mut last, &FakeNotifier::default()).expect("tick");
+    tick_once(
+        &db,
+        &Utc,
+        &hw,
+        t(20, 30, 0),
+        WakeReason::Tick,
+        &mut last,
+        &FakeNotifier::default(),
+    )
+    .expect("tick");
     let before = {
         let conn = lock_db(&db).expect("lock");
-        (segs(&conn, runs(&conn)[0].id), count(&conn, "timer_segments"))
+        (
+            segs(&conn, runs(&conn)[0].id),
+            count(&conn, "timer_segments"),
+        )
     };
     let out = testutil_capture(|| {
-        tick_once(&db, &Utc, &hw, t(19, 0, 0), WakeReason::Tick, &mut last, &FakeNotifier::default()).expect("tick");
+        tick_once(
+            &db,
+            &Utc,
+            &hw,
+            t(19, 0, 0),
+            WakeReason::Tick,
+            &mut last,
+            &FakeNotifier::default(),
+        )
+        .expect("tick");
     });
     assert!(out.contains("clock_regression_held"), "logged: {out}");
     let conn = lock_db(&db).expect("lock");
     assert!(lock(&conn), "a past clock must not release the lock");
-    assert_eq!((segs(&conn, runs(&conn)[0].id), count(&conn, "timer_segments")), before);
-    assert_eq!(last.expect("state").now_ms, t(20, 30, 0), "state is derived at the held time");
+    assert_eq!(
+        (
+            segs(&conn, runs(&conn)[0].id),
+            count(&conn, "timer_segments")
+        ),
+        before
+    );
+    assert_eq!(
+        last.expect("state").now_ms,
+        t(20, 30, 0),
+        "state is derived at the held time"
+    );
 }
 
 fn testutil_capture(f: impl FnOnce()) -> String {
@@ -283,7 +407,11 @@ fn testutil_capture(f: impl FnOnce()) -> String {
 #[test]
 fn high_water_never_moves_back_and_honors_the_persisted_floor() {
     let hw = HighWater::new(t(21, 0, 0));
-    assert_eq!(hw.observe(t(20, 0, 0)), t(21, 0, 0), "a clock behind the floor is held at the floor");
+    assert_eq!(
+        hw.observe(t(20, 0, 0)),
+        t(21, 0, 0),
+        "a clock behind the floor is held at the floor"
+    );
     assert_eq!(hw.observe(t(22, 0, 0)), t(22, 0, 0));
     assert_eq!(hw.observe(t(21, 30, 0)), t(22, 0, 0));
     assert_eq!(hw.get(), t(22, 0, 0));
@@ -310,7 +438,11 @@ fn scenario_6_a_forward_jump_is_allowed_and_only_unexplained_time_counts_as_cloc
     let unexplained = clock_jump_intervals(&conn, t(20, 0, 0), t(23, 0, 0)).expect("jump");
     // Block 0 was watched from 20:10 (when the engine joined); blocks 0..=3 then passed unobserved.
     let total: i64 = unexplained.iter().map(|i| i.end - i.start).sum();
-    assert_eq!(total, (40 + 15 + 50 + 15) * 60_000, "unobserved stretches: {unexplained:?}");
+    assert_eq!(
+        total,
+        (40 + 15 + 50 + 15) * 60_000,
+        "unobserved stretches: {unexplained:?}"
+    );
 
     // A recorded sleep explains the same stretch: nothing is left over.
     conn.execute(
@@ -318,7 +450,10 @@ fn scenario_6_a_forward_jump_is_allowed_and_only_unexplained_time_counts_as_cloc
         [t(20, 10, 0), t(22, 20, 0)],
     )
     .expect("sleep");
-    assert_eq!(clock_jump_ms(&conn, t(20, 0, 0), t(23, 0, 0)).expect("jump"), 0);
+    assert_eq!(
+        clock_jump_ms(&conn, t(20, 0, 0), t(23, 0, 0)).expect("jump"),
+        0
+    );
 }
 
 #[test]
@@ -331,7 +466,10 @@ fn scenario_7_a_run_crossing_midnight_stays_one_active_run() {
     assert!(past_midnight.state.lock_held);
     assert_eq!(count(&conn, "plan_runs"), 1);
     assert_eq!(runs(&conn)[0].date, "2026-11-05");
-    assert_eq!((past_midnight.state.phase, past_midnight.state.set_index), (Phase::Study, 3));
+    assert_eq!(
+        (past_midnight.state.phase, past_midnight.state.set_index),
+        (Phase::Study, 3)
+    );
     tick(&mut conn, t(27, 11, 0));
     assert_eq!(runs(&conn)[0].status, RunStatus::Completed);
     assert!(!lock(&conn));
@@ -342,7 +480,8 @@ fn scenario_8_a_plan_deleted_during_a_run_does_not_cut_the_run() {
     let (mut conn, id) = db_with_plan();
     tick(&mut conn, t(20, 10, 0));
     // The lock normally forbids this; the engine must still behave if it happens anyway.
-    conn.execute("UPDATE plans SET deleted_at_ms = 1 WHERE id = ?1", [id]).expect("delete");
+    conn.execute("UPDATE plans SET deleted_at_ms = 1 WHERE id = ?1", [id])
+        .expect("delete");
     let mid = tick(&mut conn, t(21, 0, 0));
     assert!(mid.state.lock_held, "the frozen run keeps going");
     tick(&mut conn, t(23, 0, 1));
@@ -378,9 +517,15 @@ fn an_overlapping_later_run_starts_when_the_earlier_one_ends_and_the_lock_never_
     let all = runs(&conn);
     assert_eq!(all.len(), 2);
     let second = &all[1];
-    assert_eq!((second.planned_start_ms, second.detail_code.as_deref()), (t(21, 0, 0), Some("shifted_by_overlap")));
+    assert_eq!(
+        (second.planned_start_ms, second.detail_code.as_deref()),
+        (t(21, 0, 0), Some("shifted_by_overlap"))
+    );
     let first_seg = &segs(&conn, second.id)[0];
-    assert_eq!((first_seg.started_at_ms, first_seg.late_join), (t(21, 0, 0), true));
+    assert_eq!(
+        (first_seg.started_at_ms, first_seg.late_join),
+        (t(21, 0, 0), true)
+    );
     assert_eq!(all[0].status, RunStatus::Completed);
 }
 
@@ -394,27 +539,62 @@ fn state_after_resume_shows_the_current_phase_and_next_plan() {
     let db = Mutex::new(conn);
     let hw = HighWater::new(0);
     let mut last = None;
-    let emitted =
-        tick_once(&db, &Utc, &hw, t(21, 10, 0), WakeReason::Resumed, &mut last, &FakeNotifier::default()).expect("resume reconcile");
-    assert!(matches!(emitted.as_slice(), [Emission::TimerChanged(_), Emission::PlanRechecked(_)]), "{emitted:?}");
+    let emitted = tick_once(
+        &db,
+        &Utc,
+        &hw,
+        t(21, 10, 0),
+        WakeReason::Resumed,
+        &mut last,
+        &FakeNotifier::default(),
+    )
+    .expect("resume reconcile");
+    assert!(
+        matches!(
+            emitted.as_slice(),
+            [Emission::TimerChanged(_), Emission::PlanRechecked(_)]
+        ),
+        "{emitted:?}"
+    );
 
     let conn = lock_db(&db).expect("lock");
     let state = current_state(&conn, &Utc, t(21, 10, 0)).expect("state");
-    assert_eq!((state.phase, state.set_index, state.sets_total), (Phase::Study, 2, 3));
+    assert_eq!(
+        (state.phase, state.set_index, state.sets_total),
+        (Phase::Study, 2, 3)
+    );
     assert_eq!(state.planned_end_ms, Some(t(21, 55, 0)));
     let next = state.next.expect("next plan");
-    assert_eq!((next.date.as_str(), next.planned_start_ms), ("2026-11-06", t(33, 0, 0)));
+    assert_eq!(
+        (next.date.as_str(), next.planned_start_ms),
+        ("2026-11-06", t(33, 0, 0))
+    );
     assert!(state.run_id.is_some() && state.segment_id.is_some());
 }
 
 #[test]
 fn reading_the_state_never_writes() {
     let (conn, _) = db_with_plan();
-    let before = (count(&conn, "plan_runs"), count(&conn, "timer_segments"), lock(&conn));
+    let before = (
+        count(&conn, "plan_runs"),
+        count(&conn, "timer_segments"),
+        lock(&conn),
+    );
     let state = current_state(&conn, &Utc, t(21, 0, 0)).expect("state");
-    assert_eq!((state.phase, state.lock_held), (Phase::Break, true), "projection shows what the engine will write");
+    assert_eq!(
+        (state.phase, state.lock_held),
+        (Phase::Break, true),
+        "projection shows what the engine will write"
+    );
     assert!(state.run_id.is_none(), "unwritten rows have no id yet");
-    assert_eq!((count(&conn, "plan_runs"), count(&conn, "timer_segments"), lock(&conn)), before);
+    assert_eq!(
+        (
+            count(&conn, "plan_runs"),
+            count(&conn, "timer_segments"),
+            lock(&conn)
+        ),
+        before
+    );
 }
 
 #[test]
@@ -423,11 +603,38 @@ fn an_unchanged_tick_emits_nothing_but_a_resume_always_does() {
     let db = Mutex::new(conn);
     let hw = HighWater::new(0);
     let mut last = None;
-    let first = tick_once(&db, &Utc, &hw, t(20, 10, 0), WakeReason::Tick, &mut last, &FakeNotifier::default()).expect("tick");
+    let first = tick_once(
+        &db,
+        &Utc,
+        &hw,
+        t(20, 10, 0),
+        WakeReason::Tick,
+        &mut last,
+        &FakeNotifier::default(),
+    )
+    .expect("tick");
     assert!(matches!(first.as_slice(), [Emission::TimerChanged(_)]));
-    let quiet = tick_once(&db, &Utc, &hw, t(20, 10, 1), WakeReason::Tick, &mut last, &FakeNotifier::default()).expect("tick");
+    let quiet = tick_once(
+        &db,
+        &Utc,
+        &hw,
+        t(20, 10, 1),
+        WakeReason::Tick,
+        &mut last,
+        &FakeNotifier::default(),
+    )
+    .expect("tick");
     assert!(quiet.is_empty(), "{quiet:?}");
-    let resumed = tick_once(&db, &Utc, &hw, t(20, 10, 2), WakeReason::Resumed, &mut last, &FakeNotifier::default()).expect("resume");
+    let resumed = tick_once(
+        &db,
+        &Utc,
+        &hw,
+        t(20, 10, 2),
+        WakeReason::Resumed,
+        &mut last,
+        &FakeNotifier::default(),
+    )
+    .expect("resume");
     assert_eq!(resumed.len(), 2);
 }
 
@@ -450,12 +657,34 @@ fn closed_segments_are_immutable_and_never_deleted() {
     let all = segs(&conn, runs(&conn)[0].id);
     let (closed, open) = (&all[0], &all[1]);
     assert!(closed.ended_at_ms.is_some() && open.ended_at_ms.is_none());
-    assert!(conn.execute("UPDATE timer_segments SET late_join = 1 WHERE id = ?1", [closed.id]).is_err());
-    assert!(conn.execute("UPDATE timer_segments SET ended_at_ms = 1 WHERE id = ?1", [closed.id]).is_err());
-    assert!(conn.execute("DELETE FROM timer_segments WHERE id = ?1", [closed.id]).is_err());
-    assert!(conn.execute("DELETE FROM timer_segments WHERE id = ?1", [open.id]).is_err());
+    assert!(
+        conn.execute(
+            "UPDATE timer_segments SET late_join = 1 WHERE id = ?1",
+            [closed.id]
+        )
+        .is_err()
+    );
+    assert!(
+        conn.execute(
+            "UPDATE timer_segments SET ended_at_ms = 1 WHERE id = ?1",
+            [closed.id]
+        )
+        .is_err()
+    );
+    assert!(
+        conn.execute("DELETE FROM timer_segments WHERE id = ?1", [closed.id])
+            .is_err()
+    );
+    assert!(
+        conn.execute("DELETE FROM timer_segments WHERE id = ?1", [open.id])
+            .is_err()
+    );
     // Marking the notice on an open segment is the one allowed change.
-    conn.execute("UPDATE timer_segments SET notice_sent_at_ms = 5 WHERE id = ?1", [open.id]).expect("notice");
+    conn.execute(
+        "UPDATE timer_segments SET notice_sent_at_ms = 5 WHERE id = ?1",
+        [open.id],
+    )
+    .expect("notice");
 }
 
 #[test]
@@ -482,20 +711,41 @@ fn check_constraints_accept_exactly_the_rust_enum_values() {
         )
     };
     for (seq, reason) in (0..).zip(EndReason::ALL) {
-        segment(seq, reason.as_str()).unwrap_or_else(|e| panic!("reason {} rejected: {e}", reason.as_str()));
+        segment(seq, reason.as_str())
+            .unwrap_or_else(|e| panic!("reason {} rejected: {e}", reason.as_str()));
     }
     assert!(segment(99, "bogus").is_err());
 
     let sql: String = conn
-        .query_row("SELECT sql FROM sqlite_master WHERE name = 'plan_runs'", [], |r| r.get(0))
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE name = 'plan_runs'",
+            [],
+            |r| r.get(0),
+        )
         .expect("schema");
     let status_list = &sql[sql.find("status IN (").expect("list")..];
-    assert_eq!(status_list[..status_list.find(')').expect("end")].matches('\'').count() / 2, RunStatus::ALL.len());
+    assert_eq!(
+        status_list[..status_list.find(')').expect("end")]
+            .matches('\'')
+            .count()
+            / 2,
+        RunStatus::ALL.len()
+    );
     let sql: String = conn
-        .query_row("SELECT sql FROM sqlite_master WHERE name = 'timer_segments'", [], |r| r.get(0))
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE name = 'timer_segments'",
+            [],
+            |r| r.get(0),
+        )
         .expect("schema");
     let reason_list = &sql[sql.find("end_reason IN (").expect("list")..];
-    assert_eq!(reason_list[..reason_list.find(')').expect("end")].matches('\'').count() / 2, EndReason::ALL.len());
+    assert_eq!(
+        reason_list[..reason_list.find(')').expect("end")]
+            .matches('\'')
+            .count()
+            / 2,
+        EndReason::ALL.len()
+    );
 }
 
 // ---- AC8: release procedures (early release, emergency pass, skip today) ----
@@ -510,12 +760,18 @@ fn locked_run() -> (Connection, i64) {
 /// Runs the whole challenge: issue, type the exact sentence one minute later, submit.
 fn release(conn: &mut Connection, kind: PassKind, at: i64) -> ReleaseOutcome {
     let desk = ReleaseDesk::default();
-    let challenge = desk.begin(conn, &Utc, kind, at - 60_000).expect("challenge");
-    desk.submit(conn, &Utc, challenge.challenge_id, &challenge.sentence, at).expect("submit")
+    let challenge = desk
+        .begin(conn, &Utc, kind, at - 60_000)
+        .expect("challenge");
+    desk.submit(conn, &Utc, challenge.challenge_id, &challenge.sentence, at)
+        .expect("submit")
 }
 
 fn typing() -> ReleaseProof {
-    ReleaseProof::Typing(Typing { challenge_len: 90, typing_ms: 1 })
+    ReleaseProof::Typing(Typing {
+        challenge_len: 90,
+        typing_ms: 1,
+    })
 }
 
 fn passes(conn: &Connection) -> Vec<study_pass::PassRecord> {
@@ -526,23 +782,55 @@ fn passes(conn: &Connection) -> Vec<study_pass::PassRecord> {
 fn the_exact_sentence_releases_early_and_records_it_without_the_text() {
     let (mut conn, _) = locked_run();
     let desk = ReleaseDesk::default();
-    let challenge = desk.begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0)).expect("challenge");
-    let outcome = desk.submit(&mut conn, &Utc, challenge.challenge_id, &challenge.sentence, t(21, 1, 0)).expect("submit");
-    assert_eq!(outcome, ReleaseOutcome::Released { kind: PassKind::EarlyRelease, expires_at_ms: None });
+    let challenge = desk
+        .begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0))
+        .expect("challenge");
+    let outcome = desk
+        .submit(
+            &mut conn,
+            &Utc,
+            challenge.challenge_id,
+            &challenge.sentence,
+            t(21, 1, 0),
+        )
+        .expect("submit");
+    assert_eq!(
+        outcome,
+        ReleaseOutcome::Released {
+            kind: PassKind::EarlyRelease,
+            expires_at_ms: None
+        }
+    );
     assert!(!lock(&conn));
     let run = &runs(&conn)[0];
     assert_eq!(
         (run.status, run.ended_at_ms, run.detail_code.as_deref()),
         (RunStatus::Aborted, Some(t(21, 1, 0)), Some("early_release"))
     );
-    let closed = segs(&conn, run.id).into_iter().find(|s| s.end_reason == Some(EndReason::EarlyRelease)).expect("segment");
+    let closed = segs(&conn, run.id)
+        .into_iter()
+        .find(|s| s.end_reason == Some(EndReason::EarlyRelease))
+        .expect("segment");
     assert_eq!(closed.ended_at_ms, Some(t(21, 1, 0)));
 
     let record = &passes(&conn)[0];
-    assert_eq!((record.kind.as_str(), record.run_id, record.date.as_str()), ("early_release", Some(run.id), "2026-11-05"));
     assert_eq!(
-        (record.challenge_len, record.typing_ms, record.expires_at_ms, record.penalty_points),
-        (i64::try_from(challenge.sentence.chars().count()).expect("len"), 60_000, None, None)
+        (record.kind.as_str(), record.run_id, record.date.as_str()),
+        ("early_release", Some(run.id), "2026-11-05")
+    );
+    assert_eq!(
+        (
+            record.challenge_len,
+            record.typing_ms,
+            record.expires_at_ms,
+            record.penalty_points
+        ),
+        (
+            i64::try_from(challenge.sentence.chars().count()).expect("len"),
+            60_000,
+            None,
+            None
+        )
     );
     let dump: String = conn
         .query_row("SELECT group_concat(at_ms || date || kind || challenge_len || typing_ms, '|') FROM study_passes", [], |r| r.get(0))
@@ -556,16 +844,45 @@ fn the_exact_sentence_releases_early_and_records_it_without_the_text() {
 fn a_wrong_sentence_changes_nothing_and_counts_attempts() {
     let (mut conn, _) = locked_run();
     let desk = ReleaseDesk::default();
-    let challenge = desk.begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0)).expect("challenge");
+    let challenge = desk
+        .begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0))
+        .expect("challenge");
     let almost = format!("{} ", challenge.sentence);
-    let first = desk.submit(&mut conn, &Utc, challenge.challenge_id, &almost, t(21, 1, 0)).expect("submit");
-    let second = desk.submit(&mut conn, &Utc, challenge.challenge_id, "", t(21, 1, 1)).expect("submit");
-    assert_eq!((first, second), (ReleaseOutcome::Mismatch { attempts: 1 }, ReleaseOutcome::Mismatch { attempts: 2 }));
+    let first = desk
+        .submit(
+            &mut conn,
+            &Utc,
+            challenge.challenge_id,
+            &almost,
+            t(21, 1, 0),
+        )
+        .expect("submit");
+    let second = desk
+        .submit(&mut conn, &Utc, challenge.challenge_id, "", t(21, 1, 1))
+        .expect("submit");
+    assert_eq!(
+        (first, second),
+        (
+            ReleaseOutcome::Mismatch { attempts: 1 },
+            ReleaseOutcome::Mismatch { attempts: 2 }
+        )
+    );
     assert!(lock(&conn));
     assert_eq!(runs(&conn)[0].status, RunStatus::Active);
-    assert!(passes(&conn).is_empty(), "a rejected release leaves no record");
+    assert!(
+        passes(&conn).is_empty(),
+        "a rejected release leaves no record"
+    );
     // A stale id does not pass either, even with the right text.
-    let stale = desk.submit(&mut conn, &Utc, challenge.challenge_id + 1, &challenge.sentence, t(21, 1, 2)).expect("submit");
+    let stale = desk
+        .submit(
+            &mut conn,
+            &Utc,
+            challenge.challenge_id + 1,
+            &challenge.sentence,
+            t(21, 1, 2),
+        )
+        .expect("submit");
     assert_eq!(stale, ReleaseOutcome::NoChallenge);
     assert!(lock(&conn));
 }
@@ -574,11 +891,15 @@ fn a_wrong_sentence_changes_nothing_and_counts_attempts() {
 fn a_paste_with_different_normalization_or_a_prefix_is_not_a_match() {
     let (mut conn, _) = locked_run();
     let desk = ReleaseDesk::default();
-    let challenge = desk.begin(&conn, &Utc, PassKind::EmergencyPass, t(21, 0, 0)).expect("challenge");
+    let challenge = desk
+        .begin(&conn, &Utc, PassKind::EmergencyPass, t(21, 0, 0))
+        .expect("challenge");
     let half: String = challenge.sentence.chars().take(40).collect();
     let decomposed: String = challenge.sentence.replace(' ', "  ");
     for typed in [half, decomposed, challenge.sentence.to_uppercase() + "!"] {
-        let outcome = desk.submit(&mut conn, &Utc, challenge.challenge_id, &typed, t(21, 1, 0)).expect("submit");
+        let outcome = desk
+            .submit(&mut conn, &Utc, challenge.challenge_id, &typed, t(21, 1, 0))
+            .expect("submit");
         assert!(matches!(outcome, ReleaseOutcome::Mismatch { .. }));
     }
     assert!(passes(&conn).is_empty());
@@ -588,18 +909,45 @@ fn a_paste_with_different_normalization_or_a_prefix_is_not_a_match() {
 fn a_challenge_is_refused_when_there_is_nothing_to_release() {
     let (conn, _) = db_with_plan();
     let desk = ReleaseDesk::default();
-    assert!(desk.begin(&conn, &Utc, PassKind::EarlyRelease, t(10, 0, 0)).is_err());
-    assert!(desk.begin(&conn, &Utc, PassKind::EmergencyPass, t(10, 0, 0)).is_err());
-    assert!(desk.begin(&conn, &Utc, PassKind::SkipToday, t(10, 0, 0)).is_ok(), "today's plan can be skipped before it starts");
+    assert!(
+        desk.begin(&conn, &Utc, PassKind::EarlyRelease, t(10, 0, 0))
+            .is_err()
+    );
+    assert!(
+        desk.begin(&conn, &Utc, PassKind::EmergencyPass, t(10, 0, 0))
+            .is_err()
+    );
+    assert!(
+        desk.begin(&conn, &Utc, PassKind::SkipToday, t(10, 0, 0))
+            .is_ok(),
+        "today's plan can be skipped before it starts"
+    );
 }
 
 #[test]
 fn a_challenge_is_single_use() {
     let (mut conn, _) = locked_run();
     let desk = ReleaseDesk::default();
-    let challenge = desk.begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0)).expect("challenge");
-    desk.submit(&mut conn, &Utc, challenge.challenge_id, &challenge.sentence, t(21, 1, 0)).expect("submit");
-    let again = desk.submit(&mut conn, &Utc, challenge.challenge_id, &challenge.sentence, t(21, 1, 1)).expect("submit");
+    let challenge = desk
+        .begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0))
+        .expect("challenge");
+    desk.submit(
+        &mut conn,
+        &Utc,
+        challenge.challenge_id,
+        &challenge.sentence,
+        t(21, 1, 0),
+    )
+    .expect("submit");
+    let again = desk
+        .submit(
+            &mut conn,
+            &Utc,
+            challenge.challenge_id,
+            &challenge.sentence,
+            t(21, 1, 1),
+        )
+        .expect("submit");
     assert_eq!(again, ReleaseOutcome::NoChallenge);
     assert_eq!(passes(&conn).len(), 1);
 }
@@ -618,13 +966,36 @@ fn release_works_with_the_engine_thread_dead_and_the_db_lock_poisoned() {
     assert!(crashed.is_err() && db.is_poisoned());
 
     let desk = ReleaseDesk::default();
-    let challenge = desk.begin(&lock_db(&db).expect("recovered lock"), &Utc, PassKind::EarlyRelease, t(21, 2, 0)).expect("challenge");
+    let challenge = desk
+        .begin(
+            &lock_db(&db).expect("recovered lock"),
+            &Utc,
+            PassKind::EarlyRelease,
+            t(21, 2, 0),
+        )
+        .expect("challenge");
     let outcome = {
         let mut conn = lock_db(&db).expect("lock");
-        desk.submit(&mut conn, &Utc, challenge.challenge_id, &challenge.sentence, t(21, 3, 0)).expect("submit")
+        desk.submit(
+            &mut conn,
+            &Utc,
+            challenge.challenge_id,
+            &challenge.sentence,
+            t(21, 3, 0),
+        )
+        .expect("submit")
     };
-    assert_eq!(outcome, ReleaseOutcome::Released { kind: PassKind::EarlyRelease, expires_at_ms: None });
-    assert!(!db.is_poisoned(), "the poison is cleared so the rest of the app works again");
+    assert_eq!(
+        outcome,
+        ReleaseOutcome::Released {
+            kind: PassKind::EarlyRelease,
+            expires_at_ms: None
+        }
+    );
+    assert!(
+        !db.is_poisoned(),
+        "the poison is cleared so the rest of the app works again"
+    );
     assert!(!lock(&lock_db(&db).expect("lock")));
 }
 
@@ -635,9 +1006,15 @@ fn an_early_released_run_is_not_resumed_but_the_next_plan_of_the_day_starts_on_t
     release(&mut conn, PassKind::EarlyRelease, t(21, 1, 0));
 
     let later = tick(&mut conn, t(21, 30, 0));
-    assert!(!later.state.lock_held && !lock(&conn), "the released run does not come back");
+    assert!(
+        !later.state.lock_held && !lock(&conn),
+        "the released run does not come back"
+    );
     assert_eq!(runs(&conn)[0].status, RunStatus::Aborted);
-    assert_eq!(later.state.next.as_ref().map(|n| n.planned_start_ms), Some(t(23, 30, 0)));
+    assert_eq!(
+        later.state.next.as_ref().map(|n| n.planned_start_ms),
+        Some(t(23, 30, 0))
+    );
 
     let next = tick(&mut conn, t(23, 30, 1));
     assert!(next.state.lock_held && lock(&conn));
@@ -657,12 +1034,28 @@ fn early_release_frees_a_stuck_lock_that_has_no_active_run() {
     let mut conn = open_in_memory().expect("db");
     set_lock_for_test(&conn, true);
     assert_eq!(
-        study_pass::grant(&mut conn, &Utc, PassKind::EarlyRelease, t(10, 0, 0), typing()).expect("grant"),
-        Grant::Granted { expires_at_ms: None }
+        study_pass::grant(
+            &mut conn,
+            &Utc,
+            PassKind::EarlyRelease,
+            t(10, 0, 0),
+            typing()
+        )
+        .expect("grant"),
+        Grant::Granted {
+            expires_at_ms: None
+        }
     );
     assert!(!lock(&conn));
     assert_eq!(
-        study_pass::grant(&mut conn, &Utc, PassKind::EarlyRelease, t(10, 0, 1), typing()).expect("grant"),
+        study_pass::grant(
+            &mut conn,
+            &Utc,
+            PassKind::EarlyRelease,
+            t(10, 0, 1),
+            typing()
+        )
+        .expect("grant"),
         Grant::NothingToRelease
     );
     assert_eq!(passes(&conn).len(), 1, "a refused release is not recorded");
@@ -675,7 +1068,11 @@ fn a_release_does_nothing_when_the_lock_row_is_missing() {
     for kind in PassKind::ALL {
         assert!(study_pass::grant(&mut conn, &Utc, kind, t(21, 1, 0), typing()).is_err());
     }
-    assert_eq!(runs(&conn)[0].status, RunStatus::Active, "fail closed: the transaction rolled back");
+    assert_eq!(
+        runs(&conn)[0].status,
+        RunStatus::Active,
+        "fail closed: the transaction rolled back"
+    );
     assert!(passes(&conn).is_empty());
 }
 
@@ -684,18 +1081,45 @@ fn an_emergency_pass_keeps_the_lock_and_run_and_records_the_penalty() {
     let (mut conn, _) = locked_run();
     let outcome = release(&mut conn, PassKind::EmergencyPass, t(21, 1, 0));
     let expires = t(21, 1, 0) + study_pass::EMERGENCY_PASS_MS;
-    assert_eq!(outcome, ReleaseOutcome::Released { kind: PassKind::EmergencyPass, expires_at_ms: Some(expires) });
-    assert!(lock(&conn), "a pass pauses enforcement only; the lock stays");
+    assert_eq!(
+        outcome,
+        ReleaseOutcome::Released {
+            kind: PassKind::EmergencyPass,
+            expires_at_ms: Some(expires)
+        }
+    );
+    assert!(
+        lock(&conn),
+        "a pass pauses enforcement only; the lock stays"
+    );
     assert_eq!(runs(&conn)[0].status, RunStatus::Active);
     let record = &passes(&conn)[0];
     assert_eq!(
-        (record.kind.as_str(), record.expires_at_ms, record.penalty_points),
-        ("emergency_pass", Some(expires), Some(study_pass::EMERGENCY_PASS_PENALTY_POINTS))
+        (
+            record.kind.as_str(),
+            record.expires_at_ms,
+            record.penalty_points
+        ),
+        (
+            "emergency_pass",
+            Some(expires),
+            Some(study_pass::EMERGENCY_PASS_PENALTY_POINTS)
+        )
     );
-    assert_eq!(study_pass::active_until(&conn, expires - 1).expect("active"), Some(expires));
-    assert_eq!(study_pass::active_until(&conn, expires).expect("active"), None, "expires exactly at the end");
+    assert_eq!(
+        study_pass::active_until(&conn, expires - 1).expect("active"),
+        Some(expires)
+    );
+    assert_eq!(
+        study_pass::active_until(&conn, expires).expect("active"),
+        None,
+        "expires exactly at the end"
+    );
     let session = store::insert_session(&conn, 1).expect("session");
-    assert!(!exit_decision(&mut conn, session, t(21, 2, 0)).expect("exit"), "the gate still refuses during a pass");
+    assert!(
+        !exit_decision(&mut conn, session, t(21, 2, 0)).expect("exit"),
+        "the gate still refuses during a pass"
+    );
 }
 
 #[test]
@@ -704,29 +1128,70 @@ fn the_daily_pass_limit_is_enforced_per_local_day_and_follows_the_setting() {
     release(&mut conn, PassKind::EmergencyPass, t(21, 1, 0));
     let after_expiry = t(21, 20, 0);
     let desk = ReleaseDesk::default();
-    assert!(desk.begin(&conn, &Utc, PassKind::EmergencyPass, after_expiry).is_err(), "default limit is one a day");
+    assert!(
+        desk.begin(&conn, &Utc, PassKind::EmergencyPass, after_expiry)
+            .is_err(),
+        "default limit is one a day"
+    );
     assert_eq!(
-        study_pass::grant(&mut conn, &Utc, PassKind::EmergencyPass, after_expiry, typing()).expect("grant"),
+        study_pass::grant(
+            &mut conn,
+            &Utc,
+            PassKind::EmergencyPass,
+            after_expiry,
+            typing()
+        )
+        .expect("grant"),
         Grant::LimitReached { limit: 1 }
     );
     assert_eq!(passes(&conn).len(), 1);
 
     store::put_setting(&conn, "emergencyPassDailyLimit", "release", "2", 1).expect("setting");
     assert!(matches!(
-        study_pass::grant(&mut conn, &Utc, PassKind::EmergencyPass, after_expiry, typing()).expect("grant"),
+        study_pass::grant(
+            &mut conn,
+            &Utc,
+            PassKind::EmergencyPass,
+            after_expiry,
+            typing()
+        )
+        .expect("grant"),
         Grant::Granted { .. }
     ));
     assert_eq!(
-        study_pass::grant(&mut conn, &Utc, PassKind::EmergencyPass, after_expiry + 1, typing()).expect("grant"),
-        Grant::AlreadyActive { expires_at_ms: after_expiry + study_pass::EMERGENCY_PASS_MS },
+        study_pass::grant(
+            &mut conn,
+            &Utc,
+            PassKind::EmergencyPass,
+            after_expiry + 1,
+            typing()
+        )
+        .expect("grant"),
+        Grant::AlreadyActive {
+            expires_at_ms: after_expiry + study_pass::EMERGENCY_PASS_MS
+        },
         "a running pass cannot be stacked"
     );
     let status = study_pass::status(&conn, &Utc, after_expiry + 1).expect("status");
-    assert_eq!((status.daily_limit, status.used_today, status.remaining_today), (2, 2, 0));
+    assert_eq!(
+        (
+            status.daily_limit,
+            status.used_today,
+            status.remaining_today
+        ),
+        (2, 2, 0)
+    );
 
     // The next local day starts a fresh allowance.
     let next_day = study_pass::status(&conn, &Utc, t(24, 5, 0)).expect("status");
-    assert_eq!((next_day.used_today, next_day.remaining_today, next_day.active_until_ms), (0, 2, None));
+    assert_eq!(
+        (
+            next_day.used_today,
+            next_day.remaining_today,
+            next_day.active_until_ms
+        ),
+        (0, 2, None)
+    );
 }
 
 #[test]
@@ -735,23 +1200,45 @@ fn skip_today_closes_the_run_and_every_remaining_plan_and_leaves_tomorrow_alone(
     new_plan_unlocked(&mut conn, "2026-11-05", "23:30", 1);
     new_plan_unlocked(&mut conn, "2026-11-06", "20:00", 1);
     let outcome = release(&mut conn, PassKind::SkipToday, t(21, 1, 0));
-    assert_eq!(outcome, ReleaseOutcome::Released { kind: PassKind::SkipToday, expires_at_ms: None });
+    assert_eq!(
+        outcome,
+        ReleaseOutcome::Released {
+            kind: PassKind::SkipToday,
+            expires_at_ms: None
+        }
+    );
     assert!(!lock(&conn));
 
     let all = runs(&conn);
     assert_eq!(all.len(), 2, "tomorrow's plan has no run yet");
-    assert!(all.iter().all(|r| r.status == RunStatus::Skipped), "{all:?}");
+    assert!(
+        all.iter().all(|r| r.status == RunStatus::Skipped),
+        "{all:?}"
+    );
     assert!(all.iter().all(|r| r.date == "2026-11-05"));
     let first = &all[0];
-    assert!(segs(&conn, first.id).iter().any(|s| s.end_reason == Some(EndReason::Skipped)));
+    assert!(
+        segs(&conn, first.id)
+            .iter()
+            .any(|s| s.end_reason == Some(EndReason::Skipped))
+    );
 
     let evening = tick(&mut conn, t(23, 30, 5));
-    assert!(!evening.state.lock_held && !lock(&conn), "the skipped 23:30 plan never starts");
+    assert!(
+        !evening.state.lock_held && !lock(&conn),
+        "the skipped 23:30 plan never starts"
+    );
     assert_eq!(runs(&conn).len(), 2);
-    assert_eq!(evening.state.next.as_ref().map(|n| n.date.as_str()), Some("2026-11-06"));
+    assert_eq!(
+        evening.state.next.as_ref().map(|n| n.date.as_str()),
+        Some("2026-11-06")
+    );
 
     let tomorrow = tick(&mut conn, t(44, 0, 5));
-    assert!(tomorrow.state.lock_held && lock(&conn), "the next day's plan runs normally");
+    assert!(
+        tomorrow.state.lock_held && lock(&conn),
+        "the next day's plan runs normally"
+    );
     let session = store::insert_session(&conn, 1).expect("session");
     assert!(!exit_decision(&mut conn, session, t(44, 1, 0)).expect("exit"));
     assert_eq!(passes(&conn)[0].kind, "skip_today");
@@ -761,11 +1248,21 @@ fn skip_today_closes_the_run_and_every_remaining_plan_and_leaves_tomorrow_alone(
 fn skip_today_before_the_first_plan_works_once_and_a_second_skip_has_nothing_to_do() {
     let (mut conn, _) = db_with_plan();
     let outcome = release(&mut conn, PassKind::SkipToday, t(10, 0, 0));
-    assert!(matches!(outcome, ReleaseOutcome::Released { kind: PassKind::SkipToday, .. }));
+    assert!(matches!(
+        outcome,
+        ReleaseOutcome::Released {
+            kind: PassKind::SkipToday,
+            ..
+        }
+    ));
     assert_eq!(runs(&conn)[0].status, RunStatus::Skipped);
-    assert!(!tick(&mut conn, t(20, 0, 5)).state.lock_held, "the skipped plan does not lock at its time");
+    assert!(
+        !tick(&mut conn, t(20, 0, 5)).state.lock_held,
+        "the skipped plan does not lock at its time"
+    );
     assert_eq!(
-        study_pass::grant(&mut conn, &Utc, PassKind::SkipToday, t(10, 0, 1), typing()).expect("grant"),
+        study_pass::grant(&mut conn, &Utc, PassKind::SkipToday, t(10, 0, 1), typing())
+            .expect("grant"),
         Grant::NothingToRelease
     );
     assert_eq!(passes(&conn).len(), 1);
@@ -775,7 +1272,10 @@ fn skip_today_before_the_first_plan_works_once_and_a_second_skip_has_nothing_to_
 fn study_passes_are_append_only_and_the_kind_list_matches_the_rust_enum() {
     let (mut conn, _) = locked_run();
     release(&mut conn, PassKind::EarlyRelease, t(21, 1, 0));
-    assert!(conn.execute("UPDATE study_passes SET typing_ms = 0", []).is_err());
+    assert!(
+        conn.execute("UPDATE study_passes SET typing_ms = 0", [])
+            .is_err()
+    );
     assert!(conn.execute("DELETE FROM study_passes", []).is_err());
     for kind in PassKind::ALL {
         let expires = (kind == PassKind::EmergencyPass).then_some(5);
@@ -798,7 +1298,10 @@ fn study_passes_are_append_only_and_the_kind_list_matches_the_rust_enum() {
 #[test]
 fn every_sentence_is_long_enough() {
     for sentence in release::sentences() {
-        assert!(sentence.chars().count() >= release::MIN_SENTENCE_CHARS, "too short: {sentence}");
+        assert!(
+            sentence.chars().count() >= release::MIN_SENTENCE_CHARS,
+            "too short: {sentence}"
+        );
     }
     let distinct: std::collections::HashSet<_> = release::sentences().iter().collect();
     assert_eq!(distinct.len(), release::sentences().len());
@@ -808,15 +1311,31 @@ fn every_sentence_is_long_enough() {
 fn logs_carry_no_typed_text_plan_names_or_subjects() {
     let (mut conn, _) = locked_run();
     let desk = ReleaseDesk::default();
-    let challenge = desk.begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0)).expect("challenge");
+    let challenge = desk
+        .begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0))
+        .expect("challenge");
     let wrong = "비밀 입력 내용 XYZ";
     let logs = crate::testutil::capture_logs(|| {
-        desk.submit(&mut conn, &Utc, challenge.challenge_id, wrong, t(21, 1, 0)).expect("wrong");
-        desk.submit(&mut conn, &Utc, challenge.challenge_id, &challenge.sentence, t(21, 1, 1)).expect("right");
+        desk.submit(&mut conn, &Utc, challenge.challenge_id, wrong, t(21, 1, 0))
+            .expect("wrong");
+        desk.submit(
+            &mut conn,
+            &Utc,
+            challenge.challenge_id,
+            &challenge.sentence,
+            t(21, 1, 1),
+        )
+        .expect("right");
     });
-    assert!(logs.contains("release_rejected") && logs.contains("pass_granted"), "logged: {logs}");
+    assert!(
+        logs.contains("release_rejected") && logs.contains("pass_granted"),
+        "logged: {logs}"
+    );
     for forbidden in [wrong, challenge.sentence.as_str(), "수학"] {
-        assert!(!logs.contains(forbidden), "log leaked `{forbidden}`: {logs}");
+        assert!(
+            !logs.contains(forbidden),
+            "log leaked `{forbidden}`: {logs}"
+        );
     }
 }
 
@@ -826,10 +1345,21 @@ fn logs_carry_no_typed_text_plan_names_or_subjects() {
 fn a_panicking_tick_is_caught_and_the_next_one_runs() {
     let health = EngineHealth::default();
     let first: Supervised<i32> = health.run(|| panic!("injected tick panic"));
-    assert_eq!(first, Supervised::Failed { just_degraded: false });
+    assert_eq!(
+        first,
+        Supervised::Failed {
+            just_degraded: false
+        }
+    );
     assert_eq!(health.snapshot().restarts, 1);
     let second = health.run(|| Ok(7));
-    assert_eq!(second, Supervised::Done { value: 7, recovered: false });
+    assert_eq!(
+        second,
+        Supervised::Done {
+            value: 7,
+            recovered: false
+        }
+    );
     assert_eq!(health.snapshot().consecutive_failures, 0);
 }
 
@@ -843,14 +1373,28 @@ fn five_consecutive_failures_degrade_once_and_recovery_is_reported() {
         } else {
             health.run(|| Err(crate::error::AppError::Internal("injected error".into())))
         };
-        if matches!(result, Supervised::Failed { just_degraded: true }) {
+        if matches!(
+            result,
+            Supervised::Failed {
+                just_degraded: true
+            }
+        ) {
             degraded_signals += 1;
         }
     }
-    assert_eq!(degraded_signals, 1, "degraded is announced once, not on every failure");
+    assert_eq!(
+        degraded_signals, 1,
+        "degraded is announced once, not on every failure"
+    );
     assert!(health.snapshot().degraded);
     let recovered = health.run(|| Ok(()));
-    assert_eq!(recovered, Supervised::Done { value: (), recovered: true });
+    assert_eq!(
+        recovered,
+        Supervised::Done {
+            value: (),
+            recovered: true
+        }
+    );
     assert!(!health.snapshot().degraded);
 }
 
@@ -866,7 +1410,17 @@ fn a_tick_that_panics_while_holding_the_db_does_not_stop_later_ticks() {
         panic!("injected panic inside a tick");
     });
     assert!(matches!(crashed, Supervised::Failed { .. }));
-    let next = health.run(|| tick_once(&db, &Utc, &hw, t(20, 30, 0), WakeReason::Tick, &mut last, &FakeNotifier::default()));
+    let next = health.run(|| {
+        tick_once(
+            &db,
+            &Utc,
+            &hw,
+            t(20, 30, 0),
+            WakeReason::Tick,
+            &mut last,
+            &FakeNotifier::default(),
+        )
+    });
     assert!(matches!(next, Supervised::Done { .. }), "{next:?}");
     assert!(lock(&lock_db(&db).expect("lock")));
 }
@@ -881,7 +1435,10 @@ fn exit_is_refused_during_a_break_and_allowed_after_the_run() {
     assert_eq!(r.state.phase, Phase::Break);
     assert!(!exit_decision(&mut conn, session, t(20, 55, 1)).expect("exit"));
     let latest = &crate::settings::read_history(&conn, 1).expect("history")[0];
-    assert_eq!((latest.key.as_str(), latest.outcome.as_str()), ("appExit", "rejected_locked"));
+    assert_eq!(
+        (latest.key.as_str(), latest.outcome.as_str()),
+        ("appExit", "rejected_locked")
+    );
     tick(&mut conn, t(23, 0, 1));
     assert!(exit_decision(&mut conn, session, t(23, 0, 2)).expect("exit"));
 }
@@ -892,7 +1449,10 @@ struct TempDir(std::path::PathBuf);
 
 impl TempDir {
     fn new(tag: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("study-manager-timer-{tag}-{}", crate::clock::now_ms().expect("clock")));
+        let dir = std::env::temp_dir().join(format!(
+            "study-manager-timer-{tag}-{}",
+            crate::clock::now_ms().expect("clock")
+        ));
         std::fs::create_dir_all(&dir).expect("dir");
         Self(dir)
     }
@@ -928,9 +1488,15 @@ fn two_minute_plan_runs_start_to_finish_across_a_restart() {
         assert_eq!(held, expected, "lock at +{second}s");
     }
     let run = &runs(&conn)[0];
-    assert_eq!((run.status, run.ended_at_ms, run.actual_start_ms), (RunStatus::Completed, Some(t(20, 6, 0)), Some(t(20, 0, 0))));
+    assert_eq!(
+        (run.status, run.ended_at_ms, run.actual_start_ms),
+        (RunStatus::Completed, Some(t(20, 6, 0)), Some(t(20, 0, 0)))
+    );
     let all = segs(&conn, run.id);
-    let shape: Vec<(BlockKind, i64, Option<EndReason>)> = all.iter().map(|s| (s.kind, s.started_at_ms, s.end_reason)).collect();
+    let shape: Vec<(BlockKind, i64, Option<EndReason>)> = all
+        .iter()
+        .map(|s| (s.kind, s.started_at_ms, s.end_reason))
+        .collect();
     assert_eq!(
         shape,
         [
@@ -939,7 +1505,10 @@ fn two_minute_plan_runs_start_to_finish_across_a_restart() {
             (BlockKind::Study, t(20, 4, 0), Some(EndReason::Elapsed)),
         ]
     );
-    assert!(all.iter().all(|s| !s.late_join), "a restart inside a block is not a late join");
+    assert!(
+        all.iter().all(|s| !s.late_join),
+        "a restart inside a block is not a late join"
+    );
     assert_eq!(count(&conn, "plan_runs"), 1);
 }
 
@@ -962,7 +1531,9 @@ fn late_tolerance_separates_tick_jitter_from_missed_boundaries() {
 const MIN: i64 = 60_000;
 
 fn emitted_notices(out: &[Emission]) -> usize {
-    out.iter().filter(|e| matches!(e, Emission::BreakEndingSoon(_))).count()
+    out.iter()
+        .filter(|e| matches!(e, Emission::BreakEndingSoon(_)))
+        .count()
 }
 
 #[test]
@@ -979,7 +1550,11 @@ fn break_notice_is_sent_once_at_one_minute_left_and_not_again_after_a_restart() 
 
     // Break is 20:10-20:14; one minute before the end is 20:13:00.
     for now in [t(20, 10, 1), t(20, 12, 59)] {
-        assert_eq!(emitted_notices(&run_tick(now, &mut last)), 0, "too early at {now}");
+        assert_eq!(
+            emitted_notices(&run_tick(now, &mut last)),
+            0,
+            "too early at {now}"
+        );
     }
     assert!(notifier.sent().is_empty());
 
@@ -989,17 +1564,27 @@ fn break_notice_is_sent_once_at_one_minute_left_and_not_again_after_a_restart() 
         _ => None,
     });
     let soon = soon.expect("event at exactly one minute left");
-    assert_eq!((soon.remaining_ms, soon.planned_end_ms), (MIN, t(20, 14, 0)));
+    assert_eq!(
+        (soon.remaining_ms, soon.planned_end_ms),
+        (MIN, t(20, 14, 0))
+    );
     assert_eq!(notifier.sent().len(), 1);
     // The text names no subject: it can show on a lock screen.
     let (title, body) = &notifier.sent()[0];
-    assert!(!title.contains("수학") && !body.contains("수학"), "{title} {body}");
+    assert!(
+        !title.contains("수학") && !body.contains("수학"),
+        "{title} {body}"
+    );
 
     assert_eq!(emitted_notices(&run_tick(t(20, 13, 1), &mut last)), 0);
     // A restart loses `last`; the sent mark in the database still prevents a repeat.
     let mut restarted = None;
     assert_eq!(emitted_notices(&run_tick(t(20, 13, 30), &mut restarted)), 0);
-    assert_eq!(emitted_notices(&run_tick(t(20, 14, 1), &mut restarted)), 0, "never after the break ended");
+    assert_eq!(
+        emitted_notices(&run_tick(t(20, 14, 1), &mut restarted)),
+        0,
+        "never after the break ended"
+    );
     assert_eq!(notifier.sent().len(), 1);
 }
 
@@ -1012,7 +1597,8 @@ fn a_break_of_one_minute_or_less_sends_no_notice() {
     let notifier = FakeNotifier::default();
     let mut last = None;
     for now in [t(20, 10, 1), t(20, 10, 30), t(20, 10, 59)] {
-        let out = tick_once(&db, &Utc, &hw, now, WakeReason::Tick, &mut last, &notifier).expect("tick");
+        let out =
+            tick_once(&db, &Utc, &hw, now, WakeReason::Tick, &mut last, &notifier).expect("tick");
         assert_eq!(emitted_notices(&out), 0, "{now}");
     }
     assert!(notifier.sent().is_empty());
@@ -1024,24 +1610,48 @@ fn notice_rule_edges() {
     set_medium(&conn, 10, 4);
     tick(&mut conn, t(20, 10, 1));
     let state = current_state(&conn, &Utc, t(20, 10, 1)).expect("state");
-    let seg = store::get_segment(&conn, state.segment_id.expect("segment")).expect("get").expect("row");
+    let seg = store::get_segment(&conn, state.segment_id.expect("segment"))
+        .expect("get")
+        .expect("row");
     let end = seg.planned_end_ms;
     assert!(!notice::is_due(&seg, end - MIN - 1));
     assert!(notice::is_due(&seg, end - MIN));
     assert!(notice::is_due(&seg, end - 1));
     assert!(!notice::is_due(&seg, end), "nothing at or after the end");
-    assert!(!notice::is_due(&SegmentRow { notice_sent_at_ms: Some(1), ..seg.clone() }, end - 5));
-    assert!(!notice::is_due(&SegmentRow { kind: BlockKind::Study, ..seg }, end - 5));
+    assert!(!notice::is_due(
+        &SegmentRow {
+            notice_sent_at_ms: Some(1),
+            ..seg.clone()
+        },
+        end - 5
+    ));
+    assert!(!notice::is_due(
+        &SegmentRow {
+            kind: BlockKind::Study,
+            ..seg
+        },
+        end - 5
+    ));
 }
 
 #[test]
 fn set_and_run_summaries_exclude_downtime_and_count_block_attempts() {
-    use crate::enforce::model::{BlockAction as A, EnforceMode as M, NewBlockEvent, TargetKind as K};
+    use crate::enforce::model::{
+        BlockAction as A, EnforceMode as M, NewBlockEvent, TargetKind as K,
+    };
     let (conn, _) = db_with_plan();
     set_medium(&conn, 10, 5);
     // Sleep from 20:02 to 20:05 lies inside the first study block (20:00-20:10).
-    store::insert_downtime(&conn, DowntimeKind::Sleep, Interval { start: t(20, 2, 0), end: t(20, 5, 0) }, false)
-        .expect("downtime");
+    store::insert_downtime(
+        &conn,
+        DowntimeKind::Sleep,
+        Interval {
+            start: t(20, 2, 0),
+            end: t(20, 5, 0),
+        },
+        false,
+    )
+    .expect("downtime");
     let db = Mutex::new(conn);
     let hw = HighWater::new(0);
     let notifier = FakeNotifier::default();
@@ -1050,12 +1660,19 @@ fn set_and_run_summaries_exclude_downtime_and_count_block_attempts() {
         tick_once(&db, &Utc, &hw, now, WakeReason::Tick, &mut last, &notifier).expect("tick")
     };
     // Blocks: study 20:00-10, break -15, study -25, break -30, study -40.
-    assert!(run_tick(t(20, 0, 1)).iter().all(|e| matches!(e, Emission::TimerChanged(_))));
+    assert!(
+        run_tick(t(20, 0, 1))
+            .iter()
+            .all(|e| matches!(e, Emission::TimerChanged(_)))
+    );
     let record = |study_nth: usize, specs: &[(K, &str, A, M)]| {
         let conn = db.lock().expect("lock");
         let run_id = runs(&conn)[0].id;
-        let study: Vec<i64> =
-            segs(&conn, run_id).iter().filter(|s| s.kind == BlockKind::Study).map(|s| s.id).collect();
+        let study: Vec<i64> = segs(&conn, run_id)
+            .iter()
+            .filter(|s| s.kind == BlockKind::Study)
+            .map(|s| s.id)
+            .collect();
         for (kind, id, action, mode) in specs {
             let event = NewBlockEvent {
                 at_ms: t(20, 3, 0),
@@ -1078,7 +1695,14 @@ fn set_and_run_summaries_exclude_downtime_and_count_block_attempts() {
         (K::Extension, "chrome", A::ExtensionDisconnected, M::Enforce),
         (K::Extension, "chrome", A::ExtensionConnected, M::Enforce),
     ];
-    for action in [A::SkippedProtected, A::SkippedPass, A::Terminated, A::ForceKilled, A::Failed, A::SiteAllowedPass] {
+    for action in [
+        A::SkippedProtected,
+        A::SkippedPass,
+        A::Terminated,
+        A::ForceKilled,
+        A::Failed,
+        A::SiteAllowedPass,
+    ] {
         first_set.push((K::App, "c", action, M::Enforce));
     }
     record(0, &first_set);
@@ -1105,7 +1729,10 @@ fn set_and_run_summaries_exclude_downtime_and_count_block_attempts() {
         _ => None,
     });
     let set = set.expect("set summary when the study block ends");
-    assert_eq!((set.set_index, set.set_studied_ms, set.today_studied_ms), (1, 7 * MIN, 7 * MIN));
+    assert_eq!(
+        (set.set_index, set.set_studied_ms, set.today_studied_ms),
+        (1, 7 * MIN, 7 * MIN)
+    );
     assert_eq!(set.attempt_count, 3);
     assert!(!first.iter().any(|e| matches!(e, Emission::RunSummary(_))));
     let sent = notifier.sent();
@@ -1123,9 +1750,16 @@ fn set_and_run_summaries_exclude_downtime_and_count_block_attempts() {
         _ => None,
     });
     let run = run.expect("run summary when the run completes");
-    assert_eq!((run.sets_total, run.run_studied_ms, run.today_studied_ms), (3, 27 * MIN, 27 * MIN));
+    assert_eq!(
+        (run.sets_total, run.run_studied_ms, run.today_studied_ms),
+        (3, 27 * MIN, 27 * MIN)
+    );
     assert_eq!((run.status.as_str(), run.attempt_count), ("completed", 4));
-    assert!(end.iter().any(|e| matches!(e, Emission::SetSummary(s) if s.set_index == 3 && s.attempt_count == 0)));
+    assert!(
+        end.iter().any(
+            |e| matches!(e, Emission::SetSummary(s) if s.set_index == 3 && s.attempt_count == 0)
+        )
+    );
 }
 
 #[test]
@@ -1155,7 +1789,17 @@ fn studied_time_counts_overlapping_downtime_once() {
     for (rows, expected) in table {
         assert_eq!(summary::studied_ms(&seg, rows), expected, "{rows:?}");
     }
-    assert_eq!(summary::studied_ms(&SegmentRow { ended_at_ms: None, end_reason: None, ..seg }, &[]), 0);
+    assert_eq!(
+        summary::studied_ms(
+            &SegmentRow {
+                ended_at_ms: None,
+                end_reason: None,
+                ..seg
+            },
+            &[]
+        ),
+        0
+    );
 }
 
 #[test]
@@ -1165,14 +1809,40 @@ fn an_aborted_study_block_is_summarized_with_its_partial_time() {
     let hw = HighWater::new(0);
     let notifier = FakeNotifier::default();
     let mut last = None;
-    tick_once(&db, &Utc, &hw, t(20, 0, 1), WakeReason::Tick, &mut last, &notifier).expect("tick");
+    tick_once(
+        &db,
+        &Utc,
+        &hw,
+        t(20, 0, 1),
+        WakeReason::Tick,
+        &mut last,
+        &notifier,
+    )
+    .expect("tick");
     {
         let mut conn = lock_db(&db).expect("lock");
         release(&mut conn, PassKind::EarlyRelease, t(20, 30, 0));
     }
-    let out = tick_once(&db, &Utc, &hw, t(20, 30, 1), WakeReason::Tick, &mut last, &notifier).expect("tick");
-    assert!(out.iter().any(|e| matches!(e, Emission::SetSummary(s) if s.set_studied_ms == 30 * MIN)), "{out:?}");
-    assert!(out.iter().any(|e| matches!(e, Emission::RunSummary(r) if r.status == "aborted")), "{out:?}");
+    let out = tick_once(
+        &db,
+        &Utc,
+        &hw,
+        t(20, 30, 1),
+        WakeReason::Tick,
+        &mut last,
+        &notifier,
+    )
+    .expect("tick");
+    assert!(
+        out.iter()
+            .any(|e| matches!(e, Emission::SetSummary(s) if s.set_studied_ms == 30 * MIN)),
+        "{out:?}"
+    );
+    assert!(
+        out.iter()
+            .any(|e| matches!(e, Emission::RunSummary(r) if r.status == "aborted")),
+        "{out:?}"
+    );
 }
 
 // ---- stage 3-6/3-7: the early-release quiz gate and the review cards ----
@@ -1187,11 +1857,24 @@ mod quiz_gate {
 
     /// Everything a quiz must never change: the lock, the runs, the block log, the recorded passes.
     fn untouched(conn: &Connection) -> (bool, Vec<RunRow>, i64, i64) {
-        (lock(conn), runs(conn), count(conn, "block_events"), count(conn, "study_passes"))
+        (
+            lock(conn),
+            runs(conn),
+            count(conn, "block_events"),
+            count(conn, "study_passes"),
+        )
     }
 
     fn items_of(conn: &Connection, challenge: &ReleaseChallenge) -> Vec<QuizItem> {
-        challenge.questions.iter().map(|q| crate::store::quiz::get_item(conn, q.item_id).expect("read").expect("item")).collect()
+        challenge
+            .questions
+            .iter()
+            .map(|q| {
+                crate::store::quiz::get_item(conn, q.item_id)
+                    .expect("read")
+                    .expect("item")
+            })
+            .collect()
     }
 
     fn quiz_run(bank_size: usize) -> Connection {
@@ -1201,18 +1884,34 @@ mod quiz_gate {
     }
 
     fn state_row(conn: &Connection) -> Option<(i64, i64)> {
-        conn.query_row("SELECT attempts, last_attempt_ms FROM release_quiz_state", [], |r| Ok((r.get(0)?, r.get(1)?))).ok()
+        conn.query_row(
+            "SELECT attempts, last_attempt_ms FROM release_quiz_state",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .ok()
     }
 
     #[test]
     fn early_release_gets_questions_when_the_bank_has_three_and_the_sentence_when_it_has_fewer() {
-        for (size, expected) in [(0, ChallengeProof::Typing), (2, ChallengeProof::Typing), (3, ChallengeProof::Quiz), (9, ChallengeProof::Quiz)] {
+        for (size, expected) in [
+            (0, ChallengeProof::Typing),
+            (2, ChallengeProof::Typing),
+            (3, ChallengeProof::Quiz),
+            (9, ChallengeProof::Quiz),
+        ] {
             let conn = quiz_run(size);
-            let challenge = ReleaseDesk::default().begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0)).expect("begin");
+            let challenge = ReleaseDesk::default()
+                .begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0))
+                .expect("begin");
             assert_eq!(challenge.proof, expected, "bank of {size}");
             match expected {
-                ChallengeProof::Quiz => assert!(challenge.sentence.is_empty() && challenge.questions.len() == 3),
-                ChallengeProof::Typing => assert!(challenge.questions.is_empty() && !challenge.sentence.is_empty()),
+                ChallengeProof::Quiz => {
+                    assert!(challenge.sentence.is_empty() && challenge.questions.len() == 3)
+                }
+                ChallengeProof::Typing => {
+                    assert!(challenge.questions.is_empty() && !challenge.sentence.is_empty())
+                }
             }
         }
     }
@@ -1222,21 +1921,36 @@ mod quiz_gate {
         for kind in [PassKind::EmergencyPass, PassKind::SkipToday] {
             let conn = quiz_run(12);
             let before = state_row(&conn);
-            let challenge = ReleaseDesk::default().begin(&conn, &Utc, kind, t(21, 0, 0)).expect("begin");
+            let challenge = ReleaseDesk::default()
+                .begin(&conn, &Utc, kind, t(21, 0, 0))
+                .expect("begin");
             assert_eq!(challenge.proof, ChallengeProof::Typing, "{kind:?}");
-            assert_eq!(state_row(&conn), before, "the quiz counters never move for {kind:?}");
+            assert_eq!(
+                state_row(&conn),
+                before,
+                "the quiz counters never move for {kind:?}"
+            );
         }
     }
 
     #[test]
     fn the_questions_carry_no_answer_in_json() {
         let conn = quiz_run(9);
-        let challenge = ReleaseDesk::default().begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0)).expect("begin");
+        let challenge = ReleaseDesk::default()
+            .begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0))
+            .expect("begin");
         let json = serde_json::to_string(&challenge).expect("json");
-        for item in items_of(&conn, &challenge).iter().filter(|i| i.choices.is_empty()) {
+        for item in items_of(&conn, &challenge)
+            .iter()
+            .filter(|i| i.choices.is_empty())
+        {
             assert!(!json.contains(&item.answer_key), "{json}");
         }
-        assert!(!json.contains("answerKey") && !json.contains("\"answer\"") && !json.contains("evidence"));
+        assert!(
+            !json.contains("answerKey")
+                && !json.contains("\"answer\"")
+                && !json.contains("evidence")
+        );
     }
 
     #[test]
@@ -1244,15 +1958,37 @@ mod quiz_gate {
         let mut conn = quiz_run(9);
         let desk = ReleaseDesk::default();
         let before = untouched(&conn);
-        let challenge = desk.begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0)).expect("begin");
+        let challenge = desk
+            .begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0))
+            .expect("begin");
         let mut answers = right_answers(&items_of(&conn, &challenge));
         answers[2] = wrong_answer();
-        let outcome = desk.submit_quiz(&mut conn, &Utc, challenge.challenge_id, &answers, t(21, 1, 0)).expect("submit");
-        assert_eq!(outcome, ReleaseOutcome::QuizFailed { retry_after_ms: 3 * MIN, attempts_left: 3 });
-        assert_eq!(untouched(&conn), before, "lock, runs, block log, and passes are unchanged");
+        let outcome = desk
+            .submit_quiz(
+                &mut conn,
+                &Utc,
+                challenge.challenge_id,
+                &answers,
+                t(21, 1, 0),
+            )
+            .expect("submit");
+        assert_eq!(
+            outcome,
+            ReleaseOutcome::QuizFailed {
+                retry_after_ms: 3 * MIN,
+                attempts_left: 3
+            }
+        );
+        assert_eq!(
+            untouched(&conn),
+            before,
+            "lock, runs, block log, and passes are unchanged"
+        );
         // The challenge is used up either way.
         let right = right_answers(&items_of(&conn, &challenge));
-        let again = desk.submit_quiz(&mut conn, &Utc, challenge.challenge_id, &right, t(21, 1, 5)).expect("again");
+        let again = desk
+            .submit_quiz(&mut conn, &Utc, challenge.challenge_id, &right, t(21, 1, 5))
+            .expect("again");
         assert_eq!(again, ReleaseOutcome::NoChallenge);
         assert_eq!(untouched(&conn), before);
     }
@@ -1261,13 +1997,25 @@ mod quiz_gate {
     fn missing_answers_and_an_unanswered_challenge_do_not_release() {
         let mut conn = quiz_run(9);
         let desk = ReleaseDesk::default();
-        let challenge = desk.begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0)).expect("begin");
+        let challenge = desk
+            .begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0))
+            .expect("begin");
         let all = right_answers(&items_of(&conn, &challenge));
-        let outcome = desk.submit_quiz(&mut conn, &Utc, challenge.challenge_id, &all[..2], t(21, 1, 0)).expect("submit");
+        let outcome = desk
+            .submit_quiz(
+                &mut conn,
+                &Utc,
+                challenge.challenge_id,
+                &all[..2],
+                t(21, 1, 0),
+            )
+            .expect("submit");
         assert!(matches!(outcome, ReleaseOutcome::QuizFailed { .. }));
         assert!(lock(&conn));
         // Closing the app instead: nothing is submitted and nothing changes but the counted attempt.
-        let _abandoned = ReleaseDesk::default().begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 10, 0)).expect("begin");
+        let _abandoned = ReleaseDesk::default()
+            .begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 10, 0))
+            .expect("begin");
         assert!(lock(&conn) && count(&conn, "study_passes") == 0);
     }
 
@@ -1275,23 +2023,62 @@ mod quiz_gate {
     fn three_of_three_releases_once_and_records_a_quiz_proof() {
         let mut conn = quiz_run(9);
         let desk = ReleaseDesk::default();
-        let challenge = desk.begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0)).expect("begin");
+        let challenge = desk
+            .begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0))
+            .expect("begin");
         let items = items_of(&conn, &challenge);
-        let outcome = desk.submit_quiz(&mut conn, &Utc, challenge.challenge_id, &right_answers(&items), t(21, 1, 0)).expect("submit");
-        assert_eq!(outcome, ReleaseOutcome::Released { kind: PassKind::EarlyRelease, expires_at_ms: None });
+        let outcome = desk
+            .submit_quiz(
+                &mut conn,
+                &Utc,
+                challenge.challenge_id,
+                &right_answers(&items),
+                t(21, 1, 0),
+            )
+            .expect("submit");
+        assert_eq!(
+            outcome,
+            ReleaseOutcome::Released {
+                kind: PassKind::EarlyRelease,
+                expires_at_ms: None
+            }
+        );
         assert!(!lock(&conn));
         let run = &runs(&conn)[0];
-        assert_eq!((run.status, run.detail_code.as_deref()), (RunStatus::Aborted, Some("early_release")));
+        assert_eq!(
+            (run.status, run.detail_code.as_deref()),
+            (RunStatus::Aborted, Some("early_release"))
+        );
         let rows = passes(&conn);
         assert_eq!(rows.len(), 1, "exactly one grant");
-        assert_eq!((rows[0].kind.as_str(), rows[0].proof_kind.as_str()), ("early_release", "quiz"));
-        let chars: i64 = items.iter().map(|i| i64::try_from(i.prompt.chars().count()).expect("len")).sum();
-        assert_eq!((rows[0].challenge_len, rows[0].typing_ms), (chars, 60_000), "prompt characters and answering time");
+        assert_eq!(
+            (rows[0].kind.as_str(), rows[0].proof_kind.as_str()),
+            ("early_release", "quiz")
+        );
+        let chars: i64 = items
+            .iter()
+            .map(|i| i64::try_from(i.prompt.chars().count()).expect("len"))
+            .sum();
+        assert_eq!(
+            (rows[0].challenge_len, rows[0].typing_ms),
+            (chars, 60_000),
+            "prompt characters and answering time"
+        );
         let release_rows: i64 =
             conn.query_row("SELECT COUNT(*) FROM quiz_attempts WHERE context = 'release' AND release_kind = 'early_release' AND correct = 1", [], |r| r.get(0)).expect("rows");
         assert_eq!(release_rows, 3);
         // The same answers cannot release twice, and no bonus points are paid for the proof.
-        assert_eq!(desk.submit_quiz(&mut conn, &Utc, challenge.challenge_id, &right_answers(&items), t(21, 1, 1)).expect("again"), ReleaseOutcome::NoChallenge);
+        assert_eq!(
+            desk.submit_quiz(
+                &mut conn,
+                &Utc,
+                challenge.challenge_id,
+                &right_answers(&items),
+                t(21, 1, 1)
+            )
+            .expect("again"),
+            ReleaseOutcome::NoChallenge
+        );
         assert_eq!(count(&conn, "point_ledger"), 0);
     }
 
@@ -1299,64 +2086,122 @@ mod quiz_gate {
     fn a_quiz_challenge_cannot_be_released_by_the_sentence_endpoint_and_vice_versa() {
         let mut conn = quiz_run(9);
         let desk = ReleaseDesk::default();
-        let challenge = desk.begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0)).expect("begin");
-        assert_eq!(desk.submit(&mut conn, &Utc, challenge.challenge_id, "", t(21, 1, 0)).expect("typed"), ReleaseOutcome::NoChallenge);
+        let challenge = desk
+            .begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0))
+            .expect("begin");
+        assert_eq!(
+            desk.submit(&mut conn, &Utc, challenge.challenge_id, "", t(21, 1, 0))
+                .expect("typed"),
+            ReleaseOutcome::NoChallenge
+        );
         assert!(lock(&conn));
-        let typing = ReleaseDesk::default().begin(&conn, &Utc, PassKind::SkipToday, t(21, 2, 0)).expect("begin");
-        let outcome = ReleaseDesk::default().submit_quiz(&mut conn, &Utc, typing.challenge_id, &[], t(21, 3, 0)).expect("quiz endpoint");
+        let typing = ReleaseDesk::default()
+            .begin(&conn, &Utc, PassKind::SkipToday, t(21, 2, 0))
+            .expect("begin");
+        let outcome = ReleaseDesk::default()
+            .submit_quiz(&mut conn, &Utc, typing.challenge_id, &[], t(21, 3, 0))
+            .expect("quiz endpoint");
         assert_eq!(outcome, ReleaseOutcome::NoChallenge);
     }
 
     #[test]
-    fn a_failed_attempt_starts_a_cooldown_and_the_cap_ends_early_release_for_the_day_without_typing() {
+    fn a_failed_attempt_starts_a_cooldown_and_the_cap_ends_early_release_for_the_day_without_typing()
+     {
         let mut conn = quiz_run(12);
         let desk = ReleaseDesk::default();
         let mut now = t(21, 0, 0);
         for attempt in 1..=4 {
-            let challenge = desk.begin(&conn, &Utc, PassKind::EarlyRelease, now).expect("begin");
+            let challenge = desk
+                .begin(&conn, &Utc, PassKind::EarlyRelease, now)
+                .expect("begin");
             if attempt == 1 {
                 // Cooling down right after the attempt was opened.
-                assert!(desk.begin(&conn, &Utc, PassKind::EarlyRelease, now + MIN).is_err(), "cooldown");
+                assert!(
+                    desk.begin(&conn, &Utc, PassKind::EarlyRelease, now + MIN)
+                        .is_err(),
+                    "cooldown"
+                );
             }
-            let outcome = desk.submit_quiz(&mut conn, &Utc, challenge.challenge_id, &[], now + 10_000).expect("submit");
-            assert!(matches!(outcome, ReleaseOutcome::QuizFailed { attempts_left, .. } if attempts_left == 4 - attempt), "{outcome:?}");
+            let outcome = desk
+                .submit_quiz(&mut conn, &Utc, challenge.challenge_id, &[], now + 10_000)
+                .expect("submit");
+            assert!(
+                matches!(outcome, ReleaseOutcome::QuizFailed { attempts_left, .. } if attempts_left == 4 - attempt),
+                "{outcome:?}"
+            );
             now += 10_000 + 3 * MIN;
         }
         // Four attempts used: refused after the cooldown too, and the sentence is not offered instead.
         let before = untouched(&conn);
         let state = state_row(&conn);
-        assert!(desk.begin(&conn, &Utc, PassKind::EarlyRelease, now + 60 * MIN).is_err());
+        assert!(
+            desk.begin(&conn, &Utc, PassKind::EarlyRelease, now + 60 * MIN)
+                .is_err()
+        );
         // Even a bank that shrank below three (reports, archive) opens no typing path.
-        conn.execute("UPDATE quiz_items SET disabled_at_ms = 1", []).expect("disable");
-        assert!(desk.begin(&conn, &Utc, PassKind::EarlyRelease, now + 60 * MIN).is_err());
-        assert_eq!(untouched(&conn), before, "the refusal changes no lock, run, block event, or pass");
+        conn.execute("UPDATE quiz_items SET disabled_at_ms = 1", [])
+            .expect("disable");
+        assert!(
+            desk.begin(&conn, &Utc, PassKind::EarlyRelease, now + 60 * MIN)
+                .is_err()
+        );
+        assert_eq!(
+            untouched(&conn),
+            before,
+            "the refusal changes no lock, run, block event, or pass"
+        );
         assert_eq!(state_row(&conn), state);
         let status = crate::quiz::release::status(&conn, &Utc, now + 60 * MIN).expect("status");
-        assert_eq!((status.mode, status.attempts_used, status.max_attempts), ("exhausted", 4, 4));
+        assert_eq!(
+            (status.mode, status.attempts_used, status.max_attempts),
+            ("exhausted", 4, 4)
+        );
         // Skip today and emergency pass still work by typing and follow their own limits.
         for kind in [PassKind::EmergencyPass, PassKind::SkipToday] {
-            let challenge = desk.begin(&conn, &Utc, kind, now + 61 * MIN).expect("typing path stays open");
+            let challenge = desk
+                .begin(&conn, &Utc, kind, now + 61 * MIN)
+                .expect("typing path stays open");
             assert_eq!(challenge.proof, ChallengeProof::Typing);
         }
-        assert_eq!(state_row(&conn), state, "their use does not touch the quiz counters");
+        assert_eq!(
+            state_row(&conn),
+            state,
+            "their use does not touch the quiz counters"
+        );
         let released = release(&mut conn, PassKind::EmergencyPass, now + 62 * MIN);
         assert!(matches!(released, ReleaseOutcome::Released { .. }));
         assert_eq!(state_row(&conn), state);
         // The next local day starts fresh.
         let next_day = t(21, 0, 0) + DAY;
-        assert_eq!(crate::quiz::release::status(&conn, &Utc, next_day).expect("status").attempts_used, 0);
+        assert_eq!(
+            crate::quiz::release::status(&conn, &Utc, next_day)
+                .expect("status")
+                .attempts_used,
+            0
+        );
     }
 
     #[test]
     fn the_cooldown_ends_after_the_configured_minutes_and_a_new_attempt_is_counted() {
         let mut conn = quiz_run(12);
         let desk = ReleaseDesk::default();
-        let challenge = desk.begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0)).expect("begin");
-        desk.submit_quiz(&mut conn, &Utc, challenge.challenge_id, &[], t(21, 0, 30)).expect("miss");
+        let challenge = desk
+            .begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0))
+            .expect("begin");
+        desk.submit_quiz(&mut conn, &Utc, challenge.challenge_id, &[], t(21, 0, 30))
+            .expect("miss");
         let status = crate::quiz::release::status(&conn, &Utc, t(21, 1, 0)).expect("status");
-        assert_eq!((status.mode, status.cooldown_remaining_ms), ("cooldown", 150_000));
-        assert!(desk.begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 3, 29)).is_err());
-        let next = desk.begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 3, 30)).expect("cooldown over");
+        assert_eq!(
+            (status.mode, status.cooldown_remaining_ms),
+            ("cooldown", 150_000)
+        );
+        assert!(
+            desk.begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 3, 29))
+                .is_err()
+        );
+        let next = desk
+            .begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 3, 30))
+            .expect("cooldown over");
         assert_eq!(next.proof, ChallengeProof::Quiz);
         assert_eq!(state_row(&conn).map(|s| s.0), Some(2));
     }
@@ -1367,11 +2212,19 @@ mod quiz_gate {
     fn rt_bank_shrunk_after_a_first_attempt_must_not_open_typing() {
         let mut conn = quiz_run(12);
         let desk = ReleaseDesk::default();
-        let challenge = desk.begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0)).expect("begin");
-        desk.submit_quiz(&mut conn, &Utc, challenge.challenge_id, &[], t(21, 0, 30)).expect("miss");
-        conn.execute("UPDATE wiki_subjects SET archived_at_ms = 1", []).expect("archive");
+        let challenge = desk
+            .begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0))
+            .expect("begin");
+        desk.submit_quiz(&mut conn, &Utc, challenge.challenge_id, &[], t(21, 0, 30))
+            .expect("miss");
+        conn.execute("UPDATE wiki_subjects SET archived_at_ms = 1", [])
+            .expect("archive");
         let after = desk.begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 10, 0));
-        assert!(after.is_err(), "typing was offered after an attempt was spent: {:?}", after.map(|c| c.proof));
+        assert!(
+            after.is_err(),
+            "typing was offered after an attempt was spent: {:?}",
+            after.map(|c| c.proof)
+        );
         let status = crate::quiz::release::status(&conn, &Utc, t(21, 10, 0)).expect("status");
         assert_eq!(status.mode, "exhausted");
     }
@@ -1379,34 +2232,67 @@ mod quiz_gate {
     #[test]
     fn the_bank_failing_to_read_falls_back_to_the_sentence_but_the_cap_does_not() {
         let conn = quiz_run(9);
-        conn.execute_batch("ALTER TABLE quiz_items RENAME TO quiz_items_gone").expect("break the bank");
-        let challenge = ReleaseDesk::default().begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0)).expect("begin");
-        assert_eq!(challenge.proof, ChallengeProof::Typing, "an unreadable bank is an integrity error, not a lock");
+        conn.execute_batch("ALTER TABLE quiz_items RENAME TO quiz_items_gone")
+            .expect("break the bank");
+        let challenge = ReleaseDesk::default()
+            .begin(&conn, &Utc, PassKind::EarlyRelease, t(21, 0, 0))
+            .expect("begin");
+        assert_eq!(
+            challenge.proof,
+            ChallengeProof::Typing,
+            "an unreadable bank is an integrity error, not a lock"
+        );
     }
 
     #[test]
     fn grant_refuses_a_quiz_proof_for_any_other_kind() {
-        let quiz = ReleaseProof::Quiz(QuizProof { prompt_chars: 30, total_ms: 1_000 });
+        let quiz = ReleaseProof::Quiz(QuizProof {
+            prompt_chars: 30,
+            total_ms: 1_000,
+        });
         for kind in [PassKind::EmergencyPass, PassKind::SkipToday] {
             let (mut conn, _) = locked_run();
-            assert!(study_pass::grant(&mut conn, &Utc, kind, t(21, 1, 0), quiz).is_err(), "{kind:?}");
+            assert!(
+                study_pass::grant(&mut conn, &Utc, kind, t(21, 1, 0), quiz).is_err(),
+                "{kind:?}"
+            );
             assert_eq!(count(&conn, "study_passes"), 0);
             assert!(lock(&conn));
         }
         let (mut conn, _) = locked_run();
-        assert_eq!(study_pass::grant(&mut conn, &Utc, PassKind::EarlyRelease, t(21, 1, 0), quiz).expect("grant"), Grant::Granted { expires_at_ms: None });
+        assert_eq!(
+            study_pass::grant(&mut conn, &Utc, PassKind::EarlyRelease, t(21, 1, 0), quiz)
+                .expect("grant"),
+            Grant::Granted {
+                expires_at_ms: None
+            }
+        );
     }
 
     #[test]
     fn proof_kind_drift_matrix_defaults_and_triggers() {
         let conn = open_in_memory().expect("db");
         // (a) the Rust enum and the schema list the same values.
-        let sql: String = conn.query_row("SELECT sql FROM sqlite_master WHERE name = 'study_passes'", [], |r| r.get(0)).expect("schema");
+        let sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE name = 'study_passes'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("schema");
         let from = sql.find("proof_kind IN (").expect("list");
         let list = &sql[from..from + sql[from..].find(')').expect("end")];
-        let mut in_schema: Vec<String> = list.split('\'').skip(1).step_by(2).map(str::to_string).collect();
+        let mut in_schema: Vec<String> = list
+            .split('\'')
+            .skip(1)
+            .step_by(2)
+            .map(str::to_string)
+            .collect();
         in_schema.sort();
-        let mut in_rust: Vec<String> = ProofKind::ALL.iter().map(|p| p.as_str().to_string()).collect();
+        let mut in_rust: Vec<String> = ProofKind::ALL
+            .iter()
+            .map(|p| p.as_str().to_string())
+            .collect();
         in_rust.sort();
         assert_eq!(in_schema, in_rust);
         // (b) every (kind, proof) pair: a quiz is accepted for early release only.
@@ -1423,13 +2309,22 @@ mod quiz_gate {
         }
         // (c) a row inserted without naming the column is a typing row.
         conn.execute("INSERT INTO study_passes (at_ms, date, kind, challenge_len, typing_ms) VALUES (2, '2026-11-05', 'skip_today', 5, 0)", []).expect("old-style insert");
-        let last: String = conn.query_row("SELECT proof_kind FROM study_passes ORDER BY id DESC LIMIT 1", [], |r| r.get(0)).expect("last");
+        let last: String = conn
+            .query_row(
+                "SELECT proof_kind FROM study_passes ORDER BY id DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .expect("last");
         assert_eq!(last, "typing");
         // (d) a quiz row still has to satisfy the older columns; (e) the log stays append-only.
         assert!(conn.execute("INSERT INTO study_passes (at_ms, date, kind, challenge_len, typing_ms, proof_kind) VALUES (3, 'd', 'early_release', 0, 0, 'quiz')", []).is_err());
         assert!(conn.execute("INSERT INTO study_passes (at_ms, date, kind, challenge_len, typing_ms, proof_kind) VALUES (3, 'd', 'early_release', 5, -1, 'quiz')", []).is_err());
         assert!(conn.execute("INSERT INTO study_passes (at_ms, date, kind, challenge_len, typing_ms, proof_kind) VALUES (3, 'd', 'early_release', 5, 0, 'voice')", []).is_err());
-        assert!(conn.execute("UPDATE study_passes SET proof_kind = 'typing'", []).is_err());
+        assert!(
+            conn.execute("UPDATE study_passes SET proof_kind = 'typing'", [])
+                .is_err()
+        );
         assert!(conn.execute("DELETE FROM study_passes", []).is_err());
     }
 
@@ -1449,14 +2344,40 @@ mod quiz_gate {
     #[test]
     fn a_distraction_card_appears_only_inside_a_locked_study_block_and_is_rationed() {
         let (conn, gate) = gate_scenario();
-        let card = gate.offer_distraction(&conn, &Utc, STUDY()).expect("offer").expect("a card inside the study block");
-        assert_eq!((card.context, card.questions.len(), card.skippable), (Context::Distraction, 1, false));
-        assert!(gate.offer_distraction(&conn, &Utc, STUDY() + 2 * MIN).expect("offer").is_none(), "5-minute cooldown");
-        assert!(gate.offer_distraction(&conn, &Utc, STUDY() + 5 * MIN + 1_000).expect("offer").is_some(), "after the cooldown");
+        let card = gate
+            .offer_distraction(&conn, &Utc, STUDY())
+            .expect("offer")
+            .expect("a card inside the study block");
+        assert_eq!(
+            (card.context, card.questions.len(), card.skippable),
+            (Context::Distraction, 1, false)
+        );
+        assert!(
+            gate.offer_distraction(&conn, &Utc, STUDY() + 2 * MIN)
+                .expect("offer")
+                .is_none(),
+            "5-minute cooldown"
+        );
+        assert!(
+            gate.offer_distraction(&conn, &Utc, STUDY() + 5 * MIN + 1_000)
+                .expect("offer")
+                .is_some(),
+            "after the cooldown"
+        );
         // A break gets no pop-up, and neither does the time after the run.
         let (conn, gate) = gate_scenario();
-        assert!(gate.offer_distraction(&conn, &Utc, BREAK()).expect("offer").is_none(), "break");
-        assert!(gate.offer_distraction(&conn, &Utc, t(23, 30, 0)).expect("offer").is_none(), "after the run");
+        assert!(
+            gate.offer_distraction(&conn, &Utc, BREAK())
+                .expect("offer")
+                .is_none(),
+            "break"
+        );
+        assert!(
+            gate.offer_distraction(&conn, &Utc, t(23, 30, 0))
+                .expect("offer")
+                .is_none(),
+            "after the run"
+        );
     }
 
     #[test]
@@ -1467,7 +2388,11 @@ mod quiz_gate {
         // Step through the rest of the run, breaks included.
         for _ in 0..30 {
             now += 6 * MIN;
-            if gate.offer_distraction(&conn, &Utc, now).expect("offer").is_some() {
+            if gate
+                .offer_distraction(&conn, &Utc, now)
+                .expect("offer")
+                .is_some()
+            {
                 shown += 1;
             }
         }
@@ -1480,14 +2405,35 @@ mod quiz_gate {
         for answer in [0, 1, 2] {
             let (mut conn, gate) = gate_scenario();
             let before = untouched(&conn);
-            let card = gate.offer_distraction(&conn, &Utc, STUDY()).expect("offer").expect("card");
+            let card = gate
+                .offer_distraction(&conn, &Utc, STUDY())
+                .expect("offer")
+                .expect("card");
             match answer {
                 0 => {
-                    let item = crate::store::quiz::get_item(&conn, card.questions[0].item_id).expect("read").expect("item");
-                    gate.answer(&mut conn, &Utc, card.card_id, &[item.answer_key], false, STUDY() + 5_000).expect("right");
+                    let item = crate::store::quiz::get_item(&conn, card.questions[0].item_id)
+                        .expect("read")
+                        .expect("item");
+                    gate.answer(
+                        &mut conn,
+                        &Utc,
+                        card.card_id,
+                        &[item.answer_key],
+                        false,
+                        STUDY() + 5_000,
+                    )
+                    .expect("right");
                 }
                 1 => {
-                    gate.answer(&mut conn, &Utc, card.card_id, &[wrong_answer()], false, STUDY() + 5_000).expect("wrong");
+                    gate.answer(
+                        &mut conn,
+                        &Utc,
+                        card.card_id,
+                        &[wrong_answer()],
+                        false,
+                        STUDY() + 5_000,
+                    )
+                    .expect("wrong");
                 }
                 _ => {} // ignored
             }
@@ -1495,37 +2441,89 @@ mod quiz_gate {
             let later = tick(&mut conn, t(21, 40, 0));
             assert!(later.state.lock_held, "the block is still held");
             let done = tick(&mut conn, t(23, 0, 1));
-            assert_eq!(done.state.phase, Phase::Idle, "the run ends on schedule regardless");
+            assert_eq!(
+                done.state.phase,
+                Phase::Idle,
+                "the run ends on schedule regardless"
+            );
         }
     }
 
     #[test]
     fn a_checkin_card_is_off_by_default_and_follows_the_same_rules_when_on() {
-        use crate::quiz::config::{update_setting, QuizSettingKey};
+        use crate::quiz::config::{QuizSettingKey, update_setting};
         let (mut conn, gate) = gate_scenario();
-        assert!(gate.offer_checkin(&conn, &Utc, STUDY()).expect("offer").is_none(), "off by default");
+        assert!(
+            gate.offer_checkin(&conn, &Utc, STUDY())
+                .expect("offer")
+                .is_none(),
+            "off by default"
+        );
         crate::testutil::set_lock_for_test(&conn, false);
-        update_setting(&mut conn, QuizSettingKey::CheckinEnabled, crate::settings::SettingValue::Bool(true), t(19, 0, 0)).expect("on");
+        update_setting(
+            &mut conn,
+            QuizSettingKey::CheckinEnabled,
+            crate::settings::SettingValue::Bool(true),
+            t(19, 0, 0),
+        )
+        .expect("on");
         crate::testutil::set_lock_for_test(&conn, true);
-        let card = gate.offer_checkin(&conn, &Utc, STUDY()).expect("offer").expect("card");
+        let card = gate
+            .offer_checkin(&conn, &Utc, STUDY())
+            .expect("offer")
+            .expect("card");
         assert_eq!(card.context, Context::Checkin);
-        assert!(gate.offer_checkin(&conn, &Utc, BREAK() + MIN).expect("break").is_none());
+        assert!(
+            gate.offer_checkin(&conn, &Utc, BREAK() + MIN)
+                .expect("break")
+                .is_none()
+        );
     }
 
     #[test]
     fn the_session_end_quiz_is_offered_once_per_finished_run_and_a_skip_is_only_recorded() {
         let (mut conn, gate) = gate_scenario();
-        assert!(gate.offer_session_end(&conn, &Utc, BREAK()).expect("offer").is_none(), "the run is still going");
+        assert!(
+            gate.offer_session_end(&conn, &Utc, BREAK())
+                .expect("offer")
+                .is_none(),
+            "the run is still going"
+        );
         tick(&mut conn, t(23, 0, 1));
-        let card = gate.offer_session_end(&conn, &Utc, t(23, 1, 0)).expect("offer").expect("quiz after the run");
-        assert_eq!((card.context, card.questions.len(), card.skippable), (Context::SessionEnd, 3, true));
-        assert!(gate.offer_session_end(&conn, &Utc, t(23, 2, 0)).expect("offer").is_none(), "already pending");
-        let result = gate.answer(&mut conn, &Utc, card.card_id, &[], true, t(23, 3, 0)).expect("skip").expect("result");
+        let card = gate
+            .offer_session_end(&conn, &Utc, t(23, 1, 0))
+            .expect("offer")
+            .expect("quiz after the run");
+        assert_eq!(
+            (card.context, card.questions.len(), card.skippable),
+            (Context::SessionEnd, 3, true)
+        );
+        assert!(
+            gate.offer_session_end(&conn, &Utc, t(23, 2, 0))
+                .expect("offer")
+                .is_none(),
+            "already pending"
+        );
+        let result = gate
+            .answer(&mut conn, &Utc, card.card_id, &[], true, t(23, 3, 0))
+            .expect("skip")
+            .expect("result");
         assert!(result.skipped && result.bonus_points == 0);
-        assert!(gate.offer_session_end(&conn, &Utc, t(23, 4, 0)).expect("offer").is_none(), "a skip uses up the run's quiz");
+        assert!(
+            gate.offer_session_end(&conn, &Utc, t(23, 4, 0))
+                .expect("offer")
+                .is_none(),
+            "a skip uses up the run's quiz"
+        );
         let run_id = runs(&conn)[0].id;
-        assert_eq!(crate::store::quiz::session_end_stats(&conn, run_id).expect("stats"), (0, 0, 3));
-        assert_eq!(crate::quiz::gate::session_end_accuracy(&conn, run_id).expect("accuracy"), (0, 0));
+        assert_eq!(
+            crate::store::quiz::session_end_stats(&conn, run_id).expect("stats"),
+            (0, 0, 3)
+        );
+        assert_eq!(
+            crate::quiz::gate::session_end_accuracy(&conn, run_id).expect("accuracy"),
+            (0, 0)
+        );
         assert_eq!(count(&conn, "point_ledger"), 0);
     }
 
@@ -1533,17 +2531,41 @@ mod quiz_gate {
     fn session_end_accuracy_counts_answers_and_pays_the_bonus_only_for_right_ones() {
         let (mut conn, gate) = gate_scenario();
         tick(&mut conn, t(23, 0, 1));
-        let card = gate.offer_session_end(&conn, &Utc, t(23, 1, 0)).expect("offer").expect("card");
-        let items: Vec<QuizItem> = card.questions.iter().map(|q| crate::store::quiz::get_item(&conn, q.item_id).expect("read").expect("item")).collect();
+        let card = gate
+            .offer_session_end(&conn, &Utc, t(23, 1, 0))
+            .expect("offer")
+            .expect("card");
+        let items: Vec<QuizItem> = card
+            .questions
+            .iter()
+            .map(|q| {
+                crate::store::quiz::get_item(&conn, q.item_id)
+                    .expect("read")
+                    .expect("item")
+            })
+            .collect();
         let mut answers = right_answers(&items);
         answers[1] = wrong_answer();
-        let result = gate.answer(&mut conn, &Utc, card.card_id, &answers, false, t(23, 2, 0)).expect("answer").expect("result");
-        assert_eq!(result.bonus_points, 2 * crate::points::rewards::QUIZ_BONUS_POINTS);
+        let result = gate
+            .answer(&mut conn, &Utc, card.card_id, &answers, false, t(23, 2, 0))
+            .expect("answer")
+            .expect("result");
+        assert_eq!(
+            result.bonus_points,
+            2 * crate::points::rewards::QUIZ_BONUS_POINTS
+        );
         let run_id = runs(&conn)[0].id;
-        assert_eq!(crate::quiz::gate::session_end_accuracy(&conn, run_id).expect("accuracy"), (3, 2));
+        assert_eq!(
+            crate::quiz::gate::session_end_accuracy(&conn, run_id).expect("accuracy"),
+            (3, 2)
+        );
         // Too old: half an hour after the run ended there is no quiz.
         let (mut conn, gate) = gate_scenario();
         tick(&mut conn, t(23, 0, 1));
-        assert!(gate.offer_session_end(&conn, &Utc, t(23, 31, 0)).expect("offer").is_none());
+        assert!(
+            gate.offer_session_end(&conn, &Utc, t(23, 31, 0))
+                .expect("offer")
+                .is_none()
+        );
     }
 }

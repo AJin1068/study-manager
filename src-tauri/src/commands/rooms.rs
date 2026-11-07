@@ -31,13 +31,25 @@ pub async fn rooms_list(service: Service<'_>) -> AppResult<RoomList> {
 }
 
 #[tauri::command]
-pub async fn rooms_create(service: Service<'_>, name: String, nickname: String) -> AppResult<RoomAction> {
+pub async fn rooms_create(
+    service: Service<'_>,
+    name: String,
+    nickname: String,
+) -> AppResult<RoomAction> {
     blocking(&service, move |s| s.create_room(&name, &nickname)).await
 }
 
 #[tauri::command]
-pub async fn rooms_join(service: Service<'_>, code: String, nickname: String, acknowledged: bool) -> AppResult<RoomAction> {
-    blocking(&service, move |s| s.join_room(&code, &nickname, acknowledged)).await
+pub async fn rooms_join(
+    service: Service<'_>,
+    code: String,
+    nickname: String,
+    acknowledged: bool,
+) -> AppResult<RoomAction> {
+    blocking(&service, move |s| {
+        s.join_room(&code, &nickname, acknowledged)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -46,17 +58,28 @@ pub async fn rooms_leave(service: Service<'_>, room_id: String) -> AppResult<Roo
 }
 
 #[tauri::command]
-pub async fn rooms_kick(service: Service<'_>, room_id: String, user_id: String) -> AppResult<RoomAction> {
+pub async fn rooms_kick(
+    service: Service<'_>,
+    room_id: String,
+    user_id: String,
+) -> AppResult<RoomAction> {
     blocking(&service, move |s| s.kick_member(&room_id, &user_id)).await
 }
 
 #[tauri::command]
-pub async fn rooms_create_invite(service: Service<'_>, room_id: String) -> AppResult<InviteOutcome> {
+pub async fn rooms_create_invite(
+    service: Service<'_>,
+    room_id: String,
+) -> AppResult<InviteOutcome> {
     blocking(&service, move |s| s.create_invite(&room_id)).await
 }
 
 #[tauri::command]
-pub async fn rooms_revoke_invite(service: Service<'_>, room_id: String, invite_id: String) -> AppResult<RoomAction> {
+pub async fn rooms_revoke_invite(
+    service: Service<'_>,
+    room_id: String,
+    invite_id: String,
+) -> AppResult<RoomAction> {
     blocking(&service, move |s| s.revoke_invite(&room_id, &invite_id)).await
 }
 
@@ -86,7 +109,11 @@ pub fn rooms_friend_settings(service: Service<'_>) -> AppResult<FriendSettings> 
 }
 
 #[tauri::command]
-pub fn rooms_update_friend_setting(service: Service<'_>, key: FriendSettingKey, value: SettingValue) -> AppResult<UpdateOutcome> {
+pub fn rooms_update_friend_setting(
+    service: Service<'_>,
+    key: FriendSettingKey,
+    value: SettingValue,
+) -> AppResult<UpdateOutcome> {
     service.update_friend_setting(key, value)
 }
 
@@ -96,7 +123,11 @@ pub async fn rooms_share_schedule(service: Service<'_>, room_id: String) -> AppR
 }
 
 #[tauri::command]
-pub async fn rooms_import_together(service: Service<'_>, room_id: String, keys: Vec<String>) -> AppResult<Vec<ImportResult>> {
+pub async fn rooms_import_together(
+    service: Service<'_>,
+    room_id: String,
+    keys: Vec<String>,
+) -> AppResult<Vec<ImportResult>> {
     blocking(&service, move |s| s.import_together(&room_id, &keys)).await
 }
 
@@ -109,7 +140,10 @@ mod tests {
     use crate::rooms::together::{ImportOutcome, ImportResult};
 
     fn fixture() -> Value {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../src/api/fixtures/rooms-contract.json");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../src/api/fixtures/rooms-contract.json"
+        );
         serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json")
     }
 
@@ -120,9 +154,28 @@ mod tests {
     #[test]
     fn room_wire_shapes_match_the_shared_fixture() {
         let f = fixture();
-        let summary = RoomSummary { room_id: "r1".into(), name: "스터디".into(), role: RoomRole::Owner, member_count: 2, capacity: 8 };
-        assert_eq!(json(&RoomList { rooms: vec![summary], stale: false, refreshed_at_ms: Some(10) }), f["list"]);
-        assert_eq!(json(&RoomAction { code: RoomCode::Ok, room_id: Some("r1".into()) }), f["action"]);
+        let summary = RoomSummary {
+            room_id: "r1".into(),
+            name: "스터디".into(),
+            role: RoomRole::Owner,
+            member_count: 2,
+            capacity: 8,
+        };
+        assert_eq!(
+            json(&RoomList {
+                rooms: vec![summary],
+                stale: false,
+                refreshed_at_ms: Some(10)
+            }),
+            f["list"]
+        );
+        assert_eq!(
+            json(&RoomAction {
+                code: RoomCode::Ok,
+                room_id: Some("r1".into())
+            }),
+            f["action"]
+        );
         assert_eq!(
             json(&InviteOutcome {
                 code: RoomCode::Ok,
@@ -140,9 +193,18 @@ mod tests {
             role: RoomRole::Owner,
             is_self: true,
             level: Some(4),
-            presence: PresenceView { kind: PresenceKind::Studying, remaining_sec: Some(600) },
+            presence: PresenceView {
+                kind: PresenceKind::Studying,
+                remaining_sec: Some(600),
+            },
             attempts_today: None,
-            character: Some(CharacterView { species: "cat".into(), hat: None, top: None, accessory: None, hand: None }),
+            character: Some(CharacterView {
+                species: "cat".into(),
+                hat: None,
+                top: None,
+                accessory: None,
+                hand: None,
+            }),
         };
         let hidden = MemberView {
             user_id: "u2".into(),
@@ -150,14 +212,29 @@ mod tests {
             role: RoomRole::Member,
             is_self: false,
             level: None,
-            presence: PresenceView { kind: PresenceKind::Hidden, remaining_sec: None },
+            presence: PresenceView {
+                kind: PresenceKind::Hidden,
+                remaining_sec: None,
+            },
             attempts_today: None,
             character: None,
         };
         let ranking = |minutes: i64| {
             vec![
-                RankRow { user_id: "u1".into(), nickname: "가".into(), is_self: true, minutes: Some(minutes), rank: Some(1) },
-                RankRow { user_id: "u2".into(), nickname: "나".into(), is_self: false, minutes: None, rank: None },
+                RankRow {
+                    user_id: "u1".into(),
+                    nickname: "가".into(),
+                    is_self: true,
+                    minutes: Some(minutes),
+                    rank: Some(1),
+                },
+                RankRow {
+                    user_id: "u2".into(),
+                    nickname: "나".into(),
+                    is_self: false,
+                    minutes: None,
+                    rank: None,
+                },
             ]
         };
         let room = RoomView {
@@ -168,7 +245,14 @@ mod tests {
             members: vec![me, hidden],
             today_ranking: ranking(30),
             week_ranking: ranking(120),
-            invites: vec![InviteView { invite_id: "i1".into(), expires_at_ms: 86_400_000, max_uses: 10, uses: 1, revoked: false, expired: false }],
+            invites: vec![InviteView {
+                invite_id: "i1".into(),
+                expires_at_ms: 86_400_000,
+                max_uses: 10,
+                uses: 1,
+                revoked: false,
+                expired: false,
+            }],
             schedule_updated_at_ms: Some(5),
             schedule: vec![TogetherItem {
                 key: "1794013200000".into(),
@@ -183,7 +267,15 @@ mod tests {
             }],
             fetched_at_ms: 10,
         };
-        assert_eq!(json(&FeedView { room: Some(room), degraded_code: None, last_ok_ms: Some(10), poll_interval_ms: 5_000 }), f["feed"]);
+        assert_eq!(
+            json(&FeedView {
+                room: Some(room),
+                degraded_code: None,
+                last_ok_ms: Some(10),
+                poll_interval_ms: 5_000
+            }),
+            f["feed"]
+        );
         let settings = FriendSettings {
             share_level: true,
             share_status: true,
@@ -194,9 +286,19 @@ mod tests {
         };
         assert_eq!(json(&settings), f["friendSettings"]);
         assert_eq!(
-            json(&ImportResult { key: "1794013200000".into(), outcome: ImportOutcome::Applied, plan_id: Some(3) }),
+            json(&ImportResult {
+                key: "1794013200000".into(),
+                outcome: ImportOutcome::Applied,
+                plan_id: Some(3)
+            }),
             f["importResult"]
         );
-        assert_eq!(json(&DistractionNotice { nickname: "나".into(), at_ms: 5 }), f["notice"]);
+        assert_eq!(
+            json(&DistractionNotice {
+                nickname: "나".into(),
+                at_ms: 5
+            }),
+            f["notice"]
+        );
     }
 }

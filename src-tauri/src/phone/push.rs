@@ -54,7 +54,9 @@ pub struct PushMessage {
 
 impl std::fmt::Debug for PushMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PushMessage").field("id", &self.id).finish_non_exhaustive()
+        f.debug_struct("PushMessage")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
     }
 }
 
@@ -103,9 +105,17 @@ pub fn display_body(received: &str) -> &str {
 
 /// `HH:MM` + the fixed sentence, as `supabase/functions/_shared/detect.ts` words it.
 fn is_missed_sentence(text: &str) -> bool {
-    let Some(clock) = text.strip_suffix(MISSED_SUFFIX) else { return false };
+    let Some(clock) = text.strip_suffix(MISSED_SUFFIX) else {
+        return false;
+    };
     let bytes = clock.as_bytes();
-    if bytes.len() != 5 || bytes[2] != b':' || !bytes.iter().enumerate().all(|(i, b)| i == 2 || b.is_ascii_digit()) {
+    if bytes.len() != 5
+        || bytes[2] != b':'
+        || !bytes
+            .iter()
+            .enumerate()
+            .all(|(i, b)| i == 2 || b.is_ascii_digit())
+    {
         return false;
     }
     let digit = |i: usize| u32::from(bytes[i] - b'0');
@@ -122,7 +132,11 @@ pub struct NtfyPush {
 
 impl NtfyPush {
     pub fn new(server: &str, topic: &str, transport: Arc<dyn HttpTransport>) -> Self {
-        Self { server: server.trim_end_matches('/').to_string(), topic: topic.to_string(), transport }
+        Self {
+            server: server.trim_end_matches('/').to_string(),
+            topic: topic.to_string(),
+            transport,
+        }
     }
 }
 
@@ -135,11 +149,25 @@ struct NtfyLine {
 
 impl PushChannel for NtfyPush {
     fn poll(&self, cursor: &PushCursor) -> Result<Vec<PushMessage>, PushError> {
-        let url = format!("{}/{}/json?poll=1&since={}", self.server, self.topic, cursor.query_value());
-        let request = HttpRequest::new(RequestTag { port: "notify", kind: "ntfy_poll" }, Method::Get, url);
+        let url = format!(
+            "{}/{}/json?poll=1&since={}",
+            self.server,
+            self.topic,
+            cursor.query_value()
+        );
+        let request = HttpRequest::new(
+            RequestTag {
+                port: "notify",
+                kind: "ntfy_poll",
+            },
+            Method::Get,
+            url,
+        );
         let response = self.transport.send(request).map_err(PushError::Transport)?;
         if !response.is_success() {
-            return Err(PushError::Http { status: response.status });
+            return Err(PushError::Http {
+                status: response.status,
+            });
         }
         let text = std::str::from_utf8(&response.body).map_err(|_| PushError::Malformed)?;
         let mut messages = Vec::new();
@@ -149,8 +177,18 @@ impl PushChannel for NtfyPush {
             if parsed.event.as_deref() != Some("message") {
                 continue;
             }
-            let id = parsed.id.filter(|id| !id.is_empty() && id.len() <= MAX_ID_LEN && id.bytes().all(|b| b.is_ascii_alphanumeric())).ok_or(PushError::Malformed)?;
-            messages.push(PushMessage { id, text: parsed.message.unwrap_or_default() });
+            let id = parsed
+                .id
+                .filter(|id| {
+                    !id.is_empty()
+                        && id.len() <= MAX_ID_LEN
+                        && id.bytes().all(|b| b.is_ascii_alphanumeric())
+                })
+                .ok_or(PushError::Malformed)?;
+            messages.push(PushMessage {
+                id,
+                text: parsed.message.unwrap_or_default(),
+            });
             if messages.len() == MAX_MESSAGES_PER_POLL {
                 break;
             }
@@ -169,7 +207,10 @@ pub struct MockPush {
 impl MockPush {
     /// A message arrives on the topic.
     pub fn deliver(&self, id: &str, text: &str) {
-        let message = PushMessage { id: id.to_string(), text: text.to_string() };
+        let message = PushMessage {
+            id: id.to_string(),
+            text: text.to_string(),
+        };
         match self.inbox.lock() {
             Ok(mut inbox) => inbox.push(message),
             Err(poisoned) => poisoned.into_inner().push(message),
@@ -247,11 +288,17 @@ pub enum RelayError {
 /// Pulls new messages and shows each one. The cursor moves past a message only after it was shown,
 /// so a notification the OS refused is tried again on the next poll; the network call is made
 /// without any lock held.
-pub fn relay(channel: &dyn PushChannel, notifier: &dyn LocalNotifier, cursor: &mut PushCursor) -> Result<usize, RelayError> {
+pub fn relay(
+    channel: &dyn PushChannel,
+    notifier: &dyn LocalNotifier,
+    cursor: &mut PushCursor,
+) -> Result<usize, RelayError> {
     let messages = channel.poll(cursor).map_err(RelayError::Push)?;
     let mut shown = 0;
     for message in messages {
-        notifier.show(display_body(&message.text)).map_err(|_| RelayError::Notify)?;
+        notifier
+            .show(display_body(&message.text))
+            .map_err(|_| RelayError::Notify)?;
         *cursor = PushCursor::After(message.id);
         shown += 1;
     }
@@ -266,7 +313,9 @@ mod tests {
     use crate::remote::http::{HostPolicy, HttpResponse, ScriptedTransport};
 
     fn contract() -> Value {
-        serde_json::from_str::<Value>(include_str!("../../../fixtures/notify/contract.json")).expect("contract")["phoneApp"].clone()
+        serde_json::from_str::<Value>(include_str!("../../../fixtures/notify/contract.json"))
+            .expect("contract")["phoneApp"]
+            .clone()
     }
 
     fn cursor_of(raw: &Value) -> PushCursor {
@@ -278,7 +327,13 @@ mod tests {
     }
 
     fn ndjson(lines: &Value) -> String {
-        lines.as_array().expect("lines").iter().map(Value::to_string).collect::<Vec<_>>().join("\n")
+        lines
+            .as_array()
+            .expect("lines")
+            .iter()
+            .map(Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     #[test]
@@ -286,13 +341,28 @@ mod tests {
         for case in contract()["poll"]["requests"].as_array().expect("requests") {
             let name = case["name"].as_str().expect("name");
             let server = case["server"].as_str().expect("server");
-            let transport = Arc::new(ScriptedTransport::new(HostPolicy::configured(["ntfy.sh", "ntfy.example.org"]), vec![Ok(HttpResponse::ok_json(200, ""))]));
-            let channel = NtfyPush::new(server, case["topic"].as_str().expect("topic"), transport.clone());
-            assert_eq!(channel.poll(&cursor_of(&case["cursor"])), Ok(vec![]), "{name}");
+            let transport = Arc::new(ScriptedTransport::new(
+                HostPolicy::configured(["ntfy.sh", "ntfy.example.org"]),
+                vec![Ok(HttpResponse::ok_json(200, ""))],
+            ));
+            let channel = NtfyPush::new(
+                server,
+                case["topic"].as_str().expect("topic"),
+                transport.clone(),
+            );
+            assert_eq!(
+                channel.poll(&cursor_of(&case["cursor"])),
+                Ok(vec![]),
+                "{name}"
+            );
             let seen = transport.requests();
             assert_eq!(seen.len(), 1, "{name}");
             assert_eq!(seen[0].method, Method::Get, "{name}");
-            assert_eq!(seen[0].url, case["expectUrl"].as_str().expect("url"), "{name}");
+            assert_eq!(
+                seen[0].url,
+                case["expectUrl"].as_str().expect("url"),
+                "{name}"
+            );
             assert!(seen[0].body.is_empty(), "{name}");
         }
     }
@@ -301,15 +371,31 @@ mod tests {
     fn a_polled_stream_becomes_local_notifications_with_fixed_bodies() {
         let contract = contract();
         let body = ndjson(&contract["poll"]["response"]);
-        let transport = Arc::new(ScriptedTransport::new(HostPolicy::configured(["ntfy.sh"]), vec![Ok(HttpResponse::ok_json(200, &body))]));
+        let transport = Arc::new(ScriptedTransport::new(
+            HostPolicy::configured(["ntfy.sh"]),
+            vec![Ok(HttpResponse::ok_json(200, &body))],
+        ));
         let channel = NtfyPush::new("https://ntfy.sh", "abcdefghijklmnopqrstuvwx", transport);
         let notifier = MockNotifier::default();
         let mut cursor = PushCursor::Time(0);
 
         assert_eq!(relay(&channel, &notifier, &mut cursor), Ok(3));
-        let expected: Vec<&str> = contract["poll"]["expectBodies"].as_array().expect("bodies").iter().map(|b| b.as_str().expect("body")).collect();
+        let expected: Vec<&str> = contract["poll"]["expectBodies"]
+            .as_array()
+            .expect("bodies")
+            .iter()
+            .map(|b| b.as_str().expect("body"))
+            .collect();
         assert_eq!(notifier.shown(), expected);
-        assert_eq!(cursor, PushCursor::After(contract["poll"]["expectCursorId"].as_str().expect("id").to_string()));
+        assert_eq!(
+            cursor,
+            PushCursor::After(
+                contract["poll"]["expectCursorId"]
+                    .as_str()
+                    .expect("id")
+                    .to_string()
+            )
+        );
     }
 
     #[test]
@@ -321,7 +407,11 @@ mod tests {
             assert_eq!(display_body(text), text);
         }
         for text in bodies["replacedByGeneric"].as_array().expect("replaced") {
-            assert_eq!(display_body(text.as_str().expect("text")), GENERIC_BODY, "{text}");
+            assert_eq!(
+                display_body(text.as_str().expect("text")),
+                GENERIC_BODY,
+                "{text}"
+            );
         }
     }
 
@@ -334,8 +424,16 @@ mod tests {
         let mut cursor = PushCursor::Time(0);
         assert_eq!(relay(&push, &notifier, &mut cursor), Ok(2));
         let shown = notifier.shown();
-        assert!(shown.iter().all(|body| !body.contains("수학") && !body.contains("숙제")), "{shown:?}");
-        assert_eq!(shown, [GENERIC_BODY, "10:30인데 아직 안 앉았어! 신호가 없어요."]);
+        assert!(
+            shown
+                .iter()
+                .all(|body| !body.contains("수학") && !body.contains("숙제")),
+            "{shown:?}"
+        );
+        assert_eq!(
+            shown,
+            [GENERIC_BODY, "10:30인데 아직 안 앉았어! 신호가 없어요."]
+        );
     }
 
     #[test]
@@ -347,8 +445,15 @@ mod tests {
         let mut cursor = PushCursor::Time(0);
 
         notifier.set_failing(true);
-        assert_eq!(relay(&push, &notifier, &mut cursor), Err(RelayError::Notify));
-        assert_eq!(cursor, PushCursor::Time(0), "not advanced past an unshown message");
+        assert_eq!(
+            relay(&push, &notifier, &mut cursor),
+            Err(RelayError::Notify)
+        );
+        assert_eq!(
+            cursor,
+            PushCursor::Time(0),
+            "not advanced past an unshown message"
+        );
 
         notifier.set_failing(false);
         assert_eq!(relay(&push, &notifier, &mut cursor), Ok(2));
@@ -364,26 +469,44 @@ mod tests {
             (Ok(HttpResponse::ok_json(403, "no")), "http_error"),
             (Err(TransportError::Timeout), "timeout"),
             (Ok(HttpResponse::ok_json(200, "not json")), "malformed"),
-            (Ok(HttpResponse::ok_json(200, r#"{"event":"message","message":"x"}"#)), "malformed"),
+            (
+                Ok(HttpResponse::ok_json(
+                    200,
+                    r#"{"event":"message","message":"x"}"#,
+                )),
+                "malformed",
+            ),
         ];
         for (step, code) in cases {
-            let transport = Arc::new(ScriptedTransport::new(HostPolicy::configured(["ntfy.sh"]), vec![step]));
+            let transport = Arc::new(ScriptedTransport::new(
+                HostPolicy::configured(["ntfy.sh"]),
+                vec![step],
+            ));
             let channel = NtfyPush::new("https://ntfy.sh", "abcdefghijklmnopqrstuvwx", transport);
             match relay(&channel, &notifier, &mut cursor) {
                 Err(RelayError::Push(err)) => assert_eq!(err.code(), code),
                 other => panic!("{code}: {other:?}"),
             }
         }
-        let strict = Arc::new(ScriptedTransport::new(HostPolicy::configured(["ntfy.sh"]), vec![]));
+        let strict = Arc::new(ScriptedTransport::new(
+            HostPolicy::configured(["ntfy.sh"]),
+            vec![],
+        ));
         let elsewhere = NtfyPush::new("https://other.example", "t", strict.clone());
-        assert_eq!(elsewhere.poll(&cursor).expect_err("denied").code(), "host_denied");
+        assert_eq!(
+            elsewhere.poll(&cursor).expect_err("denied").code(),
+            "host_denied"
+        );
         assert!(strict.requests().is_empty());
         assert!(notifier.shown().is_empty());
     }
 
     #[test]
     fn debug_output_of_a_message_does_not_contain_its_text() {
-        let message = PushMessage { id: "a1".into(), text: "비밀 과목".into() };
+        let message = PushMessage {
+            id: "a1".into(),
+            text: "비밀 과목".into(),
+        };
         assert!(!format!("{message:?}").contains("비밀"));
     }
 }

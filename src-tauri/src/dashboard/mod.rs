@@ -191,11 +191,14 @@ pub fn achieved(planned_ms: i64, actual_ms: i64) -> bool {
 
 /// Streak ending at `today` over `(planned, actual)` per date; see the module notes.
 pub fn streak_days(days: &BTreeMap<NaiveDate, (i64, i64)>, today: NaiveDate) -> i64 {
-    let Some(earliest) = days.keys().next().copied() else { return 0 };
+    let Some(earliest) = days.keys().next().copied() else {
+        return 0;
+    };
     let mut streak = 0;
     let mut day = today;
     while day >= earliest && (today - day).num_days() <= STREAK_LOOKBACK_DAYS {
-        if let Some((planned, actual)) = days.get(&day).copied().filter(|(planned, _)| *planned > 0) {
+        if let Some((planned, actual)) = days.get(&day).copied().filter(|(planned, _)| *planned > 0)
+        {
             if achieved(planned, actual) {
                 streak += 1;
             } else if day != today {
@@ -239,7 +242,10 @@ pub fn overlap_ms(a: Vec<Interval>, b: Vec<Interval>) -> i64 {
 /// Weekday (Monday 0) and hour of a timestamp in `tz`.
 fn weekday_hour<Tz: TimeZone>(tz: &Tz, at_ms: i64) -> Option<(usize, usize)> {
     let local: DateTime<Tz> = tz.timestamp_millis_opt(at_ms).single()?;
-    Some((usize::try_from(local.weekday().num_days_from_monday()).ok()?, usize::try_from(local.hour()).ok()?))
+    Some((
+        usize::try_from(local.weekday().num_days_from_monday()).ok()?,
+        usize::try_from(local.hour()).ok()?,
+    ))
 }
 
 /// Deviation counts per local weekday and hour. Timestamps that do not map to one local time
@@ -287,7 +293,13 @@ fn extras<Tz: TimeZone>(
             continue;
         }
         let planned_ms = o.sets * modes.config(o.level)?.study_min * 60_000;
-        out.push((o.clone(), Extra { date: o.date, planned_ms }));
+        out.push((
+            o.clone(),
+            Extra {
+                date: o.date,
+                planned_ms,
+            },
+        ));
     }
     Ok(out)
 }
@@ -301,7 +313,12 @@ struct DayAcc {
 
 fn fold_days(runs: &[RunFact], extras: &[Extra]) -> BTreeMap<String, DayAcc> {
     let mut days: BTreeMap<String, DayAcc> = BTreeMap::new();
-    let empty = || DayAcc { planned_ms: 0, actual_ms: 0, studied_ms: 0, closed_credited_ms: 0 };
+    let empty = || DayAcc {
+        planned_ms: 0,
+        actual_ms: 0,
+        studied_ms: 0,
+        closed_credited_ms: 0,
+    };
     for run in runs {
         let day = days.entry(run.date.clone()).or_insert_with(empty);
         day.planned_ms += run.planned_ms;
@@ -310,14 +327,22 @@ fn fold_days(runs: &[RunFact], extras: &[Extra]) -> BTreeMap<String, DayAcc> {
         day.closed_credited_ms += run.closed_credited_ms;
     }
     for extra in extras {
-        days.entry(extra.date.clone()).or_insert_with(empty).planned_ms += extra.planned_ms;
+        days.entry(extra.date.clone())
+            .or_insert_with(empty)
+            .planned_ms += extra.planned_ms;
     }
     days
 }
 
 fn day_stat(date: NaiveDate, acc: Option<&DayAcc>) -> DayStat {
-    let (planned, actual, studied, credited) =
-        acc.map_or((0, 0, 0, 0), |a| (a.planned_ms, a.actual_ms, a.studied_ms, a.closed_credited_ms));
+    let (planned, actual, studied, credited) = acc.map_or((0, 0, 0, 0), |a| {
+        (
+            a.planned_ms,
+            a.actual_ms,
+            a.studied_ms,
+            a.closed_credited_ms,
+        )
+    });
     DayStat {
         date: date_str(date),
         weekday: i64::from(date.weekday().num_days_from_monday()),
@@ -332,7 +357,11 @@ fn day_stat(date: NaiveDate, acc: Option<&DayAcc>) -> DayStat {
 // ---- today ----
 
 /// Today's view. Settles the point ledger first so level and stage are current.
-pub fn today<Tz: TimeZone>(conn: &mut Connection, tz: &Tz, now_ms: i64) -> AppResult<TodayDashboard> {
+pub fn today<Tz: TimeZone>(
+    conn: &mut Connection,
+    tz: &Tz,
+    now_ms: i64,
+) -> AppResult<TodayDashboard> {
     let today = local_date(tz, now_ms)?;
     let lookback = today - Duration::days(STREAK_LOOKBACK_DAYS);
     let runs = queries::run_facts(conn, &date_str(lookback), &date_str(today))?;
@@ -359,7 +388,12 @@ pub fn today<Tz: TimeZone>(conn: &mut Connection, tz: &Tz, now_ms: i64) -> AppRe
 }
 
 /// The earliest plan that starts after `now_ms` and has not been run yet.
-fn next_plan<Tz: TimeZone>(conn: &Connection, tz: &Tz, today: NaiveDate, now_ms: i64) -> AppResult<Option<NextPlan>> {
+fn next_plan<Tz: TimeZone>(
+    conn: &Connection,
+    tz: &Tz,
+    today: NaiveDate,
+    now_ms: i64,
+) -> AppResult<Option<NextPlan>> {
     let horizon = today + Duration::days(NEXT_PLAN_HORIZON_DAYS);
     let mut upcoming: Vec<plan::Occurrence> = extras(conn, tz, today, horizon)?
         .into_iter()
@@ -383,11 +417,16 @@ pub fn week<Tz: TimeZone>(conn: &Connection, tz: &Tz, now_ms: i64) -> AppResult<
     let monday = today - Duration::days(i64::from(today.weekday().num_days_from_monday()));
     let sunday = monday + Duration::days(6);
     let runs = queries::run_facts(conn, &date_str(monday), &date_str(sunday))?;
-    let extra_rows: Vec<Extra> = extras(conn, tz, monday, sunday)?.into_iter().map(|(_, e)| e).collect();
+    let extra_rows: Vec<Extra> = extras(conn, tz, monday, sunday)?
+        .into_iter()
+        .map(|(_, e)| e)
+        .collect();
     let folded = fold_days(&runs, &extra_rows);
 
-    let days: Vec<DayStat> =
-        (0..7).map(|offset| monday + Duration::days(offset)).map(|d| day_stat(d, folded.get(&date_str(d)))).collect();
+    let days: Vec<DayStat> = (0..7)
+        .map(|offset| monday + Duration::days(offset))
+        .map(|d| day_stat(d, folded.get(&date_str(d))))
+        .collect();
     let planned_ms: i64 = days.iter().map(|d| d.planned_ms).sum();
     let capped_actual: i64 = days.iter().map(|d| d.actual_ms.min(d.planned_ms)).sum();
 
@@ -398,9 +437,16 @@ pub fn week<Tz: TimeZone>(conn: &Connection, tz: &Tz, now_ms: i64) -> AppResult<
     let mut by_subject: Vec<SubjectTime> = subjects
         .into_iter()
         .filter(|(_, ms)| *ms > 0)
-        .map(|(subject, actual_ms)| SubjectTime { subject: subject.to_string(), actual_ms })
+        .map(|(subject, actual_ms)| SubjectTime {
+            subject: subject.to_string(),
+            actual_ms,
+        })
         .collect();
-    by_subject.sort_by(|a, b| b.actual_ms.cmp(&a.actual_ms).then_with(|| a.subject.cmp(&b.subject)));
+    by_subject.sort_by(|a, b| {
+        b.actual_ms
+            .cmp(&a.actual_ms)
+            .then_with(|| a.subject.cmp(&b.subject))
+    });
 
     Ok(WeekDashboard {
         week_start: date_str(monday),
@@ -436,11 +482,15 @@ pub fn weakness<Tz: TimeZone>(conn: &Connection, tz: &Tz, now_ms: i64) -> AppRes
     let summary = downtime::summarize(&records, from_ms, to_ms);
     let off: Vec<Interval> = store::list_downtime_intervals(conn, from_ms, to_ms)?
         .into_iter()
-        .map(|d| Interval { start: d.start.max(from_ms), end: d.end.min(to_ms) })
+        .map(|d| Interval {
+            start: d.start.max(from_ms),
+            end: d.end.min(to_ms),
+        })
         .collect();
     let planned = queries::planned_windows(conn, from_ms, to_ms)?;
 
-    let (emergency_pass, skip_today, early_release, aborted_runs) = queries::release_counts(conn, from_ms, to_ms)?;
+    let (emergency_pass, skip_today, early_release, aborted_runs) =
+        queries::release_counts(conn, from_ms, to_ms)?;
     Ok(Weakness {
         from_ms,
         to_ms,
@@ -456,7 +506,12 @@ pub fn weakness<Tz: TimeZone>(conn: &Connection, tz: &Tz, now_ms: i64) -> AppRes
             forced_quit_count: summary.forced_quit_count,
             planned_overlap_ms: overlap_ms(off, planned),
         },
-        releases: ReleaseUsage { emergency_pass, skip_today, early_release, aborted_runs },
+        releases: ReleaseUsage {
+            emergency_pass,
+            skip_today,
+            early_release,
+            aborted_runs,
+        },
         phone: phone_stat(conn, from_ms, to_ms)?,
     })
 }
@@ -464,12 +519,22 @@ pub fn weakness<Tz: TimeZone>(conn: &Connection, tz: &Tz, now_ms: i64) -> AppRes
 /// The phone's gaps (clipped to the window, each stretch of time counted once) and pick-up counts.
 fn phone_stat(conn: &Connection, from_ms: i64, to_ms: i64) -> AppResult<PhoneStat> {
     let gaps = store::phone::gaps_between(conn, from_ms, to_ms)?;
-    let spans: Vec<Interval> = gaps.iter().map(|g| Interval { start: g.start_ms.max(from_ms), end: g.end_ms.min(to_ms) }).collect();
-    let (pickup_sets_reported, pickup_sets_with_pickups, pickups_total) = store::phone::pickup_totals(conn, from_ms, to_ms)?;
+    let spans: Vec<Interval> = gaps
+        .iter()
+        .map(|g| Interval {
+            start: g.start_ms.max(from_ms),
+            end: g.end_ms.min(to_ms),
+        })
+        .collect();
+    let (pickup_sets_reported, pickup_sets_with_pickups, pickups_total) =
+        store::phone::pickup_totals(conn, from_ms, to_ms)?;
     Ok(PhoneStat {
         unreachable_ms: merge(spans).iter().map(|i| (i.end - i.start).max(0)).sum(),
         gaps: i64::try_from(gaps.len()).unwrap_or(0),
-        service_disabled_gaps: i64::try_from(gaps.iter().filter(|g| g.kind == "service_disabled").count()).unwrap_or(0),
+        service_disabled_gaps: i64::try_from(
+            gaps.iter().filter(|g| g.kind == "service_disabled").count(),
+        )
+        .unwrap_or(0),
         pickup_sets_reported,
         pickup_sets_with_pickups,
         pickups_total,

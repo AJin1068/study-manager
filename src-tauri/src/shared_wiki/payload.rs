@@ -47,7 +47,7 @@ egress_payload!(SaveMergedPageArgs);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::remote::payload::{forbidden_key, EgressPayload, CANARY_TITLE, CANARY_URL};
+    use crate::remote::payload::{CANARY_TITLE, CANARY_URL, EgressPayload, forbidden_key};
 
     fn json<P: EgressPayload>(p: &P) -> serde_json::Value {
         serde_json::to_value(p).expect("serialize")
@@ -56,9 +56,23 @@ mod tests {
     #[test]
     fn every_argument_is_an_rpc_parameter_and_none_is_a_forbidden_key() {
         let samples = [
-            json(&PublishSharedPageArgs { room_id: "r".into(), page_name: "p".into(), body: "b".into(), base_revision: None, allow_llm_merge: false }),
-            json(&WithdrawSharedPageArgs { room_id: "r".into(), page_name: "p".into() }),
-            json(&SaveMergedPageArgs { room_id: "r".into(), page_name: "p".into(), body: "b".into(), source_revisions: vec!["x".into()] }),
+            json(&PublishSharedPageArgs {
+                room_id: "r".into(),
+                page_name: "p".into(),
+                body: "b".into(),
+                base_revision: None,
+                allow_llm_merge: false,
+            }),
+            json(&WithdrawSharedPageArgs {
+                room_id: "r".into(),
+                page_name: "p".into(),
+            }),
+            json(&SaveMergedPageArgs {
+                room_id: "r".into(),
+                page_name: "p".into(),
+                body: "b".into(),
+                source_revisions: vec!["x".into()],
+            }),
         ];
         for sample in samples {
             let map = sample.as_object().expect("object");
@@ -66,13 +80,22 @@ mod tests {
             for key in map.keys() {
                 assert!(key.starts_with("p_") && !forbidden_key(key), "{key}");
             }
-            assert!(!sample.to_string().contains(CANARY_TITLE) && !sample.to_string().contains(CANARY_URL));
+            assert!(
+                !sample.to_string().contains(CANARY_TITLE)
+                    && !sample.to_string().contains(CANARY_URL)
+            );
         }
     }
 
     #[test]
     fn debug_hides_the_body() {
-        let args = PublishSharedPageArgs { room_id: "r".into(), page_name: "p".into(), body: "SECRET-BODY".into(), base_revision: None, allow_llm_merge: true };
+        let args = PublishSharedPageArgs {
+            room_id: "r".into(),
+            page_name: "p".into(),
+            body: "SECRET-BODY".into(),
+            base_revision: None,
+            allow_llm_merge: true,
+        };
         assert!(!format!("{args:?}").contains("SECRET-BODY"));
     }
 }

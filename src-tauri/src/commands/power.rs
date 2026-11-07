@@ -22,7 +22,9 @@ pub struct AutostartStatus {
 
 #[tauri::command]
 pub fn get_autostart_status(state: State<'_, AppState>) -> AppResult<AutostartStatus> {
-    Ok(AutostartStatus { enabled: state.autostart.is_enabled()? })
+    Ok(AutostartStatus {
+        enabled: state.autostart.is_enabled()?,
+    })
 }
 
 #[tauri::command]

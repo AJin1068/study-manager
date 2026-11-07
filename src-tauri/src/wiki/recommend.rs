@@ -45,7 +45,14 @@ pub enum Reason {
 
 impl Reason {
     #[cfg(test)]
-    pub const ALL: [Reason; 6] = [Reason::Empty, Reason::LowAccuracy, Reason::Stale, Reason::Hard, Reason::Review, Reason::Chosen];
+    pub const ALL: [Reason; 6] = [
+        Reason::Empty,
+        Reason::LowAccuracy,
+        Reason::Stale,
+        Reason::Hard,
+        Reason::Review,
+        Reason::Chosen,
+    ];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -59,7 +66,16 @@ impl Reason {
     }
 
     pub fn parse(raw: &str) -> Option<Self> {
-        [Reason::Empty, Reason::LowAccuracy, Reason::Stale, Reason::Hard, Reason::Review, Reason::Chosen].into_iter().find(|r| r.as_str() == raw)
+        [
+            Reason::Empty,
+            Reason::LowAccuracy,
+            Reason::Stale,
+            Reason::Hard,
+            Reason::Review,
+            Reason::Chosen,
+        ]
+        .into_iter()
+        .find(|r| r.as_str() == raw)
     }
 }
 
@@ -124,7 +140,12 @@ fn tier(p: &PageStat, now_ms: i64) -> u8 {
 }
 
 fn priority_key(p: &PageStat, now_ms: i64) -> (u8, i64, i64, i64) {
-    (tier(p, now_ms), accuracy_pct(p).unwrap_or(50), p.updated_at_ms, p.page_id)
+    (
+        tier(p, now_ms),
+        accuracy_pct(p).unwrap_or(50),
+        p.updated_at_ms,
+        p.page_id,
+    )
 }
 
 /// Higher is harder: wrong answers and a long page. An unanswered page counts as middling.
@@ -149,13 +170,22 @@ pub fn rank(pages: &[PageStat], now_ms: i64) -> Vec<Pick> {
     ordered.sort_by_key(|p| priority_key(p, now_ms));
     ordered
         .into_iter()
-        .map(|p| Pick { page_id: p.page_id, page_name: p.page_name.clone(), reason: reason_for(p, now_ms, Reason::Review) })
+        .map(|p| Pick {
+            page_id: p.page_id,
+            page_name: p.page_name.clone(),
+            reason: reason_for(p, now_ms, Reason::Review),
+        })
         .collect()
 }
 
 /// Gives each slot (earliest first) one page, each page at most once. No pages means no
 /// assignments; more slots than pages leaves the last slots without one.
-pub fn recommend_next(pages: &[PageStat], focus_by_hour: &[FocusHour], slots: &[Slot], now_ms: i64) -> Vec<Assignment> {
+pub fn recommend_next(
+    pages: &[PageStat],
+    focus_by_hour: &[FocusHour],
+    slots: &[Slot],
+    now_ms: i64,
+) -> Vec<Assignment> {
     let mut pool: Vec<&PageStat> = pages.iter().collect();
     pool.sort_by_key(|p| priority_key(p, now_ms));
     let mut slots: Vec<&Slot> = slots.iter().collect();
@@ -166,11 +196,18 @@ pub fn recommend_next(pages: &[PageStat], focus_by_hour: &[FocusHour], slots: &[
         if pool.is_empty() {
             break;
         }
-        let score = focus_by_hour.iter().find(|f| f.hour == slot.hour).map(|f| f.score_pct);
+        let score = focus_by_hour
+            .iter()
+            .find(|f| f.hour == slot.hour)
+            .map(|f| f.score_pct);
         let (index, fallback) = match score {
             Some(s) if s >= HIGH_FOCUS_PCT => {
                 // Hardest first; the priority order breaks ties because `pool` is sorted by it.
-                let best = pool.iter().enumerate().max_by_key(|(i, p)| (difficulty(p), std::cmp::Reverse(*i))).map(|(i, _)| i);
+                let best = pool
+                    .iter()
+                    .enumerate()
+                    .max_by_key(|(i, p)| (difficulty(p), std::cmp::Reverse(*i)))
+                    .map(|(i, _)| i);
                 (best.unwrap_or(0), Reason::Hard)
             }
             Some(s) if s < LOW_FOCUS_PCT => {
@@ -202,7 +239,9 @@ pub fn recommend_next(pages: &[PageStat], focus_by_hour: &[FocusHour], slots: &[
 pub fn focus_by_hour<Tz: TimeZone>(tz: &Tz, minutes: &[(i64, i64, i64, i64)]) -> Vec<FocusHour> {
     let mut totals = [(0_i64, 0_i64); 24];
     for &(at_ms, credited, away, idle) in minutes {
-        let Some(local) = tz.timestamp_millis_opt(at_ms).single() else { continue };
+        let Some(local) = tz.timestamp_millis_opt(at_ms).single() else {
+            continue;
+        };
         let slot = &mut totals[usize::try_from(local.hour()).unwrap_or(0).min(23)];
         slot.0 += credited;
         slot.1 += credited + away + idle;
@@ -211,7 +250,10 @@ pub fn focus_by_hour<Tz: TimeZone>(tz: &Tz, minutes: &[(i64, i64, i64, i64)]) ->
         .iter()
         .enumerate()
         .filter(|(_, (_, all))| *all >= MIN_FOCUS_SAMPLE_MS)
-        .map(|(hour, (credited, all))| FocusHour { hour: u32::try_from(hour).unwrap_or(0), score_pct: credited * 100 / all })
+        .map(|(hour, (credited, all))| FocusHour {
+            hour: u32::try_from(hour).unwrap_or(0),
+            score_pct: credited * 100 / all,
+        })
         .collect()
 }
 
@@ -225,7 +267,11 @@ pub fn page_stats(conn: &Connection, subject_id: i64) -> AppResult<Vec<PageStat>
     wiki_repo::list_pages(conn, subject_id)?
         .into_iter()
         .map(|page| {
-            let body_chars = fs.read_page(&subject.slug, &page.page_name).ok().flatten().map_or(0, |b| b.chars().count());
+            let body_chars = fs
+                .read_page(&subject.slug, &page.page_name)
+                .ok()
+                .flatten()
+                .map_or(0, |b| b.chars().count());
             Ok(PageStat {
                 page_id: page.id,
                 page_name: page.page_name,
@@ -239,13 +285,24 @@ pub fn page_stats(conn: &Connection, subject_id: i64) -> AppResult<Vec<PageStat>
 }
 
 /// Focus by local hour over the last four weeks.
-pub fn focus_hours<Tz: TimeZone>(conn: &Connection, tz: &Tz, now_ms: i64) -> AppResult<Vec<FocusHour>> {
-    Ok(focus_by_hour(tz, &repo::focus_minutes_since(conn, now_ms - FOCUS_LOOKBACK_MS)?))
+pub fn focus_hours<Tz: TimeZone>(
+    conn: &Connection,
+    tz: &Tz,
+    now_ms: i64,
+) -> AppResult<Vec<FocusHour>> {
+    Ok(focus_by_hour(
+        tz,
+        &repo::focus_minutes_since(conn, now_ms - FOCUS_LOOKBACK_MS)?,
+    ))
 }
 
 /// The pages of a subject to study next, most urgent first (at most `limit`). Empty when the
 /// subject has no pages.
-pub fn recommend_for_subject(conn: &Connection, subject_id: i64, now_ms: i64) -> AppResult<Vec<Pick>> {
+pub fn recommend_for_subject(
+    conn: &Connection,
+    subject_id: i64,
+    now_ms: i64,
+) -> AppResult<Vec<Pick>> {
     let mut picks = rank(&page_stats(conn, subject_id)?, now_ms);
     picks.truncate(PICK_LIMIT);
     Ok(picks)
@@ -262,11 +319,22 @@ mod tests {
     const DAY: i64 = 24 * 60 * 60 * 1000;
 
     fn page(id: i64, chars: usize, total: i64, correct: i64, age_days: i64) -> PageStat {
-        PageStat { page_id: id, page_name: format!("p{id}"), body_chars: chars, quiz_total: total, quiz_correct: correct, updated_at_ms: NOW - age_days * DAY }
+        PageStat {
+            page_id: id,
+            page_name: format!("p{id}"),
+            body_chars: chars,
+            quiz_total: total,
+            quiz_correct: correct,
+            updated_at_ms: NOW - age_days * DAY,
+        }
     }
 
     fn slot(plan: i64, hour: u32) -> Slot {
-        Slot { plan_id: plan, date: "2026-11-07".into(), hour }
+        Slot {
+            plan_id: plan,
+            date: "2026-11-07".into(),
+            hour,
+        }
     }
 
     fn ids(a: &[Assignment]) -> Vec<i64> {
@@ -275,10 +343,26 @@ mod tests {
 
     #[test]
     fn empty_beats_often_wrong_beats_stale_beats_the_rest() {
-        let pages = [page(1, 900, 10, 9, 1), page(2, 900, 10, 9, 30), page(3, 900, 10, 2, 1), page(4, 20, 0, 0, 1)];
+        let pages = [
+            page(1, 900, 10, 9, 1),
+            page(2, 900, 10, 9, 30),
+            page(3, 900, 10, 2, 1),
+            page(4, 20, 0, 0, 1),
+        ];
         let picks = rank(&pages, NOW);
-        assert_eq!(picks.iter().map(|p| p.page_id).collect::<Vec<_>>(), vec![4, 3, 2, 1]);
-        assert_eq!(picks.iter().map(|p| p.reason).collect::<Vec<_>>(), vec![Reason::Empty, Reason::LowAccuracy, Reason::Stale, Reason::Review]);
+        assert_eq!(
+            picks.iter().map(|p| p.page_id).collect::<Vec<_>>(),
+            vec![4, 3, 2, 1]
+        );
+        assert_eq!(
+            picks.iter().map(|p| p.reason).collect::<Vec<_>>(),
+            vec![
+                Reason::Empty,
+                Reason::LowAccuracy,
+                Reason::Stale,
+                Reason::Review
+            ]
+        );
     }
 
     #[test]
@@ -290,33 +374,67 @@ mod tests {
     #[test]
     fn a_well_focused_hour_gets_the_hardest_page_and_a_poorly_focused_hour_gets_review() {
         // 1: easy reviewed page, 2: hard and long, 3: fine page with questions.
-        let pages = [page(1, 400, 10, 10, 1), page(2, 2400, 10, 7, 1), page(3, 800, 10, 8, 1)];
-        let focus = [FocusHour { hour: 9, score_pct: 85 }, FocusHour { hour: 22, score_pct: 30 }];
+        let pages = [
+            page(1, 400, 10, 10, 1),
+            page(2, 2400, 10, 7, 1),
+            page(3, 800, 10, 8, 1),
+        ];
+        let focus = [
+            FocusHour {
+                hour: 9,
+                score_pct: 85,
+            },
+            FocusHour {
+                hour: 22,
+                score_pct: 30,
+            },
+        ];
         let out = recommend_next(&pages, &focus, &[slot(10, 9), slot(11, 22)], NOW);
         assert_eq!(ids(&out), vec![2, 1]);
-        assert_eq!((out[0].reason, out[1].reason), (Reason::Hard, Reason::Review));
+        assert_eq!(
+            (out[0].reason, out[1].reason),
+            (Reason::Hard, Reason::Review)
+        );
     }
 
     #[test]
     fn an_unknown_hour_follows_the_priority_order_and_slots_go_earliest_first() {
         let pages = [page(1, 900, 10, 9, 1), page(2, 20, 0, 0, 1)];
         let out = recommend_next(&pages, &[], &[slot(11, 15), slot(10, 8)], NOW);
-        assert_eq!(out.iter().map(|a| (a.plan_id, a.page_id)).collect::<Vec<_>>(), vec![(10, 2), (11, 1)]);
+        assert_eq!(
+            out.iter()
+                .map(|a| (a.plan_id, a.page_id))
+                .collect::<Vec<_>>(),
+            vec![(10, 2), (11, 1)]
+        );
     }
 
     #[test]
     fn a_page_is_assigned_once_and_no_pages_gives_nothing() {
         let pages = [page(1, 900, 0, 0, 1)];
-        assert_eq!(recommend_next(&pages, &[], &[slot(1, 9), slot(2, 10)], NOW).len(), 1);
+        assert_eq!(
+            recommend_next(&pages, &[], &[slot(1, 9), slot(2, 10)], NOW).len(),
+            1
+        );
         assert!(recommend_next(&[], &[], &[slot(1, 9)], NOW).is_empty());
     }
 
     #[test]
     fn the_result_is_deterministic() {
-        let pages = [page(1, 900, 4, 2, 3), page(2, 900, 4, 2, 3), page(3, 900, 4, 2, 3)];
-        let focus = [FocusHour { hour: 9, score_pct: 90 }];
+        let pages = [
+            page(1, 900, 4, 2, 3),
+            page(2, 900, 4, 2, 3),
+            page(3, 900, 4, 2, 3),
+        ];
+        let focus = [FocusHour {
+            hour: 9,
+            score_pct: 90,
+        }];
         let a = recommend_next(&pages, &focus, &[slot(1, 9), slot(2, 9)], NOW);
-        assert_eq!(a, recommend_next(&pages, &focus, &[slot(1, 9), slot(2, 9)], NOW));
+        assert_eq!(
+            a,
+            recommend_next(&pages, &focus, &[slot(1, 9), slot(2, 9)], NOW)
+        );
         assert_eq!(ids(&a), vec![1, 2], "ties keep the priority order");
     }
 
@@ -330,13 +448,25 @@ mod tests {
         }
         rows.push((base + 14 * hour_ms, 60_000, 0, 0)); // hour 14: one minute only
         let out = focus_by_hour(&Utc, &rows);
-        assert_eq!(out, vec![FocusHour { hour: 9, score_pct: 90 }]);
+        assert_eq!(
+            out,
+            vec![FocusHour {
+                hour: 9,
+                score_pct: 90
+            }]
+        );
     }
 
     #[test]
     fn reasons_match_the_schema_check_list() {
         let conn = crate::db::open_in_memory().expect("db");
-        let sql: String = conn.query_row("SELECT sql FROM sqlite_master WHERE name = 'topic_assignment'", [], |r| r.get(0)).expect("schema");
+        let sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE name = 'topic_assignment'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("schema");
         for r in Reason::ALL {
             assert!(sql.contains(&format!("'{}'", r.as_str())), "{}", r.as_str());
             assert_eq!(Reason::parse(r.as_str()), Some(r));

@@ -46,8 +46,13 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 }
 
 pub fn hash_occurrences(rows: &[OccurrenceRow]) -> AppResult<String> {
-    let canonical = serde_json::to_string(rows).map_err(|e| AppError::Internal(format!("snapshot encode: {e}")))?;
-    Ok(format!("v1-{:016x}-{}", fnv1a(canonical.as_bytes()), rows.len()))
+    let canonical = serde_json::to_string(rows)
+        .map_err(|e| AppError::Internal(format!("snapshot encode: {e}")))?;
+    Ok(format!(
+        "v1-{:016x}-{}",
+        fnv1a(canonical.as_bytes()),
+        rows.len()
+    ))
 }
 
 struct Collector {
@@ -60,7 +65,14 @@ impl Collector {
     /// plan rows, which is what keeps one alert per occurrence. A clash (should not happen) gets
     /// the plan id appended instead of being sent, because the server rejects a snapshot with a
     /// duplicate key as a whole.
-    fn push(&mut self, plan: &Plan, key: String, start_at_utc_ms: i64, sets: i64, status: &'static str) {
+    fn push(
+        &mut self,
+        plan: &Plan,
+        key: String,
+        start_at_utc_ms: i64,
+        sets: i64,
+        status: &'static str,
+    ) {
         let mut key = key;
         if !self.keys.insert(key.clone()) {
             key = format!("{key}:p{}", plan.id);
@@ -95,13 +107,20 @@ pub fn build_snapshot<Tz: TimeZone>(
         .ok_or_else(|| AppError::Internal("timestamp has no local date".into()))?;
     let first = today - Duration::days(LOOKBACK_DAYS);
     let last = today + Duration::days(horizon_days.max(1) - 1);
-    let mut out = Collector { rows: Vec::new(), keys: HashSet::new() };
+    let mut out = Collector {
+        rows: Vec::new(),
+        keys: HashSet::new(),
+    };
 
     let mut day = first;
     while day <= last {
         for occurrence in plan::occurrences_on(tz, plans, exceptions, modes, day)? {
-            let skipped = skips.iter().any(|s| s.date == occurrence.date && occurrence.planned_end_ms > s.at_ms);
-            let Some(owner) = plans.iter().find(|p| p.id == occurrence.plan_id) else { continue };
+            let skipped = skips
+                .iter()
+                .any(|s| s.date == occurrence.date && occurrence.planned_end_ms > s.at_ms);
+            let Some(owner) = plans.iter().find(|p| p.id == occurrence.plan_id) else {
+                continue;
+            };
             out.push(
                 owner,
                 format!("s{}:{}", occurrence.series_id, occurrence.source_date),
@@ -116,21 +135,45 @@ pub fn build_snapshot<Tz: TimeZone>(
     // A cancelled or moved-away slot is sent too, as itself: it tells the server "nothing is due
     // here", which is what keeps it from alerting about a slot the user gave up.
     for exception in exceptions {
-        let Some(owner) = plans.iter().find(|p| p.id == exception.plan_id && p.deleted_at_ms.is_none()) else { continue };
+        let Some(owner) = plans
+            .iter()
+            .find(|p| p.id == exception.plan_id && p.deleted_at_ms.is_none())
+        else {
+            continue;
+        };
         let date = plan::parse_date(&exception.date)?;
         if date < first || date > last || !plan::is_base_date(owner, date)? {
             continue;
         }
         let start = plan::local_to_ms(tz, date, plan::parse_time(&owner.start_time)?)?;
         match exception.kind {
-            ExceptionKind::Cancelled => out.push(owner, format!("s{}:{}", owner.series_id, exception.date), start, owner.sets, "canceled"),
-            ExceptionKind::Moved => out.push(owner, format!("s{}:{}:from", owner.series_id, exception.date), start, owner.sets, "moved"),
+            ExceptionKind::Cancelled => out.push(
+                owner,
+                format!("s{}:{}", owner.series_id, exception.date),
+                start,
+                owner.sets,
+                "canceled",
+            ),
+            ExceptionKind::Moved => out.push(
+                owner,
+                format!("s{}:{}:from", owner.series_id, exception.date),
+                start,
+                owner.sets,
+                "moved",
+            ),
         }
     }
 
-    out.rows.sort_by(|a, b| (a.start_at_utc_ms, &a.occurrence_key).cmp(&(b.start_at_utc_ms, &b.occurrence_key)));
+    out.rows.sort_by(|a, b| {
+        (a.start_at_utc_ms, &a.occurrence_key).cmp(&(b.start_at_utc_ms, &b.occurrence_key))
+    });
     let hash = hash_occurrences(&out.rows)?;
-    Ok(Snapshot { hash, generated_at_ms: now_ms, horizon_days, occurrences: out.rows })
+    Ok(Snapshot {
+        hash,
+        generated_at_ms: now_ms,
+        horizon_days,
+        occurrences: out.rows,
+    })
 }
 
 #[cfg(test)]
@@ -142,7 +185,10 @@ mod tests {
     use crate::db::open_in_memory;
 
     fn utc_ms(y: i32, m: u32, d: u32, h: u32, min: u32) -> i64 {
-        Utc.with_ymd_and_hms(y, m, d, h, min, 0).single().expect("valid time").timestamp_millis()
+        Utc.with_ymd_and_hms(y, m, d, h, min, 0)
+            .single()
+            .expect("valid time")
+            .timestamp_millis()
     }
 
     fn weekly(id: i64, series: i64, name: &str) -> Plan {
@@ -167,12 +213,22 @@ mod tests {
         ModeLookup::load(&open_in_memory().expect("db")).expect("modes")
     }
 
-    fn build(tz: &Tz, plans: &[Plan], exceptions: &[PlanException], skips: &[SkipMark], now: i64) -> Snapshot {
+    fn build(
+        tz: &Tz,
+        plans: &[Plan],
+        exceptions: &[PlanException],
+        skips: &[SkipMark],
+        now: i64,
+    ) -> Snapshot {
         build_snapshot(tz, plans, exceptions, &modes(), skips, now, HORIZON_DAYS).expect("snapshot")
     }
 
     fn keys(snapshot: &Snapshot) -> Vec<(&str, &str)> {
-        snapshot.occurrences.iter().map(|o| (o.occurrence_key.as_str(), o.status)).collect()
+        snapshot
+            .occurrences
+            .iter()
+            .map(|o| (o.occurrence_key.as_str(), o.status))
+            .collect()
     }
 
     // Monday 2026-06-01 12:00 KST. Window: 2026-05-31 ..= 2026-06-13 (today - 1 day, + 14 days).
@@ -185,13 +241,32 @@ mod tests {
         let snapshot = build(&Seoul, &[weekly(1, 1, "Math")], &[], &[], now());
         assert_eq!(
             keys(&snapshot),
-            [("s1:2026-06-01", "planned"), ("s1:2026-06-03", "planned"), ("s1:2026-06-08", "planned"), ("s1:2026-06-10", "planned")]
+            [
+                ("s1:2026-06-01", "planned"),
+                ("s1:2026-06-03", "planned"),
+                ("s1:2026-06-08", "planned"),
+                ("s1:2026-06-10", "planned")
+            ]
         );
         // 20:00 Asia/Seoul is 11:00 UTC.
-        assert_eq!(snapshot.occurrences[0].start_at_utc_ms, utc_ms(2026, 6, 1, 11, 0));
-        assert_eq!(snapshot.occurrences[3].start_at_utc_ms, utc_ms(2026, 6, 10, 11, 0));
-        assert_eq!((snapshot.horizon_days, snapshot.generated_at_ms), (14, now()));
-        assert!(snapshot.occurrences.iter().all(|o| o.sets == 2 && o.plan_name == "Math"));
+        assert_eq!(
+            snapshot.occurrences[0].start_at_utc_ms,
+            utc_ms(2026, 6, 1, 11, 0)
+        );
+        assert_eq!(
+            snapshot.occurrences[3].start_at_utc_ms,
+            utc_ms(2026, 6, 10, 11, 0)
+        );
+        assert_eq!(
+            (snapshot.horizon_days, snapshot.generated_at_ms),
+            (14, now())
+        );
+        assert!(
+            snapshot
+                .occurrences
+                .iter()
+                .all(|o| o.sets == 2 && o.plan_name == "Math")
+        );
     }
 
     #[test]
@@ -205,10 +280,20 @@ mod tests {
                 new_time: Some("21:30".into()),
                 sets_override: Some(3),
             },
-            PlanException { plan_id: 1, date: "2026-06-08".into(), kind: ExceptionKind::Cancelled, new_date: None, new_time: None, sets_override: None },
+            PlanException {
+                plan_id: 1,
+                date: "2026-06-08".into(),
+                kind: ExceptionKind::Cancelled,
+                new_date: None,
+                new_time: None,
+                sets_override: None,
+            },
         ];
         // "Skip today" on 2026-06-10, granted before the plan starts.
-        let skips = [SkipMark { date: "2026-06-10".into(), at_ms: utc_ms(2026, 6, 10, 2, 0) }];
+        let skips = [SkipMark {
+            date: "2026-06-10".into(),
+            at_ms: utc_ms(2026, 6, 10, 2, 0),
+        }];
         let snapshot = build(&Seoul, &[weekly(1, 1, "Math")], &exceptions, &skips, now());
         assert_eq!(
             keys(&snapshot),
@@ -220,26 +305,51 @@ mod tests {
                 ("s1:2026-06-10", "skipped"),
             ]
         );
-        let live = snapshot.occurrences.iter().find(|o| o.occurrence_key == "s1:2026-06-03").expect("moved-to row");
-        assert_eq!((live.start_at_utc_ms, live.sets), (utc_ms(2026, 6, 4, 12, 30), 3), "the new slot is the live one");
-        let vacated = snapshot.occurrences.iter().find(|o| o.occurrence_key == "s1:2026-06-03:from").expect("vacated");
+        let live = snapshot
+            .occurrences
+            .iter()
+            .find(|o| o.occurrence_key == "s1:2026-06-03")
+            .expect("moved-to row");
+        assert_eq!(
+            (live.start_at_utc_ms, live.sets),
+            (utc_ms(2026, 6, 4, 12, 30), 3),
+            "the new slot is the live one"
+        );
+        let vacated = snapshot
+            .occurrences
+            .iter()
+            .find(|o| o.occurrence_key == "s1:2026-06-03:from")
+            .expect("vacated");
         assert_eq!(vacated.start_at_utc_ms, utc_ms(2026, 6, 3, 11, 0));
     }
 
     #[test]
     fn a_skip_only_covers_occurrences_that_end_after_it_and_only_that_day() {
         // Skip granted after the Monday plan ended: it must not retroactively skip it.
-        let late = [SkipMark { date: "2026-06-01".into(), at_ms: utc_ms(2026, 6, 1, 23, 59) }];
+        let late = [SkipMark {
+            date: "2026-06-01".into(),
+            at_ms: utc_ms(2026, 6, 1, 23, 59),
+        }];
         let snapshot = build(&Seoul, &[weekly(1, 1, "Math")], &[], &late, now());
         assert_eq!(snapshot.occurrences[0].status, "planned");
-        assert_eq!(snapshot.occurrences[1].status, "planned", "Wednesday is another day");
+        assert_eq!(
+            snapshot.occurrences[1].status, "planned",
+            "Wednesday is another day"
+        );
     }
 
     #[test]
     fn deleted_plans_and_exceptions_of_missing_plans_are_not_sent() {
         let mut gone = weekly(2, 2, "Old");
         gone.deleted_at_ms = Some(5);
-        let orphan = PlanException { plan_id: 99, date: "2026-06-03".into(), kind: ExceptionKind::Cancelled, new_date: None, new_time: None, sets_override: None };
+        let orphan = PlanException {
+            plan_id: 99,
+            date: "2026-06-03".into(),
+            kind: ExceptionKind::Cancelled,
+            new_date: None,
+            new_time: None,
+            sets_override: None,
+        };
         let snapshot = build(&Seoul, &[gone], &[orphan], &[], now());
         assert!(snapshot.occurrences.is_empty());
     }
@@ -249,7 +359,10 @@ mod tests {
         let plans = [weekly(1, 1, "Math")];
         let a = build(&Seoul, &plans, &[], &[], now());
         let later = build(&Seoul, &plans, &[], &[], now() + 60_000);
-        assert_eq!(a.hash, later.hash, "same plan, same hash, even a minute later");
+        assert_eq!(
+            a.hash, later.hash,
+            "same plan, same hash, even a minute later"
+        );
         assert_ne!(a.generated_at_ms, later.generated_at_ms);
 
         let mut edited = plans.clone();
@@ -260,7 +373,10 @@ mod tests {
         let utc: Tz = chrono_tz::UTC;
         let in_utc = build(&utc, &plans, &[], &[], now());
         assert_ne!(a.hash, in_utc.hash);
-        assert_eq!(in_utc.occurrences[0].start_at_utc_ms, utc_ms(2026, 6, 1, 20, 0));
+        assert_eq!(
+            in_utc.occurrences[0].start_at_utc_ms,
+            utc_ms(2026, 6, 1, 20, 0)
+        );
     }
 
     #[test]
@@ -272,8 +388,20 @@ mod tests {
         new.start_date = "2026-06-08".into();
         new.effective_from_date = "2026-06-08".into();
         let snapshot = build(&Seoul, &[old, new], &[], &[], now());
-        let all: Vec<&str> = snapshot.occurrences.iter().map(|o| o.occurrence_key.as_str()).collect();
-        assert_eq!(all, ["s1:2026-06-01", "s1:2026-06-03", "s1:2026-06-08", "s1:2026-06-10"]);
+        let all: Vec<&str> = snapshot
+            .occurrences
+            .iter()
+            .map(|o| o.occurrence_key.as_str())
+            .collect();
+        assert_eq!(
+            all,
+            [
+                "s1:2026-06-01",
+                "s1:2026-06-03",
+                "s1:2026-06-08",
+                "s1:2026-06-10"
+            ]
+        );
     }
 
     #[test]

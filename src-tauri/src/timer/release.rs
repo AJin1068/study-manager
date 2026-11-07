@@ -22,7 +22,7 @@ use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
 use crate::quiz::release::{self as quiz_release, ReleasePlan};
-use crate::quiz::{grade, QuizItem, QuizQuestion};
+use crate::quiz::{QuizItem, QuizQuestion, grade};
 use crate::store;
 
 use super::study_pass::{self, Grant, PassKind, QuizProof, ReleaseProof, Typing};
@@ -68,21 +68,33 @@ pub struct ReleaseChallenge {
 pub enum ReleaseOutcome {
     /// The release took effect and was recorded. `expires_at_ms` is set for an emergency pass.
     #[serde(rename_all = "camelCase")]
-    Released { kind: PassKind, expires_at_ms: Option<i64> },
+    Released {
+        kind: PassKind,
+        expires_at_ms: Option<i64>,
+    },
     #[serde(rename_all = "camelCase")]
-    Mismatch { attempts: u32 },
+    Mismatch {
+        attempts: u32,
+    },
     /// No challenge was issued or it was replaced; ask for a new one.
     NoChallenge,
     NothingToRelease,
     /// The daily emergency-pass limit is spent.
     #[serde(rename_all = "camelCase")]
-    LimitReached { limit: i64 },
+    LimitReached {
+        limit: i64,
+    },
     /// An emergency pass is already running.
     #[serde(rename_all = "camelCase")]
-    AlreadyActive { expires_at_ms: i64 },
+    AlreadyActive {
+        expires_at_ms: i64,
+    },
     /// The quiz was not passed. It says nothing about how many answers were right.
     #[serde(rename_all = "camelCase")]
-    QuizFailed { retry_after_ms: i64, attempts_left: i64 },
+    QuizFailed {
+        retry_after_ms: i64,
+        attempts_left: i64,
+    },
 }
 
 enum PendingProof {
@@ -113,7 +125,9 @@ pub struct ReleaseDesk {
 
 fn lock(desk: &ReleaseDesk) -> std::sync::MutexGuard<'_, DeskState> {
     // The state is plain data, so a poisoned guard is still consistent.
-    desk.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    desk.state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn random_seed() -> u64 {
@@ -127,7 +141,9 @@ fn random_index(len: usize) -> usize {
 fn refusal_message(refusal: Grant) -> String {
     match refusal {
         Grant::NothingToRelease => "there is nothing to release".into(),
-        Grant::LimitReached { limit } => format!("the daily limit of {limit} emergency pass(es) is spent"),
+        Grant::LimitReached { limit } => {
+            format!("the daily limit of {limit} emergency pass(es) is spent")
+        }
         Grant::AlreadyActive { .. } => "an emergency pass is already running".into(),
         Grant::Granted { .. } => "granted".into(),
     }
@@ -137,25 +153,59 @@ impl ReleaseDesk {
     /// Issues a challenge for `kind`. Refused up front when the release could not be granted, so
     /// the user is not made to type a long sentence for nothing. Early release may get questions
     /// instead of the sentence; being on cooldown or out of attempts refuses it (no typing then).
-    pub fn begin<Tz: TimeZone>(&self, conn: &Connection, tz: &Tz, kind: PassKind, now_ms: i64) -> AppResult<ReleaseChallenge> {
+    pub fn begin<Tz: TimeZone>(
+        &self,
+        conn: &Connection,
+        tz: &Tz,
+        kind: PassKind,
+        now_ms: i64,
+    ) -> AppResult<ReleaseChallenge> {
         if let Some(refusal) = study_pass::refusal(conn, tz, kind, now_ms)? {
             return Err(AppError::Invalid(refusal_message(refusal)));
         }
         let seed = random_seed();
-        let quiz = if kind == PassKind::EarlyRelease { early_release_plan(conn, tz, now_ms, seed)? } else { None };
+        let quiz = if kind == PassKind::EarlyRelease {
+            early_release_plan(conn, tz, now_ms, seed)?
+        } else {
+            None
+        };
         let mut state = lock(self);
         state.next_id += 1;
         state.wrong_attempts = 0;
         let id = state.next_id;
         if let Some(items) = quiz {
             let questions = items.iter().map(|item| item.view(seed)).collect();
-            let attempts_left = quiz_release::status(conn, tz, now_ms).ok().map(|s| (s.max_attempts - s.attempts_used).max(0));
-            state.pending = Some(Pending { id, kind, proof: PendingProof::Quiz(items), issued_at_ms: now_ms });
-            tracing::info!(event = "release_proof", kind = kind.as_str(), proof = "quiz", result = "issued");
-            return Ok(ReleaseChallenge { challenge_id: id, kind, proof: ChallengeProof::Quiz, sentence: String::new(), questions, attempts_left });
+            let attempts_left = quiz_release::status(conn, tz, now_ms)
+                .ok()
+                .map(|s| (s.max_attempts - s.attempts_used).max(0));
+            state.pending = Some(Pending {
+                id,
+                kind,
+                proof: PendingProof::Quiz(items),
+                issued_at_ms: now_ms,
+            });
+            tracing::info!(
+                event = "release_proof",
+                kind = kind.as_str(),
+                proof = "quiz",
+                result = "issued"
+            );
+            return Ok(ReleaseChallenge {
+                challenge_id: id,
+                kind,
+                proof: ChallengeProof::Quiz,
+                sentence: String::new(),
+                questions,
+                attempts_left,
+            });
         }
         let sentence = SENTENCES[random_index(SENTENCES.len())];
-        state.pending = Some(Pending { id, kind, proof: PendingProof::Typing(sentence), issued_at_ms: now_ms });
+        state.pending = Some(Pending {
+            id,
+            kind,
+            proof: PendingProof::Typing(sentence),
+            issued_at_ms: now_ms,
+        });
         Ok(ReleaseChallenge {
             challenge_id: id,
             kind,
@@ -181,7 +231,9 @@ impl ReleaseDesk {
         };
         let (kind, issued_at_ms) = (pending.kind, pending.issued_at_ms);
         // Questions are answered through `submit_quiz`; the sentence endpoint never grants them.
-        let PendingProof::Typing(sentence) = pending.proof else { return Ok(ReleaseOutcome::NoChallenge) };
+        let PendingProof::Typing(sentence) = pending.proof else {
+            return Ok(ReleaseOutcome::NoChallenge);
+        };
         if typed != sentence {
             state.wrong_attempts += 1;
             let attempts = state.wrong_attempts;
@@ -194,7 +246,10 @@ impl ReleaseDesk {
             challenge_len: i64::try_from(sentence.chars().count()).unwrap_or(i64::MAX),
             typing_ms: (at_ms - issued_at_ms).max(0),
         };
-        Ok(outcome_of(kind, study_pass::grant(conn, tz, kind, at_ms, ReleaseProof::Typing(typing))?))
+        Ok(outcome_of(
+            kind,
+            study_pass::grant(conn, tz, kind, at_ms, ReleaseProof::Typing(typing))?,
+        ))
     }
 
     /// Grades the answers (one per question, in order; a missing one is wrong) and grants the early
@@ -209,39 +264,73 @@ impl ReleaseDesk {
         at_ms: i64,
     ) -> AppResult<ReleaseOutcome> {
         let mut state = lock(self);
-        let is_quiz = state.pending.as_ref().is_some_and(|p| p.id == challenge_id && matches!(p.proof, PendingProof::Quiz(_)));
+        let is_quiz = state
+            .pending
+            .as_ref()
+            .is_some_and(|p| p.id == challenge_id && matches!(p.proof, PendingProof::Quiz(_)));
         if !is_quiz {
             return Ok(ReleaseOutcome::NoChallenge);
         }
-        let Some(Pending { kind, proof: PendingProof::Quiz(items), issued_at_ms, .. }) = state.pending.take() else {
+        let Some(Pending {
+            kind,
+            proof: PendingProof::Quiz(items),
+            issued_at_ms,
+            ..
+        }) = state.pending.take()
+        else {
             return Ok(ReleaseOutcome::NoChallenge);
         };
         drop(state);
 
-        let correct: Vec<bool> =
-            items.iter().enumerate().map(|(i, item)| answers.get(i).is_some_and(|a| grade::is_correct(item, a))).collect();
+        let correct: Vec<bool> = items
+            .iter()
+            .enumerate()
+            .map(|(i, item)| answers.get(i).is_some_and(|a| grade::is_correct(item, a)))
+            .collect();
         let elapsed_ms = (at_ms - issued_at_ms).max(0);
         let run_id = store::list_active_runs(conn)?.first().map(|r| r.id);
         quiz_release::record_answers(conn, &items, &correct, run_id, elapsed_ms, at_ms)?;
         if !correct.iter().all(|ok| *ok) {
             quiz_release::fail_attempt(conn, tz, at_ms)?;
             let status = quiz_release::status(conn, tz, at_ms)?;
-            tracing::info!(event = "release_proof", kind = kind.as_str(), proof = "quiz", result = "fail");
+            tracing::info!(
+                event = "release_proof",
+                kind = kind.as_str(),
+                proof = "quiz",
+                result = "fail"
+            );
             return Ok(ReleaseOutcome::QuizFailed {
                 retry_after_ms: status.cooldown_min.saturating_mul(60_000),
                 attempts_left: (status.max_attempts - status.attempts_used).max(0),
             });
         }
-        let prompt_chars = items.iter().map(|i| i64::try_from(i.prompt.chars().count()).unwrap_or(i64::MAX)).fold(0_i64, i64::saturating_add);
-        let proof = ReleaseProof::Quiz(QuizProof { prompt_chars, total_ms: elapsed_ms });
-        tracing::info!(event = "release_proof", kind = kind.as_str(), proof = "quiz", result = "pass");
-        Ok(outcome_of(kind, study_pass::grant(conn, tz, kind, at_ms, proof)?))
+        let prompt_chars = items
+            .iter()
+            .map(|i| i64::try_from(i.prompt.chars().count()).unwrap_or(i64::MAX))
+            .fold(0_i64, i64::saturating_add);
+        let proof = ReleaseProof::Quiz(QuizProof {
+            prompt_chars,
+            total_ms: elapsed_ms,
+        });
+        tracing::info!(
+            event = "release_proof",
+            kind = kind.as_str(),
+            proof = "quiz",
+            result = "pass"
+        );
+        Ok(outcome_of(
+            kind,
+            study_pass::grant(conn, tz, kind, at_ms, proof)?,
+        ))
     }
 }
 
 fn outcome_of(kind: PassKind, grant: Grant) -> ReleaseOutcome {
     match grant {
-        Grant::Granted { expires_at_ms } => ReleaseOutcome::Released { kind, expires_at_ms },
+        Grant::Granted { expires_at_ms } => ReleaseOutcome::Released {
+            kind,
+            expires_at_ms,
+        },
         Grant::NothingToRelease => ReleaseOutcome::NothingToRelease,
         Grant::LimitReached { limit } => ReleaseOutcome::LimitReached { limit },
         Grant::AlreadyActive { expires_at_ms } => ReleaseOutcome::AlreadyActive { expires_at_ms },
@@ -251,17 +340,37 @@ fn outcome_of(kind: PassKind, grant: Grant) -> ReleaseOutcome {
 /// The questions for an early release, `None` when the typed sentence is the proof. A database
 /// failure while reading the bank falls back to the sentence (the bank is an aid, not a lock);
 /// cooldown and a spent daily cap refuse instead, so typing never opens a way around them.
-fn early_release_plan<Tz: TimeZone>(conn: &Connection, tz: &Tz, now_ms: i64, seed: u64) -> AppResult<Option<Vec<QuizItem>>> {
+fn early_release_plan<Tz: TimeZone>(
+    conn: &Connection,
+    tz: &Tz,
+    now_ms: i64,
+    seed: u64,
+) -> AppResult<Option<Vec<QuizItem>>> {
     match quiz_release::begin_attempt(conn, tz, now_ms, seed) {
         Ok(ReleasePlan::Quiz(items)) => Ok(Some(items)),
         Ok(ReleasePlan::Typing) => Ok(None),
         Ok(ReleasePlan::CoolingDown { retry_after_ms }) => {
-            tracing::info!(event = "release_proof", kind = "early_release", proof = "quiz", result = "cooldown");
-            Err(AppError::Invalid(format!("early release is cooling down: retry in {} s", (retry_after_ms + 999) / 1000)))
+            tracing::info!(
+                event = "release_proof",
+                kind = "early_release",
+                proof = "quiz",
+                result = "cooldown"
+            );
+            Err(AppError::Invalid(format!(
+                "early release is cooling down: retry in {} s",
+                (retry_after_ms + 999) / 1000
+            )))
         }
         Ok(ReleasePlan::Exhausted { max_attempts }) => {
-            tracing::info!(event = "release_proof", kind = "early_release", proof = "quiz", result = "exhausted");
-            Err(AppError::Invalid(format!("the {max_attempts} early release quiz attempts of today are used up")))
+            tracing::info!(
+                event = "release_proof",
+                kind = "early_release",
+                proof = "quiz",
+                result = "exhausted"
+            );
+            Err(AppError::Invalid(format!(
+                "the {max_attempts} early release quiz attempts of today are used up"
+            )))
         }
         Err(err) => {
             tracing::warn!(event = "release_quiz_unavailable", error = %err);

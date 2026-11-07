@@ -15,7 +15,10 @@ pub struct ScriptedTransport {
 
 impl ScriptedTransport {
     pub fn new(replies: Vec<Result<HttpResponse, TransportError>>) -> Self {
-        Self { replies: Mutex::new(replies.into()), seen: Mutex::new(Vec::new()) }
+        Self {
+            replies: Mutex::new(replies.into()),
+            seen: Mutex::new(Vec::new()),
+        }
     }
 
     pub fn seen(&self) -> Vec<HttpRequest> {
@@ -26,12 +29,20 @@ impl ScriptedTransport {
 impl HttpTransport for ScriptedTransport {
     fn send(&self, request: HttpRequest) -> Result<HttpResponse, TransportError> {
         self.seen.lock().expect("seen").push(request);
-        self.replies.lock().expect("replies").pop_front().unwrap_or(Err(TransportError::Network))
+        self.replies
+            .lock()
+            .expect("replies")
+            .pop_front()
+            .unwrap_or(Err(TransportError::Network))
     }
 }
 
 pub fn json(status: u16, body: &str) -> Result<HttpResponse, TransportError> {
-    Ok(HttpResponse { status, headers: Vec::new(), body: body.as_bytes().to_vec() })
+    Ok(HttpResponse {
+        status,
+        headers: Vec::new(),
+        body: body.as_bytes().to_vec(),
+    })
 }
 
 /// The wall clock and the monotonic clock move independently, so a test can shift one and show
@@ -43,7 +54,10 @@ pub struct TestClock {
 
 impl TestClock {
     pub fn new(mono: i64, wall: i64) -> Self {
-        Self { mono: AtomicI64::new(mono), wall: AtomicI64::new(wall) }
+        Self {
+            mono: AtomicI64::new(mono),
+            wall: AtomicI64::new(wall),
+        }
     }
 
     pub fn advance_mono(&self, ms: i64) {

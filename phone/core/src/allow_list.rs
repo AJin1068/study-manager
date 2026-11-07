@@ -11,7 +11,7 @@
 
 use std::collections::BTreeSet;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub const ROLE_EMERGENCY_CALL: &str = "emergency_call";
 pub const ROLE_DIALER: &str = "dialer";
@@ -22,8 +22,15 @@ const PACKAGE_MAX_LEN: usize = 255;
 
 /// Entering the settings app during a lock would let the user switch the blocker off, so it can
 /// never be an allowed app. Prefix match: vendor settings live under the same prefix.
-const SETTINGS_PREFIXES: [&str; 3] = ["com.android.settings", "com.android.packageinstaller", "com.google.android.packageinstaller"];
-const SETTINGS_PACKAGES: [&str; 2] = ["com.google.android.permissioncontroller", "com.android.permissioncontroller"];
+const SETTINGS_PREFIXES: [&str; 3] = [
+    "com.android.settings",
+    "com.android.packageinstaller",
+    "com.google.android.packageinstaller",
+];
+const SETTINGS_PACKAGES: [&str; 2] = [
+    "com.google.android.permissioncontroller",
+    "com.android.permissioncontroller",
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum AllowListError {
@@ -61,7 +68,11 @@ pub struct AllowList {
 impl Default for AllowList {
     /// Phone and messages allowed, no custom apps.
     fn default() -> Self {
-        Self { dialer: true, messages: true, packages: BTreeSet::new() }
+        Self {
+            dialer: true,
+            messages: true,
+            packages: BTreeSet::new(),
+        }
     }
 }
 
@@ -80,7 +91,11 @@ impl AllowList {
         if set.len() > MAX_CUSTOM_PACKAGES {
             return Err(AllowListError::TooManyPackages);
         }
-        Ok(Self { dialer, messages, packages: set })
+        Ok(Self {
+            dialer,
+            messages,
+            packages: set,
+        })
     }
 
     /// Always true. A method rather than a field so no caller can build a list without it.
@@ -107,8 +122,14 @@ impl AllowList {
         if object.keys().any(|key| key != "roles" && key != "packages") {
             return Err(AllowListError::Malformed);
         }
-        let roles = object.get("roles").and_then(Value::as_array).ok_or(AllowListError::Malformed)?;
-        let packages = object.get("packages").and_then(Value::as_array).ok_or(AllowListError::Malformed)?;
+        let roles = object
+            .get("roles")
+            .and_then(Value::as_array)
+            .ok_or(AllowListError::Malformed)?;
+        let packages = object
+            .get("packages")
+            .and_then(Value::as_array)
+            .ok_or(AllowListError::Malformed)?;
         let (mut dialer, mut messages) = (false, false);
         for role in roles {
             match role.as_str().ok_or(AllowListError::Malformed)? {
@@ -118,7 +139,10 @@ impl AllowList {
                 _ => return Err(AllowListError::UnknownRole),
             }
         }
-        let names = packages.iter().map(|p| p.as_str().ok_or(AllowListError::Malformed)).collect::<Result<Vec<_>, _>>()?;
+        let names = packages
+            .iter()
+            .map(|p| p.as_str().ok_or(AllowListError::Malformed))
+            .collect::<Result<Vec<_>, _>>()?;
         Self::new(dialer, messages, names)
     }
 
@@ -143,13 +167,18 @@ fn validate_package(name: &str) -> Result<(), AllowListError> {
         && segments.len() >= 2
         && segments.iter().all(|segment| {
             let mut chars = segment.chars();
-            chars.next().is_some_and(|c| c.is_ascii_alphabetic()) && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+            chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+                && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
         });
     if !well_formed {
         return Err(AllowListError::InvalidPackage);
     }
     let lowered = name.to_ascii_lowercase();
-    if SETTINGS_PACKAGES.contains(&lowered.as_str()) || SETTINGS_PREFIXES.iter().any(|prefix| lowered.starts_with(prefix)) {
+    if SETTINGS_PACKAGES.contains(&lowered.as_str())
+        || SETTINGS_PREFIXES
+            .iter()
+            .any(|prefix| lowered.starts_with(prefix))
+    {
         return Err(AllowListError::SettingsPackage);
     }
     Ok(())
@@ -160,7 +189,8 @@ mod tests {
     use super::*;
 
     fn contract() -> Value {
-        serde_json::from_str(include_str!("../../../fixtures/phone/blocker-bridge.json")).expect("fixture")
+        serde_json::from_str(include_str!("../../../fixtures/phone/blocker-bridge.json"))
+            .expect("fixture")
     }
 
     #[test]
@@ -168,7 +198,8 @@ mod tests {
         let contract = contract();
         for case in contract["allowList"]["valid"].as_array().expect("valid") {
             let name = case["name"].as_str().expect("name");
-            let list = AllowList::from_wire(&case["input"]).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let list =
+                AllowList::from_wire(&case["input"]).unwrap_or_else(|e| panic!("{name}: {e}"));
             assert_eq!(list.to_wire(), case["wire"], "{name}");
         }
     }
@@ -176,7 +207,10 @@ mod tests {
     #[test]
     fn fixture_refusals_carry_the_shared_codes() {
         let contract = contract();
-        for case in contract["allowList"]["invalid"].as_array().expect("invalid") {
+        for case in contract["allowList"]["invalid"]
+            .as_array()
+            .expect("invalid")
+        {
             let name = case["name"].as_str().expect("name");
             let err = AllowList::from_wire(&case["input"]).expect_err(name);
             assert_eq!(err.code(), case["error"].as_str().expect("error"), "{name}");
@@ -189,32 +223,73 @@ mod tests {
         let bare = AllowList::new(false, false, Vec::<&str>::new()).expect("bare");
         assert!(bare.allows_emergency_call());
         assert_eq!(bare.to_wire()["roles"], json!([ROLE_EMERGENCY_CALL]));
-        let from_empty_roles = AllowList::from_wire(&json!({ "roles": [], "packages": [] })).expect("empty roles");
-        assert_eq!(from_empty_roles.to_wire()["roles"], json!([ROLE_EMERGENCY_CALL]));
-        let many = AllowList::new(true, true, (0..MAX_CUSTOM_PACKAGES).map(|n| format!("com.example.app{n}"))).expect("max");
+        let from_empty_roles =
+            AllowList::from_wire(&json!({ "roles": [], "packages": [] })).expect("empty roles");
+        assert_eq!(
+            from_empty_roles.to_wire()["roles"],
+            json!([ROLE_EMERGENCY_CALL])
+        );
+        let many = AllowList::new(
+            true,
+            true,
+            (0..MAX_CUSTOM_PACKAGES).map(|n| format!("com.example.app{n}")),
+        )
+        .expect("max");
         assert_eq!(many.to_wire()["roles"][0], json!(ROLE_EMERGENCY_CALL));
     }
 
     #[test]
     fn custom_packages_are_deduplicated_sorted_and_capped() {
-        let list = AllowList::new(true, false, ["com.b.app", "com.a.app", "com.b.app"]).expect("list");
-        assert_eq!(list.packages().collect::<Vec<_>>(), ["com.a.app", "com.b.app"]);
+        let list =
+            AllowList::new(true, false, ["com.b.app", "com.a.app", "com.b.app"]).expect("list");
+        assert_eq!(
+            list.packages().collect::<Vec<_>>(),
+            ["com.a.app", "com.b.app"]
+        );
         let too_many = (0..=MAX_CUSTOM_PACKAGES).map(|n| format!("com.example.app{n}"));
-        assert_eq!(AllowList::new(true, true, too_many), Err(AllowListError::TooManyPackages));
+        assert_eq!(
+            AllowList::new(true, true, too_many),
+            Err(AllowListError::TooManyPackages)
+        );
     }
 
     #[test]
     fn the_settings_app_can_never_be_allowed() {
-        for name in ["com.android.settings", "COM.ANDROID.SETTINGS", "com.android.settings.intelligence", "com.google.android.permissioncontroller"] {
-            assert_eq!(AllowList::new(true, true, [name]), Err(AllowListError::SettingsPackage), "{name}");
+        for name in [
+            "com.android.settings",
+            "COM.ANDROID.SETTINGS",
+            "com.android.settings.intelligence",
+            "com.google.android.permissioncontroller",
+        ] {
+            assert_eq!(
+                AllowList::new(true, true, [name]),
+                Err(AllowListError::SettingsPackage),
+                "{name}"
+            );
         }
     }
 
     #[test]
     fn malformed_package_names_are_refused() {
-        for name in ["", "notes", "com..app", "com.1app", "com.app!", ".com.app", "com.app.", "com.한글.app"] {
-            assert_eq!(AllowList::new(true, true, [name]), Err(AllowListError::InvalidPackage), "{name:?}");
+        for name in [
+            "",
+            "notes",
+            "com..app",
+            "com.1app",
+            "com.app!",
+            ".com.app",
+            "com.app.",
+            "com.한글.app",
+        ] {
+            assert_eq!(
+                AllowList::new(true, true, [name]),
+                Err(AllowListError::InvalidPackage),
+                "{name:?}"
+            );
         }
-        assert_eq!(AllowList::new(true, true, [format!("com.{}", "a".repeat(PACKAGE_MAX_LEN))]), Err(AllowListError::InvalidPackage));
+        assert_eq!(
+            AllowList::new(true, true, [format!("com.{}", "a".repeat(PACKAGE_MAX_LEN))]),
+            Err(AllowListError::InvalidPackage)
+        );
     }
 }

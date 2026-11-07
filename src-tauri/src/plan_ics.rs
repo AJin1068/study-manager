@@ -73,7 +73,10 @@ struct Prop {
 
 impl Prop {
     fn param(&self, key: &str) -> Option<&str> {
-        self.params.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
+        self.params
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
     }
 }
 
@@ -81,7 +84,10 @@ fn unfold(text: &str) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     for raw in text.split('\n') {
         let line = raw.strip_suffix('\r').unwrap_or(raw);
-        match (line.strip_prefix(' ').or_else(|| line.strip_prefix('\t')), lines.last_mut()) {
+        match (
+            line.strip_prefix(' ').or_else(|| line.strip_prefix('\t')),
+            lines.last_mut(),
+        ) {
             (Some(rest), Some(prev)) => prev.push_str(rest),
             _ => lines.push(line.to_string()),
         }
@@ -115,9 +121,18 @@ fn parse_prop(line: &str) -> Option<Prop> {
     let name = parts.next()?.trim().to_ascii_uppercase();
     let params = parts
         .filter_map(|p| p.split_once('='))
-        .map(|(k, v)| (k.trim().to_ascii_uppercase(), v.trim().trim_matches('"').to_string()))
+        .map(|(k, v)| {
+            (
+                k.trim().to_ascii_uppercase(),
+                v.trim().trim_matches('"').to_string(),
+            )
+        })
         .collect();
-    Some(Prop { name, params, value: value.to_string() })
+    Some(Prop {
+        name,
+        params,
+        value: value.to_string(),
+    })
 }
 
 fn unescape(raw: &str) -> String {
@@ -166,7 +181,11 @@ fn parse_stamp(prop: &Prop) -> Result<Stamp, SkipReason> {
         return Err(SkipReason::Invalid);
     }
     let stamp = NaiveDateTime::parse_from_str(body, STAMP_FMT).map_err(|_| SkipReason::Invalid)?;
-    Ok(if utc { Stamp::Utc(stamp) } else { Stamp::Floating(stamp) })
+    Ok(if utc {
+        Stamp::Utc(stamp)
+    } else {
+        Stamp::Floating(stamp)
+    })
 }
 
 fn parse_duration_min(raw: &str) -> Option<i64> {
@@ -202,7 +221,11 @@ fn weekday_bit(date: NaiveDate) -> i64 {
 }
 
 /// `FREQ=WEEKLY` with plain weekday names; anything else is unsupported.
-fn parse_rrule(raw: &str, start: NaiveDate, start_time: NaiveTime) -> Result<IcsRepeat, SkipReason> {
+fn parse_rrule(
+    raw: &str,
+    start: NaiveDate,
+    start_time: NaiveTime,
+) -> Result<IcsRepeat, SkipReason> {
     let (mut weekly, mut weekdays, mut until) = (false, 0_i64, None);
     for part in raw.split(';').filter(|p| !p.trim().is_empty()) {
         let (key, value) = part.split_once('=').ok_or(SkipReason::UnsupportedRule)?;
@@ -212,15 +235,20 @@ fn parse_rrule(raw: &str, start: NaiveDate, start_time: NaiveTime) -> Result<Ics
             "WKST" => {}
             "BYDAY" => {
                 for code in value.split(',') {
-                    weekdays |= day_mask(&code.trim().to_ascii_uppercase()).ok_or(SkipReason::UnsupportedRule)?;
+                    weekdays |= day_mask(&code.trim().to_ascii_uppercase())
+                        .ok_or(SkipReason::UnsupportedRule)?;
                 }
             }
             "UNTIL" => {
                 let value = value.trim();
                 let digits = value.get(..8).ok_or(SkipReason::Invalid)?;
-                let mut date = NaiveDate::parse_from_str(digits, "%Y%m%d").map_err(|_| SkipReason::Invalid)?;
+                let mut date =
+                    NaiveDate::parse_from_str(digits, "%Y%m%d").map_err(|_| SkipReason::Invalid)?;
                 // A time-of-day bound earlier than the start time excludes that day's occurrence.
-                if let Some(time) = value.get(9..15).and_then(|t| NaiveTime::parse_from_str(t, "%H%M%S").ok()) {
+                if let Some(time) = value
+                    .get(9..15)
+                    .and_then(|t| NaiveTime::parse_from_str(t, "%H%M%S").ok())
+                {
                     if time < start_time {
                         date -= Duration::days(1);
                     }
@@ -251,7 +279,10 @@ fn minute_floor(time: NaiveTime) -> NaiveTime {
 
 fn event_from_props<Tz: TimeZone>(props: &[Prop], tz: &Tz) -> Result<IcsEvent, SkipReason> {
     let find = |name: &str| props.iter().find(|p| p.name == name);
-    if find("RECURRENCE-ID").is_some() || find("RDATE").is_some() || props.iter().filter(|p| p.name == "RRULE").count() > 1 {
+    if find("RECURRENCE-ID").is_some()
+        || find("RDATE").is_some()
+        || props.iter().filter(|p| p.name == "RRULE").count() > 1
+    {
         return Err(SkipReason::UnsupportedRule);
     }
     if find("STATUS").is_some_and(|p| p.value.trim().eq_ignore_ascii_case("CANCELLED")) {
@@ -266,34 +297,59 @@ fn event_from_props<Tz: TimeZone>(props: &[Prop], tz: &Tz) -> Result<IcsEvent, S
         // A repeating UTC event keeps its UTC weekdays; converting only the start would misplace them.
         Stamp::Utc(_) if rrule.is_some() => return Err(SkipReason::Timezone),
         Stamp::Utc(naive) => {
-            let local = chrono::Utc.from_utc_datetime(naive).with_timezone(tz).naive_local();
+            let local = chrono::Utc
+                .from_utc_datetime(naive)
+                .with_timezone(tz)
+                .naive_local();
             (local.date(), local.time())
         }
     };
     let time = minute_floor(time);
 
     let duration_min = match (find("DTEND").and_then(|p| parse_stamp(p).ok()), &start) {
-        (Some(Stamp::Floating(end)), Stamp::Floating(begin)) | (Some(Stamp::Utc(end)), Stamp::Utc(begin)) => {
+        (Some(Stamp::Floating(end)), Stamp::Floating(begin))
+        | (Some(Stamp::Utc(end)), Stamp::Utc(begin)) => {
             Some((end - *begin).num_minutes()).filter(|m| *m > 0)
         }
         _ => find("DURATION").and_then(|p| parse_duration_min(&p.value)),
     };
 
-    let name = clean_label(&find("SUMMARY").ok_or(SkipReason::Invalid)?.value).ok_or(SkipReason::Invalid)?;
-    let subject = find("CATEGORIES")
-        .and_then(|p| split_unescaped_comma(&p.value).into_iter().find_map(|v| clean_label(&v)));
-    let sets = find("X-SM-SETS").and_then(|p| p.value.trim().parse::<i64>().ok()).filter(|n| (1..=24).contains(n));
-    let repeat = rrule.map(|p| parse_rrule(&p.value, date, time)).transpose()?;
+    let name = clean_label(&find("SUMMARY").ok_or(SkipReason::Invalid)?.value)
+        .ok_or(SkipReason::Invalid)?;
+    let subject = find("CATEGORIES").and_then(|p| {
+        split_unescaped_comma(&p.value)
+            .into_iter()
+            .find_map(|v| clean_label(&v))
+    });
+    let sets = find("X-SM-SETS")
+        .and_then(|p| p.value.trim().parse::<i64>().ok())
+        .filter(|n| (1..=24).contains(n));
+    let repeat = rrule
+        .map(|p| parse_rrule(&p.value, date, time))
+        .transpose()?;
 
     let mut exdates = Vec::new();
     for prop in props.iter().filter(|p| p.name == "EXDATE") {
         for value in prop.value.split(',') {
-            if let Some(day) = value.trim().get(..8).and_then(|d| NaiveDate::parse_from_str(d, "%Y%m%d").ok()) {
+            if let Some(day) = value
+                .trim()
+                .get(..8)
+                .and_then(|d| NaiveDate::parse_from_str(d, "%Y%m%d").ok())
+            {
                 exdates.push(day);
             }
         }
     }
-    Ok(IcsEvent { name, subject, date, time, duration_min, sets, repeat, exdates })
+    Ok(IcsEvent {
+        name,
+        subject,
+        date,
+        time,
+        duration_min,
+        sets,
+        repeat,
+        exdates,
+    })
 }
 
 fn split_unescaped_comma(raw: &str) -> Vec<String> {
@@ -323,7 +379,10 @@ pub fn parse_ics<Tz: TimeZone>(text: &str, tz: &Tz) -> AppResult<ParsedIcs> {
     }
     let text = text.trim_start_matches('\u{feff}');
     let lines = unfold(text);
-    if !lines.iter().any(|l| l.trim().eq_ignore_ascii_case("BEGIN:VCALENDAR")) {
+    if !lines
+        .iter()
+        .any(|l| l.trim().eq_ignore_ascii_case("BEGIN:VCALENDAR"))
+    {
         return Err(AppError::Invalid("not an iCalendar (.ics) file".into()));
     }
     let mut parsed = ParsedIcs::default();
@@ -339,7 +398,9 @@ pub fn parse_ics<Tz: TimeZone>(text: &str, tz: &Tz) -> AppResult<ParsedIcs> {
             if let Some(props) = current.take() {
                 seen += 1;
                 if seen > MAX_EVENTS {
-                    return Err(AppError::Invalid(format!("the calendar has more than {MAX_EVENTS} events")));
+                    return Err(AppError::Invalid(format!(
+                        "the calendar has more than {MAX_EVENTS} events"
+                    )));
                 }
                 match event_from_props(&props, tz) {
                     Ok(event) => parsed.events.push(event),
@@ -413,7 +474,13 @@ fn stamp(date: NaiveDate, time: NaiveTime) -> String {
 }
 
 fn byday(weekdays: i64) -> String {
-    DAY_CODES.iter().enumerate().filter(|(i, _)| weekdays & (1 << i) != 0).map(|(_, c)| *c).collect::<Vec<_>>().join(",")
+    DAY_CODES
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| weekdays & (1 << i) != 0)
+        .map(|(_, c)| *c)
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// Writes a VCALENDAR. `now` is the DTSTAMP (UTC).
@@ -428,22 +495,39 @@ pub fn generate_ics(events: &[ExportEvent], now: NaiveDateTime) -> String {
         push_line(&mut out, "BEGIN:VEVENT");
         push_line(&mut out, &format!("UID:{}", event.uid));
         push_line(&mut out, &format!("DTSTAMP:{dtstamp}"));
-        push_line(&mut out, &format!("DTSTART:{}", stamp(event.date, event.time)));
+        push_line(
+            &mut out,
+            &format!("DTSTART:{}", stamp(event.date, event.time)),
+        );
         let end = event.date.and_time(event.time) + Duration::minutes(event.duration_min);
         push_line(&mut out, &format!("DTEND:{}", end.format(STAMP_FMT)));
         push_line(&mut out, &format!("SUMMARY:{}", escape_text(&event.name)));
-        push_line(&mut out, &format!("CATEGORIES:{}", escape_text(&event.subject)));
+        push_line(
+            &mut out,
+            &format!("CATEGORIES:{}", escape_text(&event.subject)),
+        );
         push_line(&mut out, &format!("X-SM-SETS:{}", event.sets));
         if let Some(repeat) = &event.repeat {
             let mut rule = format!("RRULE:FREQ=WEEKLY;BYDAY={}", byday(repeat.weekdays));
             if let Some(until) = repeat.until {
                 // Floating, like DTSTART; the last day is included.
-                let _ = write!(rule, ";UNTIL={}", stamp(until, NaiveTime::from_hms_opt(23, 59, 59).unwrap_or(NaiveTime::MIN)));
+                let _ = write!(
+                    rule,
+                    ";UNTIL={}",
+                    stamp(
+                        until,
+                        NaiveTime::from_hms_opt(23, 59, 59).unwrap_or(NaiveTime::MIN)
+                    )
+                );
             }
             push_line(&mut out, &rule);
         }
         if !event.exdates.is_empty() {
-            let days: Vec<String> = event.exdates.iter().map(|d| stamp(*d, event.time)).collect();
+            let days: Vec<String> = event
+                .exdates
+                .iter()
+                .map(|d| stamp(*d, event.time))
+                .collect();
             push_line(&mut out, &format!("EXDATE:{}", days.join(",")));
         }
         push_line(&mut out, "END:VEVENT");
@@ -480,10 +564,14 @@ mod tests {
 
     #[test]
     fn parses_floating_single_event_with_duration_from_dtend() {
-        let parsed = parse_one("DTSTART:20261105T200000\r\nDTEND:20261105T230000\r\nSUMMARY:수학\r\n");
+        let parsed =
+            parse_one("DTSTART:20261105T200000\r\nDTEND:20261105T230000\r\nSUMMARY:수학\r\n");
         assert!(parsed.skipped.is_empty());
         let e = &parsed.events[0];
-        assert_eq!((e.name.as_str(), e.date, e.time, e.duration_min), ("수학", d(2026, 11, 5), t(20, 0), Some(180)));
+        assert_eq!(
+            (e.name.as_str(), e.date, e.time, e.duration_min),
+            ("수학", d(2026, 11, 5), t(20, 0), Some(180))
+        );
         assert_eq!(e.repeat, None);
     }
 
@@ -498,34 +586,85 @@ mod tests {
         assert_eq!(e.subject.as_deref(), Some("영어"));
         assert_eq!(e.duration_min, Some(90));
         assert_eq!(e.sets, Some(2));
-        assert_eq!(e.repeat, Some(IcsRepeat { weekdays: 0b101, until: Some(d(2026, 12, 31)) }));
+        assert_eq!(
+            e.repeat,
+            Some(IcsRepeat {
+                weekdays: 0b101,
+                until: Some(d(2026, 12, 31))
+            })
+        );
         assert_eq!(e.exdates, [d(2026, 11, 4), d(2026, 11, 9)]);
     }
 
     #[test]
     fn byday_defaults_to_the_start_weekday() {
         let parsed = parse_one("DTSTART:20261105T200000\r\nSUMMARY:a\r\nRRULE:FREQ=WEEKLY\r\n");
-        assert_eq!(parsed.events[0].repeat, Some(IcsRepeat { weekdays: 1 << 3, until: None }));
+        assert_eq!(
+            parsed.events[0].repeat,
+            Some(IcsRepeat {
+                weekdays: 1 << 3,
+                until: None
+            })
+        );
     }
 
     #[test]
     fn unsupported_inputs_are_reported_by_reason() {
         let cases: Vec<(&str, SkipReason)> = vec![
-            ("DTSTART;VALUE=DATE:20261105\r\nSUMMARY:a\r\n", SkipReason::AllDay),
-            ("DTSTART;TZID=Asia/Seoul:20261105T200000\r\nSUMMARY:a\r\n", SkipReason::Timezone),
-            ("DTSTART:20261105T200000Z\r\nSUMMARY:a\r\nRRULE:FREQ=WEEKLY\r\n", SkipReason::Timezone),
-            ("DTSTART:20261105T200000\r\nSUMMARY:a\r\nRRULE:FREQ=DAILY\r\n", SkipReason::UnsupportedRule),
-            ("DTSTART:20261105T200000\r\nSUMMARY:a\r\nRRULE:FREQ=WEEKLY;INTERVAL=2\r\n", SkipReason::UnsupportedRule),
-            ("DTSTART:20261105T200000\r\nSUMMARY:a\r\nRRULE:FREQ=WEEKLY;COUNT=4\r\n", SkipReason::UnsupportedRule),
-            ("DTSTART:20261105T200000\r\nSUMMARY:a\r\nRRULE:FREQ=WEEKLY;BYDAY=1MO\r\n", SkipReason::UnsupportedRule),
-            ("DTSTART:20261105T200000\r\nSUMMARY:a\r\nRRULE:FREQ=WEEKLY;BYDAY=MO\r\n", SkipReason::UnsupportedRule),
-            ("DTSTART:20261105T200000\r\nSUMMARY:a\r\nRECURRENCE-ID:20261105T200000\r\n", SkipReason::UnsupportedRule),
-            ("DTSTART:20261105T200000\r\nSUMMARY:a\r\nRDATE:20261106T200000\r\n", SkipReason::UnsupportedRule),
-            ("DTSTART:20261105T200000\r\nSUMMARY:a\r\nSTATUS:CANCELLED\r\n", SkipReason::Invalid),
+            (
+                "DTSTART;VALUE=DATE:20261105\r\nSUMMARY:a\r\n",
+                SkipReason::AllDay,
+            ),
+            (
+                "DTSTART;TZID=Asia/Seoul:20261105T200000\r\nSUMMARY:a\r\n",
+                SkipReason::Timezone,
+            ),
+            (
+                "DTSTART:20261105T200000Z\r\nSUMMARY:a\r\nRRULE:FREQ=WEEKLY\r\n",
+                SkipReason::Timezone,
+            ),
+            (
+                "DTSTART:20261105T200000\r\nSUMMARY:a\r\nRRULE:FREQ=DAILY\r\n",
+                SkipReason::UnsupportedRule,
+            ),
+            (
+                "DTSTART:20261105T200000\r\nSUMMARY:a\r\nRRULE:FREQ=WEEKLY;INTERVAL=2\r\n",
+                SkipReason::UnsupportedRule,
+            ),
+            (
+                "DTSTART:20261105T200000\r\nSUMMARY:a\r\nRRULE:FREQ=WEEKLY;COUNT=4\r\n",
+                SkipReason::UnsupportedRule,
+            ),
+            (
+                "DTSTART:20261105T200000\r\nSUMMARY:a\r\nRRULE:FREQ=WEEKLY;BYDAY=1MO\r\n",
+                SkipReason::UnsupportedRule,
+            ),
+            (
+                "DTSTART:20261105T200000\r\nSUMMARY:a\r\nRRULE:FREQ=WEEKLY;BYDAY=MO\r\n",
+                SkipReason::UnsupportedRule,
+            ),
+            (
+                "DTSTART:20261105T200000\r\nSUMMARY:a\r\nRECURRENCE-ID:20261105T200000\r\n",
+                SkipReason::UnsupportedRule,
+            ),
+            (
+                "DTSTART:20261105T200000\r\nSUMMARY:a\r\nRDATE:20261106T200000\r\n",
+                SkipReason::UnsupportedRule,
+            ),
+            (
+                "DTSTART:20261105T200000\r\nSUMMARY:a\r\nSTATUS:CANCELLED\r\n",
+                SkipReason::Invalid,
+            ),
             ("SUMMARY:a\r\n", SkipReason::Invalid),
             ("DTSTART:20261105T200000\r\n", SkipReason::Invalid),
-            ("DTSTART:20261105T200000\r\nSUMMARY:  \r\n", SkipReason::Invalid),
-            ("DTSTART:20261305T200000\r\nSUMMARY:a\r\n", SkipReason::Invalid),
+            (
+                "DTSTART:20261105T200000\r\nSUMMARY:  \r\n",
+                SkipReason::Invalid,
+            ),
+            (
+                "DTSTART:20261305T200000\r\nSUMMARY:a\r\n",
+                SkipReason::Invalid,
+            ),
         ];
         for (body, reason) in cases {
             let parsed = parse_one(body);
@@ -536,9 +675,14 @@ mod tests {
 
     #[test]
     fn utc_single_event_converts_to_the_local_zone() {
-        let text = wrap(&vevent("DTSTART:20261105T013000Z\r\nDTEND:20261105T033000Z\r\nSUMMARY:a\r\n"));
+        let text = wrap(&vevent(
+            "DTSTART:20261105T013000Z\r\nDTEND:20261105T033000Z\r\nSUMMARY:a\r\n",
+        ));
         let e = &parse_ics(&text, &New_York).expect("parse").events[0];
-        assert_eq!((e.date, e.time, e.duration_min), (d(2026, 11, 4), t(20, 30), Some(120)));
+        assert_eq!(
+            (e.date, e.time, e.duration_min),
+            (d(2026, 11, 4), t(20, 30), Some(120))
+        );
     }
 
     #[test]
@@ -566,7 +710,10 @@ mod tests {
                 time: t(20, 0),
                 duration_min: 180,
                 sets: 3,
-                repeat: Some(IcsRepeat { weekdays: 0b101, until: Some(d(2026, 12, 31)) }),
+                repeat: Some(IcsRepeat {
+                    weekdays: 0b101,
+                    until: Some(d(2026, 12, 31)),
+                }),
                 exdates: vec![d(2026, 11, 4)],
             },
             ExportEvent {
@@ -596,11 +743,28 @@ mod tests {
         assert!(parsed.skipped.is_empty());
         assert_eq!(parsed.events.len(), 2);
         let (a, b) = (&parsed.events[0], &parsed.events[1]);
-        assert_eq!((a.name.as_str(), a.subject.as_deref(), a.sets, a.duration_min), ("수학, 심화; 반", Some("수학"), Some(3), Some(180)));
-        assert_eq!(a.repeat, Some(IcsRepeat { weekdays: 0b101, until: Some(d(2026, 12, 31)) }));
+        assert_eq!(
+            (
+                a.name.as_str(),
+                a.subject.as_deref(),
+                a.sets,
+                a.duration_min
+            ),
+            ("수학, 심화; 반", Some("수학"), Some(3), Some(180))
+        );
+        assert_eq!(
+            a.repeat,
+            Some(IcsRepeat {
+                weekdays: 0b101,
+                until: Some(d(2026, 12, 31))
+            })
+        );
         assert_eq!(a.exdates, [d(2026, 11, 4)]);
         assert_eq!(b.name.chars().count(), 100);
-        assert_eq!((b.date, b.time, b.repeat.clone()), (d(2026, 11, 6), t(9, 5), None));
+        assert_eq!(
+            (b.date, b.time, b.repeat.clone()),
+            (d(2026, 11, 6), t(9, 5), None)
+        );
     }
 
     #[test]
@@ -614,7 +778,10 @@ mod tests {
                 time: t(8 + (i % 12) as u32, 0),
                 duration_min: 50,
                 sets: 1,
-                repeat: (i % 2 == 0).then(|| IcsRepeat { weekdays: weekday_bit(d(2026, 1, 1) + Duration::days(i % 300)), until: None }),
+                repeat: (i % 2 == 0).then(|| IcsRepeat {
+                    weekdays: weekday_bit(d(2026, 1, 1) + Duration::days(i % 300)),
+                    until: None,
+                }),
                 exdates: vec![],
             })
             .collect();
@@ -622,6 +789,10 @@ mod tests {
         let started = std::time::Instant::now();
         let parsed = parse_ics(&text, &Utc).expect("parse");
         assert_eq!(parsed.events.len(), 1000);
-        assert!(started.elapsed() < std::time::Duration::from_secs(5), "took {:?}", started.elapsed());
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "took {:?}",
+            started.elapsed()
+        );
     }
 }

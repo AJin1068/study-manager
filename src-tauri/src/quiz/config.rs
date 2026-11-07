@@ -28,14 +28,29 @@ pub const RELEASE_MAX_ATTEMPTS: SettingSpec = SettingSpec {
     tighten_to: None,
 };
 /// One review question when a blocked app is opened (never lifts the block).
-pub const DISTRACTION_ENABLED: SettingSpec =
-    SettingSpec { name: "quiz.distraction_enabled", category: CATEGORY, kind: ValueKind::Bool, default: "true", tighten_to: Some("false") };
+pub const DISTRACTION_ENABLED: SettingSpec = SettingSpec {
+    name: "quiz.distraction_enabled",
+    category: CATEGORY,
+    kind: ValueKind::Bool,
+    default: "true",
+    tighten_to: Some("false"),
+};
 /// A wiki card added to the random focus check-in (off by default).
-pub const CHECKIN_ENABLED: SettingSpec =
-    SettingSpec { name: "quiz.checkin_enabled", category: CATEGORY, kind: ValueKind::Bool, default: "false", tighten_to: Some("false") };
+pub const CHECKIN_ENABLED: SettingSpec = SettingSpec {
+    name: "quiz.checkin_enabled",
+    category: CATEGORY,
+    kind: ValueKind::Bool,
+    default: "false",
+    tighten_to: Some("false"),
+};
 /// Three questions after a run ends (can be skipped).
-pub const SESSION_END_ENABLED: SettingSpec =
-    SettingSpec { name: "quiz.session_end_enabled", category: CATEGORY, kind: ValueKind::Bool, default: "true", tighten_to: Some("false") };
+pub const SESSION_END_ENABLED: SettingSpec = SettingSpec {
+    name: "quiz.session_end_enabled",
+    category: CATEGORY,
+    kind: ValueKind::Bool,
+    default: "true",
+    tighten_to: Some("false"),
+};
 
 /// The settings the quiz card edits. API name = camelCase of the variant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,7 +75,12 @@ impl QuizSettingKey {
     }
 }
 
-pub fn update_setting(conn: &mut Connection, key: QuizSettingKey, value: SettingValue, at_ms: i64) -> AppResult<UpdateOutcome> {
+pub fn update_setting(
+    conn: &mut Connection,
+    key: QuizSettingKey,
+    value: SettingValue,
+    at_ms: i64,
+) -> AppResult<UpdateOutcome> {
     settings::apply_setting(conn, &key.spec(), &value, at_ms, || Ok(()))
 }
 
@@ -134,16 +154,54 @@ mod tests {
     fn the_release_limits_cannot_be_loosened_while_the_lock_is_held() {
         let mut conn = open_in_memory().expect("db");
         set_lock_for_test(&conn, true);
-        let outcome = update_setting(&mut conn, QuizSettingKey::ReleaseMaxAttemptsPerDay, SettingValue::Int(20), 5).expect("apply");
-        assert_eq!(outcome, UpdateOutcome::RejectedLocked { key: "quiz.release_max_attempts_per_day".into() });
-        assert_eq!(QuizConfig::load(&conn).expect("load").release_max_attempts_per_day, 4);
-        update_setting(&mut conn, QuizSettingKey::CheckinEnabled, SettingValue::Bool(false), 6).expect("tighten stays allowed");
+        let outcome = update_setting(
+            &mut conn,
+            QuizSettingKey::ReleaseMaxAttemptsPerDay,
+            SettingValue::Int(20),
+            5,
+        )
+        .expect("apply");
+        assert_eq!(
+            outcome,
+            UpdateOutcome::RejectedLocked {
+                key: "quiz.release_max_attempts_per_day".into()
+            }
+        );
+        assert_eq!(
+            QuizConfig::load(&conn)
+                .expect("load")
+                .release_max_attempts_per_day,
+            4
+        );
+        update_setting(
+            &mut conn,
+            QuizSettingKey::CheckinEnabled,
+            SettingValue::Bool(false),
+            6,
+        )
+        .expect("tighten stays allowed");
     }
 
     #[test]
     fn out_of_range_values_are_rejected() {
         let mut conn = open_in_memory().expect("db");
-        assert!(update_setting(&mut conn, QuizSettingKey::ReleaseCooldownMin, SettingValue::Int(0), 1).is_err());
-        assert!(update_setting(&mut conn, QuizSettingKey::ReleaseMaxAttemptsPerDay, SettingValue::Int(21), 1).is_err());
+        assert!(
+            update_setting(
+                &mut conn,
+                QuizSettingKey::ReleaseCooldownMin,
+                SettingValue::Int(0),
+                1
+            )
+            .is_err()
+        );
+        assert!(
+            update_setting(
+                &mut conn,
+                QuizSettingKey::ReleaseMaxAttemptsPerDay,
+                SettingValue::Int(21),
+                1
+            )
+            .is_err()
+        );
     }
 }

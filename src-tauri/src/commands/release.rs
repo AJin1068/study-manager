@@ -5,7 +5,7 @@
 use chrono::Local;
 use tauri::{AppHandle, Emitter, State};
 
-use super::{lock_db, AppState};
+use super::{AppState, lock_db};
 use crate::clock::now_ms;
 use crate::error::AppResult;
 use crate::quiz::release::{self as quiz_release, ReleaseQuizStatus};
@@ -38,7 +38,9 @@ pub fn submit_release(
     let effective = state.high_water.observe(now_ms()?);
     let (outcome, snapshot) = {
         let mut conn = lock_db(&state.db)?;
-        let outcome = state.release.submit(&mut conn, &Local, challenge_id, &typed, effective)?;
+        let outcome = state
+            .release
+            .submit(&mut conn, &Local, challenge_id, &typed, effective)?;
         let snapshot = released_snapshot(&conn, &outcome, effective)?;
         (outcome, snapshot)
     };
@@ -59,7 +61,10 @@ pub fn submit_release_quiz(
     let effective = state.high_water.observe(now_ms()?);
     let (outcome, snapshot) = {
         let mut conn = lock_db(&state.db)?;
-        let outcome = state.release.submit_quiz(&mut conn, &Local, challenge_id, &answers, effective)?;
+        let outcome =
+            state
+                .release
+                .submit_quiz(&mut conn, &Local, challenge_id, &answers, effective)?;
         let snapshot = released_snapshot(&conn, &outcome, effective)?;
         (outcome, snapshot)
     };
@@ -85,9 +90,16 @@ fn wake_phone(state: &AppState, outcome: &ReleaseOutcome) {
 
 type ReleasedSnapshot = Option<(crate::timer::model::TimerState, PassStatus)>;
 
-fn released_snapshot(conn: &rusqlite::Connection, outcome: &ReleaseOutcome, effective: i64) -> AppResult<ReleasedSnapshot> {
+fn released_snapshot(
+    conn: &rusqlite::Connection,
+    outcome: &ReleaseOutcome,
+    effective: i64,
+) -> AppResult<ReleasedSnapshot> {
     if matches!(outcome, ReleaseOutcome::Released { .. }) {
-        Ok(Some((timer::current_state(conn, &Local, effective)?, study_pass::status(conn, &Local, effective)?)))
+        Ok(Some((
+            timer::current_state(conn, &Local, effective)?,
+            study_pass::status(conn, &Local, effective)?,
+        )))
     } else {
         Ok(None)
     }
@@ -121,7 +133,7 @@ pub fn list_passes(state: State<'_, AppState>) -> AppResult<Vec<PassRecord>> {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     use super::*;
     use crate::quiz::{ItemKind, QuizQuestion};
@@ -130,8 +142,12 @@ mod tests {
 
     #[test]
     fn release_wire_shapes_match_the_shared_fixture() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../src/api/fixtures/release-contract.json");
-        let expected: Value = serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../src/api/fixtures/release-contract.json"
+        );
+        let expected: Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
         let actual = json!({
             "challenge": ReleaseChallenge {
                 challenge_id: 3,

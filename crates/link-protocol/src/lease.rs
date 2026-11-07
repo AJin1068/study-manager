@@ -74,7 +74,12 @@ impl std::error::Error for LeaseError {}
 
 impl LockLease {
     /// A lock that holds until the end of the segment plus the grace.
-    pub fn locked(run_id: &str, seq: i64, issued_at_ms: i64, segment_end_ms: i64) -> Result<Self, LeaseError> {
+    pub fn locked(
+        run_id: &str,
+        seq: i64,
+        issued_at_ms: i64,
+        segment_end_ms: i64,
+    ) -> Result<Self, LeaseError> {
         let lease = Self {
             run_id: run_id.to_string(),
             seq,
@@ -87,7 +92,12 @@ impl LockLease {
         Ok(lease)
     }
 
-    pub fn free(run_id: &str, seq: i64, issued_at_ms: i64, cause: ReleaseCause) -> Result<Self, LeaseError> {
+    pub fn free(
+        run_id: &str,
+        seq: i64,
+        issued_at_ms: i64,
+        cause: ReleaseCause,
+    ) -> Result<Self, LeaseError> {
         let lease = Self {
             run_id: run_id.to_string(),
             seq,
@@ -146,10 +156,15 @@ impl LeaseReceipt {
     /// cap when it arrives (a forged or replayed "lock forever").
     pub fn new(lease: LockLease, server_now_ms: i64) -> Result<Self, LeaseError> {
         lease.validate()?;
-        if lease.state == LeaseState::Locked && lease.valid_until_ms.saturating_sub(server_now_ms) > MAX_LEASE_MS {
+        if lease.state == LeaseState::Locked
+            && lease.valid_until_ms.saturating_sub(server_now_ms) > MAX_LEASE_MS
+        {
             return Err(LeaseError::TooLong);
         }
-        Ok(Self { lease, server_now_ms })
+        Ok(Self {
+            lease,
+            server_now_ms,
+        })
     }
 
     pub fn lease(&self) -> &LockLease {
@@ -162,7 +177,10 @@ impl LeaseReceipt {
 
     /// Milliseconds of lock left at the moment of receipt (never negative).
     pub fn remaining_at_receipt_ms(&self) -> i64 {
-        self.lease.valid_until_ms.saturating_sub(self.server_now_ms).max(0)
+        self.lease
+            .valid_until_ms
+            .saturating_sub(self.server_now_ms)
+            .max(0)
     }
 }
 

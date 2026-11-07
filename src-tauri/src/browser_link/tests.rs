@@ -7,8 +7,10 @@ use std::time::Duration;
 
 use rusqlite::Connection;
 
-use super::protocol::{write_frame, MAX_FRAME_BYTES};
-use super::service::{LinkEnv, RulesJudge, Service, TabContext, TabJudge, Verdict, REASON_SITE_ALLOWED_PASS};
+use super::protocol::{MAX_FRAME_BYTES, write_frame};
+use super::service::{
+    LinkEnv, REASON_SITE_ALLOWED_PASS, RulesJudge, Service, TabContext, TabJudge, Verdict,
+};
 use super::{LinkHub, LinkStatus};
 use crate::db::open_in_memory;
 use crate::enforce::model::{EnforceMode, EntryKind, EntrySource};
@@ -21,7 +23,8 @@ use crate::testutil::capture_logs;
 pub(super) const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 pub(super) const EXT: &str = "abcdefghijklmnopabcdefghijklmnop";
 const OTHER_EXT: &str = "ponmlkjihgfedcbaponmlkjihgfedcba";
-const SECRET_URL: &str = "https://Docs.Example.com:8443/private/path-xyz?session=SECRETQ#frag-secret";
+const SECRET_URL: &str =
+    "https://Docs.Example.com:8443/private/path-xyz?session=SECRETQ#frag-secret";
 
 pub(super) struct TestStream {
     input: Cursor<Vec<u8>>,
@@ -32,7 +35,11 @@ pub(super) struct TestStream {
 
 impl TestStream {
     pub(super) fn new(input: Vec<u8>) -> TestStream {
-        TestStream { input: Cursor::new(input), output: Vec::new(), writes_left: None }
+        TestStream {
+            input: Cursor::new(input),
+            output: Vec::new(),
+            writes_left: None,
+        }
     }
 
     pub(super) fn replies(&self) -> Vec<serde_json::Value> {
@@ -121,12 +128,36 @@ fn rig(verdict: Verdict, in_study: bool, mode: EnforceMode) -> Rig {
     let db = Arc::new(Mutex::new(conn));
     let changes = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&changes);
-    let hub = Arc::new(LinkHub::new(Box::new(move |s| sink.lock().expect("sink").push(s))));
-    let window = in_study.then_some(StudyWindow { run_id: None, segment_id: None });
-    let env = Arc::new(FakeEnv { now: AtomicI64::new(1_000_000), window: Mutex::new(window) });
-    let judge = Arc::new(FixedJudge { verdict, calls: AtomicU32::new(0) });
-    let service = Service::new(Arc::clone(&db), Arc::clone(&hub), env, judge.clone(), TOKEN.into(), vec![EXT.to_owned()]);
-    Rig { service, db, hub, judge, changes }
+    let hub = Arc::new(LinkHub::new(Box::new(move |s| {
+        sink.lock().expect("sink").push(s)
+    })));
+    let window = in_study.then_some(StudyWindow {
+        run_id: None,
+        segment_id: None,
+    });
+    let env = Arc::new(FakeEnv {
+        now: AtomicI64::new(1_000_000),
+        window: Mutex::new(window),
+    });
+    let judge = Arc::new(FixedJudge {
+        verdict,
+        calls: AtomicU32::new(0),
+    });
+    let service = Service::new(
+        Arc::clone(&db),
+        Arc::clone(&hub),
+        env,
+        judge.clone(),
+        TOKEN.into(),
+        vec![EXT.to_owned()],
+    );
+    Rig {
+        service,
+        db,
+        hub,
+        judge,
+        changes,
+    }
 }
 
 pub(super) fn frames(messages: &[serde_json::Value]) -> Vec<u8> {
@@ -163,7 +194,9 @@ fn events(rig: &Rig) -> Vec<(String, String, String, Option<String>)> {
     let conn = rig.db.lock().expect("db");
     let mut rows = store::list_block_events(&conn, 100).expect("events");
     rows.reverse();
-    rows.into_iter().map(|e| (e.target_kind, e.target_id, e.action, e.detail_code)).collect()
+    rows.into_iter()
+        .map(|e| (e.target_kind, e.target_id, e.action, e.detail_code))
+        .collect()
 }
 
 #[test]
@@ -183,7 +216,10 @@ fn wrong_token_or_origin_is_refused_without_records_or_status_change() {
         let replies = stream.replies();
         assert_eq!(replies.len(), 1, "exactly one error reply for {messages:?}");
         assert_eq!(replies[0]["type"], "error");
-        assert!(events(&rig).is_empty(), "no block_events for a refused peer");
+        assert!(
+            events(&rig).is_empty(),
+            "no block_events for a refused peer"
+        );
         assert!(!rig.hub.status().connected);
         assert!(rig.changes.lock().expect("changes").is_empty());
     }
@@ -203,7 +239,10 @@ fn no_allowed_extensions_means_everyone_is_refused() {
     let service = Service::new(
         Arc::clone(&rig.db),
         Arc::clone(&rig.hub),
-        Arc::new(FakeEnv { now: AtomicI64::new(5), window: Mutex::new(None) }),
+        Arc::new(FakeEnv {
+            now: AtomicI64::new(5),
+            window: Mutex::new(None),
+        }),
         rig.judge.clone(),
         TOKEN.into(),
         Vec::new(),
@@ -222,8 +261,18 @@ fn connect_and_disconnect_are_recorded_and_reported() {
     assert_eq!(
         events(&rig),
         vec![
-            ("extension".into(), EXT.into(), "extension_connected".into(), None),
-            ("extension".into(), EXT.into(), "extension_disconnected".into(), Some("closed".into())),
+            (
+                "extension".into(),
+                EXT.into(),
+                "extension_connected".into(),
+                None
+            ),
+            (
+                "extension".into(),
+                EXT.into(),
+                "extension_disconnected".into(),
+                Some("closed".into())
+            ),
         ]
     );
     let status = rig.hub.status();
@@ -232,7 +281,10 @@ fn connect_and_disconnect_are_recorded_and_reported() {
     assert_eq!(status.last_disconnect_reason.as_deref(), Some("closed"));
     assert!(status.last_connected_at_ms.is_some() && status.last_disconnected_at_ms.is_some());
     let seen = rig.changes.lock().expect("changes");
-    assert_eq!(seen.iter().map(|s| s.connected).collect::<Vec<_>>(), vec![true, false]);
+    assert_eq!(
+        seen.iter().map(|s| s.connected).collect::<Vec<_>>(),
+        vec![true, false]
+    );
 }
 
 #[test]
@@ -257,9 +309,16 @@ fn every_way_a_link_can_end_records_a_disconnect() {
         let rig = rig(Verdict::allow("x"), true, EnforceMode::DryRun);
         run(&rig, input);
         let log = events(&rig);
-        assert_eq!(log.last().map(|e| e.2.as_str()), Some("extension_disconnected"), "{reason}");
+        assert_eq!(
+            log.last().map(|e| e.2.as_str()),
+            Some("extension_disconnected"),
+            "{reason}"
+        );
         assert_eq!(log.last().and_then(|e| e.3.as_deref()), Some(reason));
-        assert_eq!(rig.hub.status().last_disconnect_reason.as_deref(), Some(reason));
+        assert_eq!(
+            rig.hub.status().last_disconnect_reason.as_deref(),
+            Some(reason)
+        );
         assert!(!rig.hub.status().connected);
     }
 }
@@ -272,7 +331,10 @@ fn a_dead_peer_write_failure_still_records_the_disconnect() {
     let mut stream = TestStream::new(input);
     stream.writes_left = Some(1); // the hello ack gets through, the verdict does not
     rig.service.serve(&mut stream);
-    assert_eq!(events(&rig).last().and_then(|e| e.3.clone()).as_deref(), Some("write_failed"));
+    assert_eq!(
+        events(&rig).last().and_then(|e| e.3.clone()).as_deref(),
+        Some("write_failed")
+    );
 }
 
 #[test]
@@ -283,7 +345,10 @@ fn each_tab_event_gets_exactly_one_verdict_with_its_tab_id() {
     let stream = run(&rig, frames(&messages));
     let replies = stream.replies();
     assert_eq!(replies.len(), 3);
-    assert_eq!((replies[1]["tabId"].as_i64(), replies[1]["type"].as_str()), (Some(11), Some("verdict")));
+    assert_eq!(
+        (replies[1]["tabId"].as_i64(), replies[1]["type"].as_str()),
+        (Some(11), Some("verdict"))
+    );
     assert_eq!(replies[2]["tabId"].as_i64(), Some(12));
     assert_eq!(replies[1]["verdict"], "allow");
 }
@@ -302,7 +367,13 @@ fn outside_study_and_non_web_tabs_are_allowed_without_judging() {
     let mut messages = handshake();
     messages.push(tab("chrome://settings", 2));
     let replies = run(&non_web, frames(&messages)).replies();
-    assert_eq!((replies[1]["verdict"].as_str(), replies[1]["reasonCode"].as_str()), (Some("allow"), Some("not_web")));
+    assert_eq!(
+        (
+            replies[1]["verdict"].as_str(),
+            replies[1]["reasonCode"].as_str()
+        ),
+        (Some("allow"), Some("not_web"))
+    );
     assert_eq!(non_web.judge.calls.load(Ordering::SeqCst), 0);
 }
 
@@ -312,9 +383,26 @@ fn block_verdict_is_enforced_in_enforce_mode_and_recorded_by_domain_only() {
     let mut messages = handshake();
     messages.push(tab(SECRET_URL, 5));
     let replies = run(&rig, frames(&messages)).replies();
-    assert_eq!((replies[1]["verdict"].as_str(), replies[1]["reasonCode"].as_str()), (Some("block"), Some("blocked_site")));
-    let blocked: Vec<_> = events(&rig).into_iter().filter(|e| e.2 == "site_blocked").collect();
-    assert_eq!(blocked, vec![("site".into(), "docs.example.com".into(), "site_blocked".into(), Some("blocked_site".into()))]);
+    assert_eq!(
+        (
+            replies[1]["verdict"].as_str(),
+            replies[1]["reasonCode"].as_str()
+        ),
+        (Some("block"), Some("blocked_site"))
+    );
+    let blocked: Vec<_> = events(&rig)
+        .into_iter()
+        .filter(|e| e.2 == "site_blocked")
+        .collect();
+    assert_eq!(
+        blocked,
+        vec![(
+            "site".into(),
+            "docs.example.com".into(),
+            "site_blocked".into(),
+            Some("blocked_site".into())
+        )]
+    );
 }
 
 #[test]
@@ -323,18 +411,36 @@ fn dry_run_records_the_block_but_lets_the_page_load() {
     let mut messages = handshake();
     messages.push(tab("https://games.example/play", 5));
     let replies = run(&rig, frames(&messages)).replies();
-    assert_eq!((replies[1]["verdict"].as_str(), replies[1]["reasonCode"].as_str()), (Some("allow"), Some("dry_run")));
-    assert!(events(&rig).iter().any(|e| e.2 == "site_blocked" && e.1 == "games.example"));
+    assert_eq!(
+        (
+            replies[1]["verdict"].as_str(),
+            replies[1]["reasonCode"].as_str()
+        ),
+        (Some("allow"), Some("dry_run"))
+    );
+    assert!(
+        events(&rig)
+            .iter()
+            .any(|e| e.2 == "site_blocked" && e.1 == "games.example")
+    );
 }
 
 #[test]
 fn pass_allowance_is_recorded() {
-    let rig = rig(Verdict::allow(REASON_SITE_ALLOWED_PASS), true, EnforceMode::Enforce);
+    let rig = rig(
+        Verdict::allow(REASON_SITE_ALLOWED_PASS),
+        true,
+        EnforceMode::Enforce,
+    );
     let mut messages = handshake();
     messages.push(tab("https://games.example/play", 5));
     let replies = run(&rig, frames(&messages)).replies();
     assert_eq!(replies[1]["verdict"], "allow");
-    assert!(events(&rig).iter().any(|e| e.2 == "site_allowed_pass" && e.1 == "games.example"));
+    assert!(
+        events(&rig)
+            .iter()
+            .any(|e| e.2 == "site_allowed_pass" && e.1 == "games.example")
+    );
 }
 
 #[test]
@@ -367,9 +473,24 @@ fn logs_and_rows_never_contain_url_path_query_or_title() {
             run(&rig, input);
         });
         let rows = format!("{:?}", events(&rig));
-        for forbidden in ["private", "path-xyz", "SECRETQ", "frag-secret", "SECRET-TITLE", "token=abc", "/account", "8443"] {
-            assert!(!logs.contains(forbidden), "log leaked `{forbidden}`: {logs}");
-            assert!(!rows.contains(forbidden), "rows leaked `{forbidden}`: {rows}");
+        for forbidden in [
+            "private",
+            "path-xyz",
+            "SECRETQ",
+            "frag-secret",
+            "SECRET-TITLE",
+            "token=abc",
+            "/account",
+            "8443",
+        ] {
+            assert!(
+                !logs.contains(forbidden),
+                "log leaked `{forbidden}`: {logs}"
+            );
+            assert!(
+                !rows.contains(forbidden),
+                "rows leaked `{forbidden}`: {rows}"
+            );
         }
         assert!(!logs.contains(TOKEN));
         if logs.contains("docs.example.com") {
@@ -393,7 +514,13 @@ fn panicking_judge_still_records_the_disconnect() {
     let service = Service::new(
         Arc::clone(&base.db),
         Arc::clone(&base.hub),
-        Arc::new(FakeEnv { now: AtomicI64::new(9), window: Mutex::new(Some(StudyWindow { run_id: None, segment_id: None })) }),
+        Arc::new(FakeEnv {
+            now: AtomicI64::new(9),
+            window: Mutex::new(Some(StudyWindow {
+                run_id: None,
+                segment_id: None,
+            })),
+        }),
         Arc::new(Boom),
         TOKEN.into(),
         vec![EXT.to_owned()],
@@ -402,8 +529,14 @@ fn panicking_judge_still_records_the_disconnect() {
     messages.push(tab("https://a.example/", 1));
     let mut stream = TestStream::new(frames(&messages));
     service.serve(&mut stream);
-    assert_eq!(events(&base).last().and_then(|e| e.3.clone()).as_deref(), Some("internal_error"));
-    assert!(!base.hub.status().connected, "the lock must not be left poisoned-open");
+    assert_eq!(
+        events(&base).last().and_then(|e| e.3.clone()).as_deref(),
+        Some("internal_error")
+    );
+    assert!(
+        !base.hub.status().connected,
+        "the lock must not be left poisoned-open"
+    );
 }
 
 #[test]
@@ -425,17 +558,25 @@ fn rules_rig(entries: &[&str], stored: Option<&str>, in_study: bool, mode: Enfor
     {
         let conn = base.db.lock().expect("db");
         for entry in entries {
-            store::insert_block_entry(&conn, EntryKind::Site, entry, EntrySource::User, None, 1).expect("entry");
+            store::insert_block_entry(&conn, EntryKind::Site, entry, EntrySource::User, None, 1)
+                .expect("entry");
         }
         if let Some(json) = stored {
-            store::put_setting(&conn, crate::site_rules::SITE_RULES_KEY, "browser", json, 1).expect("rules");
+            store::put_setting(&conn, crate::site_rules::SITE_RULES_KEY, "browser", json, 1)
+                .expect("rules");
         }
     }
-    let window = in_study.then_some(StudyWindow { run_id: None, segment_id: None });
+    let window = in_study.then_some(StudyWindow {
+        run_id: None,
+        segment_id: None,
+    });
     let service = Service::new(
         Arc::clone(&base.db),
         Arc::clone(&base.hub),
-        Arc::new(FakeEnv { now: AtomicI64::new(1_000_000), window: Mutex::new(window) }),
+        Arc::new(FakeEnv {
+            now: AtomicI64::new(1_000_000),
+            window: Mutex::new(window),
+        }),
         Arc::new(RulesJudge::new(Arc::clone(&base.db))),
         TOKEN.into(),
         vec![EXT.to_owned()],
@@ -449,19 +590,48 @@ fn verdicts(rig: &Rig, urls: &[&str]) -> Vec<(String, String)> {
     let replies = run(rig, frames(&messages)).replies();
     replies[1..]
         .iter()
-        .map(|r| (r["verdict"].as_str().unwrap_or("").to_owned(), r["reasonCode"].as_str().unwrap_or("").to_owned()))
+        .map(|r| {
+            (
+                r["verdict"].as_str().unwrap_or("").to_owned(),
+                r["reasonCode"].as_str().unwrap_or("").to_owned(),
+            )
+        })
         .collect()
 }
 
 #[test]
 fn tab_change_in_a_locked_study_block_gets_a_rule_verdict() {
     let rig = rules_rig(&["reddit.com"], None, true, EnforceMode::Enforce);
-    let got = verdicts(&rig, &["https://old.reddit.com/r/rust?x=SECRETQ", "https://docs.rs/serde", "chrome://newtab"]);
-    let expected: Vec<(String, String)> =
-        [("block", "blocked_site"), ("allow", "unlisted_allowed"), ("allow", "not_web")].iter().map(|(a, b)| ((*a).into(), (*b).into())).collect();
+    let got = verdicts(
+        &rig,
+        &[
+            "https://old.reddit.com/r/rust?x=SECRETQ",
+            "https://docs.rs/serde",
+            "chrome://newtab",
+        ],
+    );
+    let expected: Vec<(String, String)> = [
+        ("block", "blocked_site"),
+        ("allow", "unlisted_allowed"),
+        ("allow", "not_web"),
+    ]
+    .iter()
+    .map(|(a, b)| ((*a).into(), (*b).into()))
+    .collect();
     assert_eq!(got, expected);
-    let blocked: Vec<_> = events(&rig).into_iter().filter(|e| e.2 == "site_blocked").collect();
-    assert_eq!(blocked, vec![("site".into(), "old.reddit.com".into(), "site_blocked".into(), Some("blocked_site".into()))]);
+    let blocked: Vec<_> = events(&rig)
+        .into_iter()
+        .filter(|e| e.2 == "site_blocked")
+        .collect();
+    assert_eq!(
+        blocked,
+        vec![(
+            "site".into(),
+            "old.reddit.com".into(),
+            "site_blocked".into(),
+            Some("blocked_site".into())
+        )]
+    );
 }
 
 #[test]
@@ -478,19 +648,39 @@ fn non_canonical_urls_are_judged_not_waved_through_as_not_web() {
     for (url, got) in urls.iter().zip(verdicts(&rig, &urls)) {
         assert_eq!(got.0, "block", "url: {url}");
     }
-    let not_web = verdicts(&rig, &["chrome://settings", "about:blank", "https://exa mple.com/"]);
-    assert!(not_web.iter().all(|v| v == &("allow".to_owned(), "not_web".to_owned())));
+    let not_web = verdicts(
+        &rig,
+        &["chrome://settings", "about:blank", "https://exa mple.com/"],
+    );
+    assert!(
+        not_web
+            .iter()
+            .all(|v| v == &("allow".to_owned(), "not_web".to_owned()))
+    );
 }
 
 #[test]
 fn strict_mode_blocks_unlisted_sites_and_rules_stay_off_outside_study() {
-    let strict = rules_rig(&[], Some(r#"{"strict":true,"allow":["github.com"]}"#), true, EnforceMode::Enforce);
+    let strict = rules_rig(
+        &[],
+        Some(r#"{"strict":true,"allow":["github.com"]}"#),
+        true,
+        EnforceMode::Enforce,
+    );
     let got = verdicts(&strict, &["https://github.com/a", "https://example.org/b"]);
     assert_eq!(got[0], ("allow".to_owned(), "allowed_listed".to_owned()));
     assert_eq!(got[1], ("block".to_owned(), "strict_unlisted".to_owned()));
 
-    let outside = rules_rig(&["reddit.com"], Some(r#"{"strict":true}"#), false, EnforceMode::Enforce);
-    assert_eq!(verdicts(&outside, &["https://reddit.com/"]), vec![("allow".to_owned(), "outside_study".to_owned())]);
+    let outside = rules_rig(
+        &["reddit.com"],
+        Some(r#"{"strict":true}"#),
+        false,
+        EnforceMode::Enforce,
+    );
+    assert_eq!(
+        verdicts(&outside, &["https://reddit.com/"]),
+        vec![("allow".to_owned(), "outside_study".to_owned())]
+    );
     assert!(events(&outside).iter().all(|e| e.0 == "extension"));
 }
 
@@ -506,18 +696,33 @@ fn emergency_pass_turns_a_block_into_a_recorded_allow() {
             [],
         )
         .expect("pass");
-    assert_eq!(verdicts(&rig, &["https://reddit.com/r/x"]), vec![("allow".to_owned(), "site_allowed_pass".to_owned())]);
-    assert!(events(&rig).iter().any(|e| e.2 == "site_allowed_pass" && e.1 == "reddit.com"));
+    assert_eq!(
+        verdicts(&rig, &["https://reddit.com/r/x"]),
+        vec![("allow".to_owned(), "site_allowed_pass".to_owned())]
+    );
+    assert!(
+        events(&rig)
+            .iter()
+            .any(|e| e.2 == "site_allowed_pass" && e.1 == "reddit.com")
+    );
     assert!(events(&rig).iter().all(|e| e.2 != "site_blocked"));
 }
 
 #[test]
 fn rule_decisions_never_store_or_log_url_parts_or_titles() {
-    let rig = rules_rig(&["bank.example"], Some(r#"{"youtubePlaylists":["PLstudy"]}"#), true, EnforceMode::Enforce);
+    let rig = rules_rig(
+        &["bank.example"],
+        Some(r#"{"youtubePlaylists":["PLstudy"]}"#),
+        true,
+        EnforceMode::Enforce,
+    );
     let mut messages = handshake();
     messages.push(tab(SECRET_URL, 1));
     messages.push(tab("https://bank.example/account?token=abc#frag-secret", 2));
-    messages.push(tab("https://www.youtube.com/watch?v=VIDSECRET&list=PLstudy", 3));
+    messages.push(tab(
+        "https://www.youtube.com/watch?v=VIDSECRET&list=PLstudy",
+        3,
+    ));
     let input = frames(&messages);
     let logs = capture_logs(|| {
         run(&rig, input);
@@ -525,15 +730,40 @@ fn rule_decisions_never_store_or_log_url_parts_or_titles() {
     let rows = format!("{:?}", events(&rig));
     let all_rows = {
         let conn = rig.db.lock().expect("db");
-        let mut stmt = conn.prepare("SELECT target_id, detail_code FROM block_events").expect("prepare");
-        let rows: Vec<(String, Option<String>)> =
-            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).expect("query").collect::<Result<_, _>>().expect("rows");
+        let mut stmt = conn
+            .prepare("SELECT target_id, detail_code FROM block_events")
+            .expect("prepare");
+        let rows: Vec<(String, Option<String>)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .expect("query")
+            .collect::<Result<_, _>>()
+            .expect("rows");
         format!("{rows:?}")
     };
-    for forbidden in ["private", "path-xyz", "SECRETQ", "frag-secret", "SECRET-TITLE", "token=abc", "/account", "VIDSECRET", "PLstudy", "8443"] {
-        assert!(!logs.contains(forbidden), "log leaked `{forbidden}`: {logs}");
-        assert!(!rows.contains(forbidden), "rows leaked `{forbidden}`: {rows}");
-        assert!(!all_rows.contains(forbidden), "db leaked `{forbidden}`: {all_rows}");
+    for forbidden in [
+        "private",
+        "path-xyz",
+        "SECRETQ",
+        "frag-secret",
+        "SECRET-TITLE",
+        "token=abc",
+        "/account",
+        "VIDSECRET",
+        "PLstudy",
+        "8443",
+    ] {
+        assert!(
+            !logs.contains(forbidden),
+            "log leaked `{forbidden}`: {logs}"
+        );
+        assert!(
+            !rows.contains(forbidden),
+            "rows leaked `{forbidden}`: {rows}"
+        );
+        assert!(
+            !all_rows.contains(forbidden),
+            "db leaked `{forbidden}`: {all_rows}"
+        );
     }
 }
 
@@ -542,8 +772,22 @@ fn allowed_extension_id_is_valid_and_documented_with_the_extension() {
     assert_eq!(super::ALLOWED_EXTENSION_IDS.len(), 1);
     let id = super::ALLOWED_EXTENSION_IDS[0];
     assert!(super::protocol::is_valid_ext_id(id));
-    let readme = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../extension/README.md")).expect("readme");
-    assert!(readme.contains(id), "extension/README.md must name the ID the app allows");
-    let manifest = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../extension/public/manifest.json")).expect("manifest");
-    assert!(manifest.contains("\"key\""), "the ID is only stable while the manifest pins a key");
+    let readme = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../extension/README.md"
+    ))
+    .expect("readme");
+    assert!(
+        readme.contains(id),
+        "extension/README.md must name the ID the app allows"
+    );
+    let manifest = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../extension/public/manifest.json"
+    ))
+    .expect("manifest");
+    assert!(
+        manifest.contains("\"key\""),
+        "the ID is only stable while the manifest pins a key"
+    );
 }

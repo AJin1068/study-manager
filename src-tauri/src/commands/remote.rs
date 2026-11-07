@@ -5,14 +5,13 @@
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
-use super::{lock_db, AppState, DEFAULT_LIMIT};
+use super::{AppState, DEFAULT_LIMIT, lock_db};
 use crate::clock::now_ms;
 use crate::error::{AppError, AppResult};
 use crate::remote::auth::{AuthError, SignOutReport};
 use crate::remote::config::{self, RemoteConfig, RemoteSettingKey};
 use crate::remote::payload::DeviceRegistration;
 use crate::remote::qr::{self, NtfySubscription};
-use crate::sync::status::SyncStatusView;
 use crate::remote::runtime::{ConnectionTest, IntegrationStatesView};
 use crate::remote::secret_flow;
 use crate::remote::secrets::SecretName;
@@ -20,6 +19,7 @@ use crate::remote::{IntegrationPort, ModeSetting};
 use crate::settings::{SettingValue, UpdateOutcome};
 use crate::store::remote::{self as events, EgressSummaryRow, RemoteEventRow};
 use crate::study;
+use crate::sync::status::SyncStatusView;
 
 pub const REMOTE_STATE_EVENT: &str = "remote://state";
 
@@ -81,17 +81,32 @@ pub fn update_remote_setting(
 
 /// Stores a secret. The value is consumed here: the result carries only the outcome.
 #[tauri::command]
-pub fn save_secret(app: AppHandle, state: State<'_, AppState>, name: SecretName, value: String) -> AppResult<UpdateOutcome> {
+pub fn save_secret(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: SecretName,
+    value: String,
+) -> AppResult<UpdateOutcome> {
     let outcome = {
         let mut conn = lock_db(&state.db)?;
-        secret_flow::save_secret(&mut conn, state.remote.secrets().as_ref(), name, &value, now_ms()?)?
+        secret_flow::save_secret(
+            &mut conn,
+            state.remote.secrets().as_ref(),
+            name,
+            &value,
+            now_ms()?,
+        )?
     };
     announce(&app, &state);
     Ok(outcome)
 }
 
 #[tauri::command]
-pub fn clear_secret(app: AppHandle, state: State<'_, AppState>, name: SecretName) -> AppResult<UpdateOutcome> {
+pub fn clear_secret(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: SecretName,
+) -> AppResult<UpdateOutcome> {
     let outcome = {
         let mut conn = lock_db(&state.db)?;
         secret_flow::clear_secret(&mut conn, state.remote.secrets().as_ref(), name, now_ms()?)?
@@ -101,7 +116,11 @@ pub fn clear_secret(app: AppHandle, state: State<'_, AppState>, name: SecretName
 }
 
 #[tauri::command]
-pub async fn test_connection(app: AppHandle, state: State<'_, AppState>, port: IntegrationPort) -> AppResult<ConnectionTest> {
+pub async fn test_connection(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    port: IntegrationPort,
+) -> AppResult<ConnectionTest> {
     if port == IntegrationPort::Llm {
         // The model call blocks; it runs off the UI thread with the database lock released.
         let llm = std::sync::Arc::clone(&state.llm);
@@ -118,7 +137,10 @@ pub async fn test_connection(app: AppHandle, state: State<'_, AppState>, port: I
 }
 
 #[tauri::command]
-pub fn list_remote_events(state: State<'_, AppState>, limit: Option<i64>) -> AppResult<Vec<RemoteEventRow>> {
+pub fn list_remote_events(
+    state: State<'_, AppState>,
+    limit: Option<i64>,
+) -> AppResult<Vec<RemoteEventRow>> {
     let conn = lock_db(&state.db)?;
     events::list_events(&conn, limit.unwrap_or(DEFAULT_LIMIT))
 }
@@ -135,36 +157,59 @@ pub fn auth_request_otp(state: State<'_, AppState>, email: String) -> AppResult<
         let conn = lock_db(&state.db)?;
         state.remote.supabase(&conn)?
     };
-    handle.auth.request_otp(email.trim()).map_err(AppError::from)
+    handle
+        .auth
+        .request_otp(email.trim())
+        .map_err(AppError::from)
 }
 
 /// Result of entering the mailed code. Expected user-facing outcomes are values, not errors.
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
-#[serde(tag = "status", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "status",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum VerifyOutcome {
-    SignedIn { user_id: String },
+    SignedIn {
+        user_id: String,
+    },
     /// A planned run holds the settings lock: signing in is refused and recorded.
     RejectedLocked,
     InvalidCode,
-    Cooldown { until_ms: i64 },
-    RateLimited { retry_after_ms: u64 },
+    Cooldown {
+        until_ms: i64,
+    },
+    RateLimited {
+        retry_after_ms: u64,
+    },
 }
 
 #[tauri::command]
-pub fn auth_verify_otp(app: AppHandle, state: State<'_, AppState>, email: String, code: String) -> AppResult<VerifyOutcome> {
+pub fn auth_verify_otp(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    email: String,
+    code: String,
+) -> AppResult<VerifyOutcome> {
     let now = now_ms()?;
     let (handle, device_id) = {
         let mut conn = lock_db(&state.db)?;
         if secret_flow::refuse_entry_if_locked(&mut conn, SecretName::SupabaseRefreshToken, now)? {
             return Ok(VerifyOutcome::RejectedLocked);
         }
-        (state.remote.supabase(&conn)?, config::ensure_device_id(&conn, now)?)
+        (
+            state.remote.supabase(&conn)?,
+            config::ensure_device_id(&conn, now)?,
+        )
     };
     let user_id = match handle.auth.verify_otp(email.trim(), code.trim()) {
         Ok(user_id) => user_id,
         Err(AuthError::InvalidCode) => return Ok(VerifyOutcome::InvalidCode),
         Err(AuthError::Cooldown { until_ms }) => return Ok(VerifyOutcome::Cooldown { until_ms }),
-        Err(AuthError::RateLimited { retry_after_ms }) => return Ok(VerifyOutcome::RateLimited { retry_after_ms }),
+        Err(AuthError::RateLimited { retry_after_ms }) => {
+            return Ok(VerifyOutcome::RateLimited { retry_after_ms });
+        }
         Err(other) => return Err(other.into()),
     };
     {
@@ -174,8 +219,15 @@ pub fn auth_verify_otp(app: AppHandle, state: State<'_, AppState>, email: String
     }
     // Register this device so later pushes and heartbeats have a row to point at. Offline or a
     // server hiccup only delays that; sign-in itself stands.
-    let registration = DeviceRegistration { id: device_id, app_version: env!("CARGO_PKG_VERSION").into(), platform: crate::platform::name() };
-    if let Err(err) = handle.rest.insert("device_register", "devices", &registration, true) {
+    let registration = DeviceRegistration {
+        id: device_id,
+        app_version: env!("CARGO_PKG_VERSION").into(),
+        platform: crate::platform::name(),
+    };
+    if let Err(err) = handle
+        .rest
+        .insert("device_register", "devices", &registration, true)
+    {
         tracing::warn!(event = "device_register_failed", code = err.code());
     }
     announce(&app, &state);
@@ -201,7 +253,10 @@ pub fn auth_sign_out(app: AppHandle, state: State<'_, AppState>) -> AppResult<Si
     };
     let report = match handle {
         Some(handle) => handle.auth.sign_out(&device_id)?,
-        None => SignOutReport { device_removed: false, server_session_ended: false },
+        None => SignOutReport {
+            device_removed: false,
+            server_session_ended: false,
+        },
     };
     {
         let conn = lock_db(&state.db)?;
@@ -219,7 +274,10 @@ pub fn auth_sign_out(app: AppHandle, state: State<'_, AppState>) -> AppResult<Si
         secret_flow::record_cleared(&conn, SecretName::SupabaseRefreshToken, tighten, now)?;
     }
     announce(&app, &state);
-    Ok(SignOutResult { device_removed: report.device_removed, server_session_ended: report.server_session_ended })
+    Ok(SignOutResult {
+        device_removed: report.device_removed,
+        server_session_ended: report.server_session_ended,
+    })
 }
 
 /// Last success times and failure codes of the mirror and the "PC is on" signal.
@@ -244,7 +302,11 @@ pub fn get_ntfy_subscription(state: State<'_, AppState>) -> AppResult<Option<Ntf
         let conn = lock_db(&state.db)?;
         RemoteConfig::load(&conn)?.notify_ntfy_server
     };
-    let topic = state.remote.secrets().get(SecretName::NtfyTopic).map_err(|_| AppError::Remote("secret_store_unavailable".into()))?;
+    let topic = state
+        .remote
+        .secrets()
+        .get(SecretName::NtfyTopic)
+        .map_err(|_| AppError::Remote("secret_store_unavailable".into()))?;
     Ok(topic.and_then(|t| qr::subscription(&server, t.expose())))
 }
 
@@ -260,15 +322,23 @@ pub fn test_notification(app: AppHandle, state: State<'_, AppState>) -> AppResul
         Ok(()) => (true, "ok".to_string()),
         Err(err) => (false, err.code().to_string()),
     };
-    let health = if ok { crate::remote::Health::Ok } else { crate::remote::Health::Degraded { code: code.clone() } };
+    let health = if ok {
+        crate::remote::Health::Ok
+    } else {
+        crate::remote::Health::Degraded { code: code.clone() }
+    };
     state.remote.record_health(IntegrationPort::Notify, health);
     announce(&app, &state);
-    Ok(ConnectionTest { port: IntegrationPort::Notify, ok, code })
+    Ok(ConnectionTest {
+        port: IntegrationPort::Notify,
+        ok,
+        code,
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     use super::*;
     use crate::remote::auth::AuthStatus;
@@ -277,27 +347,84 @@ mod tests {
     use crate::remote::secrets::SecretStoreKind;
     use crate::remote::{Health, IntegrationMode, IntegrationState};
 
-    fn port(port: IntegrationPort, setting: ModeSetting, mode: IntegrationMode, configured: bool, health: Health, last_ok_ms: Option<i64>) -> IntegrationState {
-        IntegrationState { port, setting, mode, configured, health, last_ok_ms }
+    fn port(
+        port: IntegrationPort,
+        setting: ModeSetting,
+        mode: IntegrationMode,
+        configured: bool,
+        health: Health,
+        last_ok_ms: Option<i64>,
+    ) -> IntegrationState {
+        IntegrationState {
+            port,
+            setting,
+            mode,
+            configured,
+            health,
+            last_ok_ms,
+        }
     }
 
     #[test]
     fn remote_wire_shapes_match_the_shared_fixture() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../src/api/fixtures/remote-contract.json");
-        let expected: Value = serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../src/api/fixtures/remote-contract.json"
+        );
+        let expected: Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
         let view = IntegrationStatesView {
             ports: vec![
-                port(IntegrationPort::Supabase, ModeSetting::Auto, IntegrationMode::Live, true, Health::Degraded { code: "auth_expired".into() }, Some(1_773_000_000_000)),
-                port(IntegrationPort::Notify, ModeSetting::Mock, IntegrationMode::Mock, false, Health::Unknown, None),
-                port(IntegrationPort::Llm, ModeSetting::Auto, IntegrationMode::NotConfigured, false, Health::Ok, None),
-                port(IntegrationPort::Push, ModeSetting::Auto, IntegrationMode::NotConfigured, false, Health::Unknown, None),
+                port(
+                    IntegrationPort::Supabase,
+                    ModeSetting::Auto,
+                    IntegrationMode::Live,
+                    true,
+                    Health::Degraded {
+                        code: "auth_expired".into(),
+                    },
+                    Some(1_773_000_000_000),
+                ),
+                port(
+                    IntegrationPort::Notify,
+                    ModeSetting::Mock,
+                    IntegrationMode::Mock,
+                    false,
+                    Health::Unknown,
+                    None,
+                ),
+                port(
+                    IntegrationPort::Llm,
+                    ModeSetting::Auto,
+                    IntegrationMode::NotConfigured,
+                    false,
+                    Health::Ok,
+                    None,
+                ),
+                port(
+                    IntegrationPort::Push,
+                    ModeSetting::Auto,
+                    IntegrationMode::NotConfigured,
+                    false,
+                    Health::Unknown,
+                    None,
+                ),
             ],
             secret_store: SecretStoreStatus {
                 kind: SecretStoreKind::SessionOnly,
                 degraded_code: Some("secret_store_session_only"),
-                configured: SecretFlags { anthropic_api_key: false, supabase_refresh_token: false, ntfy_topic: true },
+                configured: SecretFlags {
+                    anthropic_api_key: false,
+                    supabase_refresh_token: false,
+                    ntfy_topic: true,
+                },
             },
-            auth: AuthStatus { signed_in: false, user_id: None, degraded_code: Some("auth_expired"), cooldown_until_ms: None },
+            auth: AuthStatus {
+                signed_in: false,
+                user_id: None,
+                degraded_code: Some("auth_expired"),
+                cooldown_until_ms: None,
+            },
         };
         let settings = RemoteConfig {
             supabase_endpoint: "https://abc.supabase.co".into(),

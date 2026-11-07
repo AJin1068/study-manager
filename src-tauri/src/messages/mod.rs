@@ -28,7 +28,13 @@ pub enum Tone {
 }
 
 impl Tone {
-    pub const ALL: [Tone; 5] = [Tone::Gentle, Tone::Warm, Tone::Normal, Tone::Firm, Tone::Harsh];
+    pub const ALL: [Tone; 5] = [
+        Tone::Gentle,
+        Tone::Warm,
+        Tone::Normal,
+        Tone::Firm,
+        Tone::Harsh,
+    ];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -117,9 +123,23 @@ pub const MESSAGE_EVENT: &str = "message://cheer";
 /// kinds that can ask a review question (not for a distraction, which stays short).
 pub fn compose(kind: Kind, tone: Tone, concept: Option<&str>, seed: u64) -> Message {
     let notice = templates::general(kind, tone, seed).to_string();
-    let wiki = concept.filter(|_| kind != Kind::Distraction).map(|c| templates::wiki(tone, c, seed));
+    let wiki = concept
+        .filter(|_| kind != Kind::Distraction)
+        .map(|c| templates::wiki(tone, c, seed));
     match wiki {
-        Some(text) => Message { kind, tone, source: Source::Wiki, text, notice },
-        None => Message { kind, tone, source: Source::Template, text: notice.clone(), notice },
+        Some(text) => Message {
+            kind,
+            tone,
+            source: Source::Wiki,
+            text,
+            notice,
+        },
+        None => Message {
+            kind,
+            tone,
+            source: Source::Template,
+            text: notice.clone(),
+            notice,
+        },
     }
 }

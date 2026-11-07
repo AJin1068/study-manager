@@ -35,7 +35,9 @@ impl Default for UreqTransport {
 
 /// `https://...`, or `http://localhost` / `http://127.0.0.1` (the same rule as the pairing offer).
 pub fn url_allowed(url: &str) -> bool {
-    let Some((scheme, rest)) = url.split_once("://") else { return false };
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return false;
+    };
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
     let host = authority.split(':').next().unwrap_or_default();
     match scheme {
@@ -61,20 +63,38 @@ impl HttpTransport for UreqTransport {
             Method::Get => "GET",
             Method::Post => "POST",
         };
-        let mut builder = ureq::http::Request::builder().method(method).uri(request.url.as_str());
+        let mut builder = ureq::http::Request::builder()
+            .method(method)
+            .uri(request.url.as_str());
         for (name, value) in &request.headers {
             builder = builder.header(name.as_str(), value.as_str());
         }
-        let built = builder.body(request.body.unwrap_or_default()).map_err(|_| TransportError::Network)?;
+        let built = builder
+            .body(request.body.unwrap_or_default())
+            .map_err(|_| TransportError::Network)?;
         let mut response = self.agent.run(built).map_err(map_error)?;
         let status = response.status().as_u16();
         let headers = response
             .headers()
             .iter()
-            .filter_map(|(name, value)| value.to_str().ok().map(|v| (name.as_str().to_string(), v.to_string())))
+            .filter_map(|(name, value)| {
+                value
+                    .to_str()
+                    .ok()
+                    .map(|v| (name.as_str().to_string(), v.to_string()))
+            })
             .collect();
-        let body = response.body_mut().with_config().limit(MAX_RESPONSE_BYTES).read_to_vec().map_err(map_error)?;
-        Ok(HttpResponse { status, headers, body })
+        let body = response
+            .body_mut()
+            .with_config()
+            .limit(MAX_RESPONSE_BYTES)
+            .read_to_vec()
+            .map_err(map_error)?;
+        Ok(HttpResponse {
+            status,
+            headers,
+            body,
+        })
     }
 }
 
@@ -84,10 +104,19 @@ mod tests {
 
     #[test]
     fn only_https_or_loopback_http_may_be_called() {
-        assert!(url_allowed("https://proj.supabase.co/rest/v1/rpc/phone_lease"));
+        assert!(url_allowed(
+            "https://proj.supabase.co/rest/v1/rpc/phone_lease"
+        ));
         assert!(url_allowed("http://127.0.0.1:54321/auth/v1/signup"));
         assert!(url_allowed("http://localhost:54321/x"));
-        for url in ["http://proj.supabase.co/x", "http://127.0.0.1.evil.example/x", "ftp://x", "file:///etc/passwd", "https:///x", "nothing"] {
+        for url in [
+            "http://proj.supabase.co/x",
+            "http://127.0.0.1.evil.example/x",
+            "ftp://x",
+            "file:///etc/passwd",
+            "https:///x",
+            "nothing",
+        ] {
             assert!(!url_allowed(url), "{url}");
         }
     }

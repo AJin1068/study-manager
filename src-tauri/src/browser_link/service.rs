@@ -1,25 +1,25 @@
 //! One browser connection from first frame to disconnect: authenticate, judge tab events, answer
 //! each with exactly one verdict, record the link's coming and going.
 
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use chrono::Local;
 use rusqlite::Connection;
 
-use super::protocol::{
-    domain_of, encode, is_valid_ext_id, is_valid_version, parse_incoming, read_frame, write_frame, FrameError,
-    Incoming, Outgoing, TabKind, VerdictKind, PROTOCOL_VERSION,
-};
 use super::LinkHub;
+use super::protocol::{
+    FrameError, Incoming, Outgoing, PROTOCOL_VERSION, TabKind, VerdictKind, domain_of, encode,
+    is_valid_ext_id, is_valid_version, parse_incoming, read_frame, write_frame,
+};
 use crate::clock;
 use crate::commands::lock_db;
 use crate::enforce::model::{BlockAction, EnforceMode, NewBlockEvent, TargetKind};
 use crate::enforce::{self, StudyWindow};
 use crate::error::AppResult;
 use crate::platform::LinkStream;
-use crate::site_rules::{self, Situation, SiteRuleEngine};
+use crate::site_rules::{self, SiteRuleEngine, Situation};
 use crate::store;
 use crate::timer::{self, HighWater};
 
@@ -57,11 +57,17 @@ pub struct Verdict {
 
 impl Verdict {
     pub fn allow(reason_code: &'static str) -> Verdict {
-        Verdict { kind: VerdictKind::Allow, reason_code }
+        Verdict {
+            kind: VerdictKind::Allow,
+            reason_code,
+        }
     }
 
     pub fn block(reason_code: &'static str) -> Verdict {
-        Verdict { kind: VerdictKind::Block, reason_code }
+        Verdict {
+            kind: VerdictKind::Block,
+            reason_code,
+        }
     }
 }
 
@@ -79,14 +85,19 @@ pub struct RulesJudge {
 
 impl RulesJudge {
     pub fn new(db: Arc<Mutex<Connection>>) -> RulesJudge {
-        RulesJudge { engine: SiteRuleEngine::new(db) }
+        RulesJudge {
+            engine: SiteRuleEngine::new(db),
+        }
     }
 }
 
 impl TabJudge for RulesJudge {
     fn judge(&self, tab: &TabContext<'_>) -> Verdict {
         let scope = (tab.window.run_id, tab.window.segment_id);
-        let situation = Situation { in_study: true, pass_active: tab.pass_active };
+        let situation = Situation {
+            in_study: true,
+            pass_active: tab.pass_active,
+        };
         let decision = self.engine.decide(tab.url, scope, situation);
         if decision.block {
             Verdict::block(decision.reason)
@@ -132,12 +143,17 @@ struct RateLimiter {
 
 impl RateLimiter {
     fn new() -> RateLimiter {
-        RateLimiter { window_start_ms: i64::MIN, count: 0 }
+        RateLimiter {
+            window_start_ms: i64::MIN,
+            count: 0,
+        }
     }
 
     /// Returns whether this event is within budget, and whether it is the first one over.
     fn admit(&mut self, now_ms: i64) -> Admission {
-        if self.window_start_ms == i64::MIN || now_ms.saturating_sub(self.window_start_ms) >= RATE_WINDOW_MS {
+        if self.window_start_ms == i64::MIN
+            || now_ms.saturating_sub(self.window_start_ms) >= RATE_WINDOW_MS
+        {
             self.window_start_ms = now_ms;
             self.count = 0;
         }
@@ -169,7 +185,11 @@ pub struct Service {
 fn tokens_match(expected: &str, given: &str) -> bool {
     // No early exit on the first differing byte.
     expected.len() == given.len()
-        && expected.bytes().zip(given.bytes()).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
+        && expected
+            .bytes()
+            .zip(given.bytes())
+            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+            == 0
 }
 
 fn send(stream: &mut dyn LinkStream, message: &Outgoing) -> bool {
@@ -185,17 +205,27 @@ impl Service {
         token: String,
         allowed_ext_ids: Vec<String>,
     ) -> Service {
-        Service { db, hub, env, judge, token, allowed_ext_ids }
+        Service {
+            db,
+            hub,
+            env,
+            judge,
+            token,
+            allowed_ext_ids,
+        }
     }
 
     /// Runs one connection to its end. The disconnect is recorded on every path out of an
     /// established link, including a panic inside the message loop.
     pub fn serve(&self, stream: &mut dyn LinkStream) {
-        let Some(ext_id) = self.handshake(stream) else { return };
+        let Some(ext_id) = self.handshake(stream) else {
+            return;
+        };
         let connected_at = self.record_link(&ext_id, BlockAction::ExtensionConnected, None);
         self.hub.connected(connected_at);
         tracing::info!(event = "extension_connected");
-        let reason = catch_unwind(AssertUnwindSafe(|| self.pump(stream))).unwrap_or("internal_error");
+        let reason =
+            catch_unwind(AssertUnwindSafe(|| self.pump(stream))).unwrap_or("internal_error");
         let at = self.record_link(&ext_id, BlockAction::ExtensionDisconnected, Some(reason));
         self.hub.disconnected(at, reason);
         tracing::info!(event = "extension_disconnected", reason);
@@ -213,7 +243,10 @@ impl Service {
             None
         };
         let origin = match self.read_message(stream) {
-            Ok(Incoming::Auth { token, origin_ext_id }) if tokens_match(&self.token, &token) => origin_ext_id,
+            Ok(Incoming::Auth {
+                token,
+                origin_ext_id,
+            }) if tokens_match(&self.token, &token) => origin_ext_id,
             Ok(Incoming::Auth { .. }) => return refuse(stream, "unauthorized"),
             Ok(_) => return refuse(stream, "protocol_error"),
             Err(code) => return refuse(stream, code),
@@ -229,7 +262,14 @@ impl Service {
         if !known || ext_id != origin {
             return refuse(stream, "unknown_extension");
         }
-        if stream.set_read_timeout(None).is_err() || !send(stream, &Outgoing::HelloAck { protocol: PROTOCOL_VERSION }) {
+        if stream.set_read_timeout(None).is_err()
+            || !send(
+                stream,
+                &Outgoing::HelloAck {
+                    protocol: PROTOCOL_VERSION,
+                },
+            )
+        {
             return None;
         }
         Some(ext_id)
@@ -256,17 +296,36 @@ impl Service {
                     if matches!(code, "bad_message" | "frame_too_large") {
                         send(stream, &Outgoing::Error { code });
                     }
-                    return if code == "bad_message" { "protocol_error" } else { code };
+                    return if code == "bad_message" {
+                        "protocol_error"
+                    } else {
+                        code
+                    };
                 }
             };
-            let Incoming::TabEvent { url, tab_id, kind, title } = message else {
-                send(stream, &Outgoing::Error { code: "protocol_error" });
+            let Incoming::TabEvent {
+                url,
+                tab_id,
+                kind,
+                title,
+            } = message
+            else {
+                send(
+                    stream,
+                    &Outgoing::Error {
+                        code: "protocol_error",
+                    },
+                );
                 return "protocol_error";
             };
             let verdict = self.handle_tab(&url, title.as_deref(), kind, &mut limiter);
             drop(url);
             drop(title);
-            let reply = Outgoing::Verdict { tab_id, verdict: verdict.kind, reason_code: verdict.reason_code };
+            let reply = Outgoing::Verdict {
+                tab_id,
+                verdict: verdict.kind,
+                reason_code: verdict.reason_code,
+            };
             if !send(stream, &reply) {
                 return "write_failed";
             }
@@ -274,7 +333,13 @@ impl Service {
     }
 
     /// Every failure inside resolves to allow: the link never blocks on its own malfunction.
-    fn handle_tab(&self, url: &str, title: Option<&str>, kind: TabKind, limiter: &mut RateLimiter) -> Verdict {
+    fn handle_tab(
+        &self,
+        url: &str,
+        title: Option<&str>,
+        kind: TabKind,
+        limiter: &mut RateLimiter,
+    ) -> Verdict {
         let now = match self.env.now_ms() {
             Ok(now) => now,
             Err(err) => {
@@ -285,12 +350,17 @@ impl Service {
         match limiter.admit(now) {
             Admission::Admitted => {}
             Admission::FirstOver => {
-                tracing::warn!(event = "browser_link_rate_limited", limit = RATE_LIMIT_EVENTS);
+                tracing::warn!(
+                    event = "browser_link_rate_limited",
+                    limit = RATE_LIMIT_EVENTS
+                );
                 return Verdict::allow(REASON_RATE_LIMITED);
             }
             Admission::Over => return Verdict::allow(REASON_RATE_LIMITED),
         }
-        let Some(domain) = domain_of(url) else { return Verdict::allow(REASON_NOT_WEB) };
+        let Some(domain) = domain_of(url) else {
+            return Verdict::allow(REASON_NOT_WEB);
+        };
         let context = (|| -> AppResult<(Option<StudyWindow>, EnforceMode, bool)> {
             let conn = lock_db(&self.db)?;
             let window = self.env.study_window(&conn, now)?;
@@ -304,8 +374,15 @@ impl Service {
                 return Verdict::allow(REASON_APP_ERROR);
             }
         };
-        let Some(window) = window else { return Verdict::allow(REASON_OUTSIDE_STUDY) };
-        let verdict = self.judge.judge(&TabContext { url, title, window, pass_active });
+        let Some(window) = window else {
+            return Verdict::allow(REASON_OUTSIDE_STUDY);
+        };
+        let verdict = self.judge.judge(&TabContext {
+            url,
+            title,
+            window,
+            pass_active,
+        });
         let action = match (verdict.kind, verdict.reason_code) {
             (VerdictKind::Block, _) => Some(BlockAction::SiteBlocked),
             (VerdictKind::Allow, REASON_SITE_ALLOWED_PASS) => Some(BlockAction::SiteAllowedPass),

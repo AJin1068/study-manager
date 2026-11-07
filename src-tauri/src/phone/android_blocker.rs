@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 
 use link_protocol::PhoneBeat;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::allow_list::AllowList;
 use super::blocker::BlockerStatus;
@@ -73,15 +73,20 @@ impl AndroidAccessibilityBlocker {
     }
 
     fn call(&self, command: &str, payload: Value) -> Result<Value, BlockerError> {
-        self.bridge.invoke(command, payload).map_err(|_| BlockerError::BridgeUnreachable)
+        self.bridge
+            .invoke(command, payload)
+            .map_err(|_| BlockerError::BridgeUnreachable)
     }
 
     fn expect_ok(&self, command: &str, payload: Value) -> Result<(), BlockerError> {
-        let reply: Reply = serde_json::from_value(self.call(command, payload)?).map_err(|_| BlockerError::BridgeMalformed)?;
+        let reply: Reply = serde_json::from_value(self.call(command, payload)?)
+            .map_err(|_| BlockerError::BridgeMalformed)?;
         match (reply.ok, reply.code) {
             (true, None) => Ok(()),
             (false, Some(ReplyCode::ServiceDisabled)) => Err(BlockerError::ServiceDisabled),
-            (false, Some(ReplyCode::InvalidRequest | ReplyCode::Internal)) => Err(BlockerError::Refused),
+            (false, Some(ReplyCode::InvalidRequest | ReplyCode::Internal)) => {
+                Err(BlockerError::Refused)
+            }
             // `ok: true` with a code, or `ok: false` without one, says nothing the caller can act on.
             _ => Err(BlockerError::BridgeMalformed),
         }
@@ -160,7 +165,10 @@ pub struct ScriptedBridge {
 
 impl ScriptedBridge {
     pub fn new(replies: Vec<Result<Value, BridgeFailure>>) -> Self {
-        Self { replies: Mutex::new(replies.into()), seen: Mutex::new(Vec::new()) }
+        Self {
+            replies: Mutex::new(replies.into()),
+            seen: Mutex::new(Vec::new()),
+        }
     }
 
     pub fn seen(&self) -> Vec<(String, Value)> {
@@ -181,7 +189,9 @@ impl PluginBridge for ScriptedBridge {
             Ok(replies) => replies,
             Err(poisoned) => poisoned.into_inner(),
         };
-        replies.pop_front().unwrap_or(Err(BridgeFailure::Unavailable))
+        replies
+            .pop_front()
+            .unwrap_or(Err(BridgeFailure::Unavailable))
     }
 }
 
@@ -192,10 +202,13 @@ mod tests {
     use super::*;
 
     fn contract() -> Value {
-        serde_json::from_str(include_str!("../../../fixtures/phone/blocker-bridge.json")).expect("fixture")
+        serde_json::from_str(include_str!("../../../fixtures/phone/blocker-bridge.json"))
+            .expect("fixture")
     }
 
-    fn blocker(replies: Vec<Result<Value, BridgeFailure>>) -> (AndroidAccessibilityBlocker, Arc<ScriptedBridge>) {
+    fn blocker(
+        replies: Vec<Result<Value, BridgeFailure>>,
+    ) -> (AndroidAccessibilityBlocker, Arc<ScriptedBridge>) {
         let bridge = Arc::new(ScriptedBridge::new(replies));
         (AndroidAccessibilityBlocker::new(bridge.clone()), bridge)
     }
@@ -209,8 +222,13 @@ mod tests {
             issued_at_ms: 0,
             valid_until_ms: request["remaining_ms"].as_i64().expect("remaining"),
         };
-        let engagement = Engagement::new(&lease, request["remaining_ms"].as_i64().expect("remaining")).expect("engagement");
-        (engagement, AllowList::from_wire(&request["allow"]).expect("allow"))
+        let engagement =
+            Engagement::new(&lease, request["remaining_ms"].as_i64().expect("remaining"))
+                .expect("engagement");
+        (
+            engagement,
+            AllowList::from_wire(&request["allow"]).expect("allow"),
+        )
     }
 
     #[test]
@@ -218,11 +236,18 @@ mod tests {
         let contract = contract();
         let request = &contract["commands"]["engage"]["request"];
         let (engagement, allow) = engagement_of(request);
-        for case in contract["commands"]["engage"]["replies"].as_array().expect("replies") {
+        for case in contract["commands"]["engage"]["replies"]
+            .as_array()
+            .expect("replies")
+        {
             let name = case["name"].as_str().expect("name");
             let (blocker, bridge) = blocker(vec![Ok(case["reply"].clone())]);
             let got = blocker.engage(&engagement, &allow);
-            assert_eq!(bridge.seen(), vec![(COMMAND_ENGAGE.to_string(), request.clone())], "{name}");
+            assert_eq!(
+                bridge.seen(),
+                vec![(COMMAND_ENGAGE.to_string(), request.clone())],
+                "{name}"
+            );
             match case["result"].as_str().expect("result") {
                 "ok" => assert_eq!(got, Ok(()), "{name}"),
                 code => assert_eq!(got.expect_err(name).code(), code, "{name}"),
@@ -233,38 +258,83 @@ mod tests {
     #[test]
     fn release_and_status_follow_the_fixture() {
         let contract = contract();
-        for case in contract["commands"]["release"]["replies"].as_array().expect("replies") {
+        for case in contract["commands"]["release"]["replies"]
+            .as_array()
+            .expect("replies")
+        {
             let name = case["name"].as_str().expect("name");
             let (blocker, bridge) = blocker(vec![Ok(case["reply"].clone())]);
             let got = blocker.release();
-            assert_eq!(bridge.seen(), vec![(COMMAND_RELEASE.to_string(), contract["commands"]["release"]["request"].clone())], "{name}");
+            assert_eq!(
+                bridge.seen(),
+                vec![(
+                    COMMAND_RELEASE.to_string(),
+                    contract["commands"]["release"]["request"].clone()
+                )],
+                "{name}"
+            );
             match case["result"].as_str().expect("result") {
                 "ok" => assert_eq!(got, Ok(()), "{name}"),
                 code => assert_eq!(got.expect_err(name).code(), code, "{name}"),
             }
         }
-        for case in contract["commands"]["status"]["replies"].as_array().expect("replies") {
+        for case in contract["commands"]["status"]["replies"]
+            .as_array()
+            .expect("replies")
+        {
             let name = case["name"].as_str().expect("name");
             let (blocker, bridge) = blocker(vec![Ok(case["reply"].clone())]);
-            assert_eq!(serde_json::to_value(blocker.status()).expect("json"), case["status"], "{name}");
-            assert_eq!(bridge.seen(), vec![(COMMAND_STATUS.to_string(), contract["commands"]["status"]["request"].clone())], "{name}");
+            assert_eq!(
+                serde_json::to_value(blocker.status()).expect("json"),
+                case["status"],
+                "{name}"
+            );
+            assert_eq!(
+                bridge.seen(),
+                vec![(
+                    COMMAND_STATUS.to_string(),
+                    contract["commands"]["status"]["request"].clone()
+                )],
+                "{name}"
+            );
         }
     }
 
     #[test]
     fn a_silent_plugin_is_unreachable_not_inactive_and_never_a_silent_success() {
-        let (blocker, _) = blocker(vec![Err(BridgeFailure::Timeout), Err(BridgeFailure::Unavailable), Err(BridgeFailure::Timeout)]);
+        let (blocker, _) = blocker(vec![
+            Err(BridgeFailure::Timeout),
+            Err(BridgeFailure::Unavailable),
+            Err(BridgeFailure::Timeout),
+        ]);
         assert_eq!(blocker.status(), BlockerStatus::Unreachable);
-        let engagement = Engagement { run_id: "r".into(), seq: 1, remaining_ms: 1_000 };
-        assert_eq!(blocker.engage(&engagement, &AllowList::default()), Err(BlockerError::BridgeUnreachable));
+        let engagement = Engagement {
+            run_id: "r".into(),
+            seq: 1,
+            remaining_ms: 1_000,
+        };
+        assert_eq!(
+            blocker.engage(&engagement, &AllowList::default()),
+            Err(BlockerError::BridgeUnreachable)
+        );
         assert_eq!(blocker.release(), Err(BlockerError::BridgeUnreachable));
     }
 
     #[test]
     fn replies_outside_the_contract_are_malformed() {
-        for reply in [json!({}), json!({ "ok": true, "code": "internal" }), json!({ "ok": false }), json!({ "ok": true, "extra": 1 }), json!("ok")] {
+        for reply in [
+            json!({}),
+            json!({ "ok": true, "code": "internal" }),
+            json!({ "ok": false }),
+            json!({ "ok": true, "extra": 1 }),
+            json!("ok"),
+        ] {
             let (blocker, _) = blocker(vec![Ok(reply.clone())]);
-            assert_eq!(blocker.release(), Err(BlockerError::BridgeMalformed), "{reply}");
+            assert_eq!(
+                blocker.release(),
+                Err(BlockerError::BridgeMalformed),
+                "{reply}"
+            );
         }
         let (blocker, _) = blocker(vec![Ok(json!({ "kind": "locked" }))]);
         assert_eq!(blocker.status(), BlockerStatus::Unreachable);
@@ -275,20 +345,35 @@ mod tests {
         let contract = contract();
         for case in contract["events"].as_array().expect("events") {
             let name = case["name"].as_str().expect("name");
-            let event = BridgeEvent::parse(&case["event"]).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let event =
+                BridgeEvent::parse(&case["event"]).unwrap_or_else(|e| panic!("{name}: {e}"));
             let before: PhoneBeat = serde_json::from_value(case["before"].clone()).expect("before");
             let after: PhoneBeat = serde_json::from_value(case["after"].clone()).expect("after");
             assert_eq!(event.apply(&before), after, "{name}");
         }
-        assert_eq!(BridgeEvent::parse(&json!({ "event": "package_opened" })), Err(BlockerError::BridgeMalformed));
-        assert_eq!(BridgeEvent::parse(&json!({ "event": "lock_ended", "package": "com.example" })), Err(BlockerError::BridgeMalformed));
+        assert_eq!(
+            BridgeEvent::parse(&json!({ "event": "package_opened" })),
+            Err(BlockerError::BridgeMalformed)
+        );
+        assert_eq!(
+            BridgeEvent::parse(&json!({ "event": "lock_ended", "package": "com.example" })),
+            Err(BlockerError::BridgeMalformed)
+        );
     }
 
     #[test]
     fn nothing_on_the_wire_can_name_an_app_the_user_opened() {
         let contract = contract();
-        let text = contract["commands"]["engage"]["request"].to_string() + &contract["events"].to_string();
-        for field in ["package_name", "app_name", "foreground", "usage", "title", "url"] {
+        let text =
+            contract["commands"]["engage"]["request"].to_string() + &contract["events"].to_string();
+        for field in [
+            "package_name",
+            "app_name",
+            "foreground",
+            "usage",
+            "title",
+            "url",
+        ] {
             assert!(!text.contains(field), "{field}");
         }
     }

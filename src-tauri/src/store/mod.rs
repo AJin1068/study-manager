@@ -19,12 +19,16 @@ pub mod tabcache;
 pub mod topic;
 pub mod wiki;
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::downtime::{DowntimeKind, DowntimeRecord, Interval};
-use crate::enforce::model::{BlockAction, BlockEntry, BlockEvent, EntryKind, EntrySource, NewBlockEvent};
+use crate::enforce::model::{
+    BlockAction, BlockEntry, BlockEvent, EntryKind, EntrySource, NewBlockEvent,
+};
 use crate::error::{AppError, AppResult};
-use crate::focus::model::{FocusEventKind, FocusEventRow, FocusTotals, MinuteDelta, NewFocusEvent, StudyApp};
+use crate::focus::model::{
+    FocusEventKind, FocusEventRow, FocusTotals, MinuteDelta, NewFocusEvent, StudyApp,
+};
 use crate::settings::{HistoryEntry, Outcome, Reason};
 use crate::study::{ModeConfig, StudyLevel};
 use crate::timer::model::{EndReason, NewRun, NewSegment, RunRow, RunStatus, SegmentRow};
@@ -33,11 +37,21 @@ use crate::timer::model::{EndReason, NewRun, NewSegment, RunRow, RunStatus, Segm
 
 pub fn get_setting(conn: &Connection, key: &str) -> AppResult<Option<String>> {
     Ok(conn
-        .query_row("SELECT value FROM settings WHERE key = ?1", params![key], |row| row.get(0))
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        )
         .optional()?)
 }
 
-pub fn put_setting(conn: &Connection, key: &str, category: &str, value: &str, at_ms: i64) -> AppResult<()> {
+pub fn put_setting(
+    conn: &Connection,
+    key: &str,
+    category: &str,
+    value: &str,
+    at_ms: i64,
+) -> AppResult<()> {
     conn.execute(
         "INSERT INTO settings (key, category, value, updated_at_ms) VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at_ms = excluded.updated_at_ms",
@@ -100,7 +114,9 @@ pub fn read_study_state(conn: &Connection) -> AppResult<(bool, i64)> {
         .optional()?;
     match row {
         Some((held, changed)) => Ok((held != 0, changed)),
-        None => Err(AppError::Internal("study_state row is missing; lock state is unknown".into())),
+        None => Err(AppError::Internal(
+            "study_state row is missing; lock state is unknown".into(),
+        )),
     }
 }
 
@@ -112,19 +128,30 @@ pub fn put_study_state(conn: &Connection, lock_held: bool, at_ms: i64) -> AppRes
         params![i64::from(lock_held), at_ms],
     )?;
     if changed != 1 {
-        return Err(AppError::Internal("study_state row is missing; cannot write lock state".into()));
+        return Err(AppError::Internal(
+            "study_state row is missing; cannot write lock state".into(),
+        ));
     }
     Ok(())
 }
 
 pub fn read_daily_mode(conn: &Connection, date: &str) -> AppResult<Option<StudyLevel>> {
     let raw: Option<String> = conn
-        .query_row("SELECT level FROM daily_mode WHERE date = ?1", params![date], |row| row.get(0))
+        .query_row(
+            "SELECT level FROM daily_mode WHERE date = ?1",
+            params![date],
+            |row| row.get(0),
+        )
         .optional()?;
     Ok(raw.as_deref().and_then(StudyLevel::parse))
 }
 
-pub fn put_daily_mode(conn: &Connection, date: &str, level: StudyLevel, at_ms: i64) -> AppResult<()> {
+pub fn put_daily_mode(
+    conn: &Connection,
+    date: &str,
+    level: StudyLevel,
+    at_ms: i64,
+) -> AppResult<()> {
     conn.execute(
         "INSERT INTO daily_mode (date, level, selected_at_ms) VALUES (?1, ?2, ?3)
          ON CONFLICT(date) DO UPDATE SET level = excluded.level, selected_at_ms = excluded.selected_at_ms",
@@ -151,8 +178,9 @@ pub fn list_mode_configs(conn: &Connection) -> AppResult<Vec<ModeConfig>> {
     let mut configs = Vec::new();
     for row in rows {
         let (level, study_min, break_min, long_break_min, sets_before_long_break) = row?;
-        let level = StudyLevel::parse(&level)
-            .ok_or_else(|| crate::error::AppError::Invalid(format!("unknown mode level {level}")))?;
+        let level = StudyLevel::parse(&level).ok_or_else(|| {
+            crate::error::AppError::Invalid(format!("unknown mode level {level}"))
+        })?;
         configs.push(ModeConfig {
             level,
             study_min,
@@ -178,7 +206,10 @@ pub fn put_mode_config(conn: &Connection, config: &ModeConfig) -> AppResult<()> 
         ],
     )?;
     if changed != 1 {
-        return Err(AppError::Internal(format!("mode config row missing for {}", config.level.as_str())));
+        return Err(AppError::Internal(format!(
+            "mode config row missing for {}",
+            config.level.as_str()
+        )));
     }
     Ok(())
 }
@@ -209,7 +240,12 @@ pub fn touch_heartbeat(conn: &Connection, session_id: i64, at_ms: i64) -> AppRes
     Ok(())
 }
 
-pub fn set_clean_exit(conn: &Connection, session_id: i64, clean: bool, at_ms: i64) -> AppResult<()> {
+pub fn set_clean_exit(
+    conn: &Connection,
+    session_id: i64,
+    clean: bool,
+    at_ms: i64,
+) -> AppResult<()> {
     conn.execute(
         "UPDATE sessions SET clean_exit = ?2, last_heartbeat_ms = ?3 WHERE id = ?1",
         params![session_id, i64::from(clean), at_ms],
@@ -247,7 +283,12 @@ pub fn measured_sleep_intervals(conn: &Connection) -> AppResult<Vec<Interval>> {
         "SELECT start_at_ms, end_at_ms FROM downtime_records
          WHERE kind = 'sleep' AND estimated = 0 ORDER BY start_at_ms",
     )?;
-    let rows = stmt.query_map([], |row| Ok(Interval { start: row.get(0)?, end: row.get(1)? }))?;
+    let rows = stmt.query_map([], |row| {
+        Ok(Interval {
+            start: row.get(0)?,
+            end: row.get(1)?,
+        })
+    })?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
@@ -277,7 +318,9 @@ pub fn list_downtime(conn: &Connection, limit: i64) -> AppResult<Vec<DowntimeRec
 
 // ---- plans / plan_exceptions / plan_history ----
 
-use crate::plan::{ExceptionKind, NewPlanHistory, Plan, PlanException, PlanHistoryEntry, SubjectCount};
+use crate::plan::{
+    ExceptionKind, NewPlanHistory, Plan, PlanException, PlanHistoryEntry, SubjectCount,
+};
 
 const PLAN_COLUMNS: &str = "id, series_id, plan_name, subject, start_date, start_time, sets, \
      repeat_weekdays, repeat_until, effective_from_date, created_at_ms, deleted_at_ms";
@@ -328,7 +371,11 @@ pub fn insert_plan(conn: &Connection, plan: &Plan) -> AppResult<i64> {
 
 pub fn get_plan(conn: &Connection, id: i64) -> AppResult<Option<Plan>> {
     Ok(conn
-        .query_row(&format!("SELECT {PLAN_COLUMNS} FROM plans WHERE id = ?1"), params![id], plan_from_row)
+        .query_row(
+            &format!("SELECT {PLAN_COLUMNS} FROM plans WHERE id = ?1"),
+            params![id],
+            plan_from_row,
+        )
         .optional()?)
 }
 
@@ -350,12 +397,18 @@ pub fn update_plan_fields(conn: &Connection, plan: &Plan) -> AppResult<()> {
 }
 
 pub fn set_plan_repeat_until(conn: &Connection, id: i64, until: Option<&str>) -> AppResult<()> {
-    conn.execute("UPDATE plans SET repeat_until = ?2 WHERE id = ?1", params![id, until])?;
+    conn.execute(
+        "UPDATE plans SET repeat_until = ?2 WHERE id = ?1",
+        params![id, until],
+    )?;
     Ok(())
 }
 
 pub fn soft_delete_plan(conn: &Connection, id: i64, at_ms: i64) -> AppResult<()> {
-    conn.execute("UPDATE plans SET deleted_at_ms = ?2 WHERE id = ?1", params![id, at_ms])?;
+    conn.execute(
+        "UPDATE plans SET deleted_at_ms = ?2 WHERE id = ?1",
+        params![id, at_ms],
+    )?;
     Ok(())
 }
 
@@ -379,10 +432,16 @@ fn exception_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PlanException
 
 const EXCEPTION_COLUMNS: &str = "plan_id, date, kind, new_date, new_time, sets_override";
 
-pub fn get_plan_exception(conn: &Connection, plan_id: i64, date: &str) -> AppResult<Option<PlanException>> {
+pub fn get_plan_exception(
+    conn: &Connection,
+    plan_id: i64,
+    date: &str,
+) -> AppResult<Option<PlanException>> {
     Ok(conn
         .query_row(
-            &format!("SELECT {EXCEPTION_COLUMNS} FROM plan_exceptions WHERE plan_id = ?1 AND date = ?2"),
+            &format!(
+                "SELECT {EXCEPTION_COLUMNS} FROM plan_exceptions WHERE plan_id = ?1 AND date = ?2"
+            ),
             params![plan_id, date],
             exception_from_row,
         )
@@ -419,7 +478,12 @@ pub fn delete_plan_exception(conn: &Connection, plan_id: i64, date: &str) -> App
 }
 
 /// Hands the exceptions keyed on or after `from_date` to another plan row (series split).
-pub fn move_plan_exceptions_from(conn: &Connection, from_plan: i64, to_plan: i64, from_date: &str) -> AppResult<()> {
+pub fn move_plan_exceptions_from(
+    conn: &Connection,
+    from_plan: i64,
+    to_plan: i64,
+    from_date: &str,
+) -> AppResult<()> {
     conn.execute(
         "UPDATE plan_exceptions SET plan_id = ?2 WHERE plan_id = ?1 AND date >= ?3",
         params![from_plan, to_plan, from_date],
@@ -427,9 +491,13 @@ pub fn move_plan_exceptions_from(conn: &Connection, from_plan: i64, to_plan: i64
     Ok(())
 }
 
-pub fn list_daily_modes(conn: &Connection) -> AppResult<std::collections::HashMap<String, StudyLevel>> {
+pub fn list_daily_modes(
+    conn: &Connection,
+) -> AppResult<std::collections::HashMap<String, StudyLevel>> {
     let mut stmt = conn.prepare("SELECT date, level FROM daily_mode")?;
-    let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
     let mut map = std::collections::HashMap::new();
     for row in rows {
         let (date, level) = row?;
@@ -469,7 +537,10 @@ pub fn next_plan_history_id(conn: &Connection) -> AppResult<i64> {
 }
 
 /// Every row of one batch, oldest first (applied changes, their undo, and rejected attempts).
-pub fn list_plan_history_batch(conn: &Connection, batch_id: &str) -> AppResult<Vec<PlanHistoryEntry>> {
+pub fn list_plan_history_batch(
+    conn: &Connection,
+    batch_id: &str,
+) -> AppResult<Vec<PlanHistoryEntry>> {
     let mut stmt = conn.prepare(
         "SELECT id, plan_id, at_ms, action, reason_code, reason_text, before_json, after_json, outcome, batch_id
          FROM plan_history WHERE batch_id = ?1 ORDER BY id",
@@ -493,7 +564,11 @@ pub fn list_plan_history_batch(conn: &Connection, batch_id: &str) -> AppResult<V
 
 /// History newest first. With a plan id, the whole series that plan belongs to (a series edit
 /// splits the plan into several rows, but the user sees one timeline).
-pub fn list_plan_history(conn: &Connection, plan_id: Option<i64>, limit: i64) -> AppResult<Vec<PlanHistoryEntry>> {
+pub fn list_plan_history(
+    conn: &Connection,
+    plan_id: Option<i64>,
+    limit: i64,
+) -> AppResult<Vec<PlanHistoryEntry>> {
     let mut stmt = conn.prepare(
         "SELECT id, plan_id, at_ms, action, reason_code, reason_text, before_json, after_json, outcome, batch_id
          FROM plan_history
@@ -527,14 +602,21 @@ pub fn count_postponed(conn: &Connection, from_ms: i64, to_ms: i64) -> AppResult
     )?)
 }
 
-pub fn postponed_by_subject(conn: &Connection, from_ms: i64, to_ms: i64) -> AppResult<Vec<SubjectCount>> {
+pub fn postponed_by_subject(
+    conn: &Connection,
+    from_ms: i64,
+    to_ms: i64,
+) -> AppResult<Vec<SubjectCount>> {
     let mut stmt = conn.prepare(
         "SELECT p.subject, COUNT(*) AS n FROM plan_history h JOIN plans p ON p.id = h.plan_id
          WHERE h.reason_code = 'postponed' AND h.outcome = 'applied' AND h.at_ms >= ?1 AND h.at_ms < ?2
          GROUP BY p.subject ORDER BY n DESC, p.subject",
     )?;
     let rows = stmt.query_map(params![from_ms, to_ms], |row| {
-        Ok(SubjectCount { subject: row.get(0)?, count: row.get(1)? })
+        Ok(SubjectCount {
+            subject: row.get(0)?,
+            count: row.get(1)?,
+        })
     })?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
@@ -543,7 +625,11 @@ pub fn postponed_by_subject(conn: &Connection, from_ms: i64, to_ms: i64) -> AppR
 
 /// Highest heartbeat of any session: the persisted floor of the engine's high-water clock.
 pub fn max_heartbeat(conn: &Connection) -> AppResult<i64> {
-    Ok(conn.query_row("SELECT COALESCE(MAX(last_heartbeat_ms), 0) FROM sessions", [], |row| row.get(0))?)
+    Ok(conn.query_row(
+        "SELECT COALESCE(MAX(last_heartbeat_ms), 0) FROM sessions",
+        [],
+        |row| row.get(0),
+    )?)
 }
 
 fn bad_value(column: usize, what: &str, raw: &str) -> rusqlite::Error {
@@ -589,21 +675,28 @@ pub fn list_runs_since(conn: &Connection, from_date: &str) -> AppResult<Vec<RunR
 }
 
 pub fn list_active_runs(conn: &Connection) -> AppResult<Vec<RunRow>> {
-    let mut stmt = conn.prepare(&format!("SELECT {RUN_COLUMNS} FROM plan_runs WHERE status = 'active' ORDER BY planned_start_ms, id"))?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {RUN_COLUMNS} FROM plan_runs WHERE status = 'active' ORDER BY planned_start_ms, id"
+    ))?;
     let rows = stmt.query_map([], run_from_row)?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
 pub fn get_run(conn: &Connection, run_id: i64) -> AppResult<Option<RunRow>> {
     Ok(conn
-        .query_row(&format!("SELECT {RUN_COLUMNS} FROM plan_runs WHERE id = ?1"), params![run_id], run_from_row)
+        .query_row(
+            &format!("SELECT {RUN_COLUMNS} FROM plan_runs WHERE id = ?1"),
+            params![run_id],
+            run_from_row,
+        )
         .optional()?)
 }
 
 /// Every run of one local date, whatever its status.
 pub fn list_runs_on_date(conn: &Connection, date: &str) -> AppResult<Vec<RunRow>> {
-    let mut stmt =
-        conn.prepare(&format!("SELECT {RUN_COLUMNS} FROM plan_runs WHERE date = ?1 ORDER BY planned_start_ms, id"))?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {RUN_COLUMNS} FROM plan_runs WHERE date = ?1 ORDER BY planned_start_ms, id"
+    ))?;
     let rows = stmt.query_map(params![date], run_from_row)?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
@@ -655,13 +748,16 @@ fn segment_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SegmentRow> {
         id: row.get(0)?,
         run_id: row.get(1)?,
         seq: row.get(2)?,
-        kind: crate::timer::model::parse_kind(&kind).ok_or_else(|| bad_value(3, "segment kind", &kind))?,
+        kind: crate::timer::model::parse_kind(&kind)
+            .ok_or_else(|| bad_value(3, "segment kind", &kind))?,
         planned_start_ms: row.get(4)?,
         planned_end_ms: row.get(5)?,
         started_at_ms: row.get(6)?,
         ended_at_ms: row.get(7)?,
         end_reason: match reason {
-            Some(raw) => Some(EndReason::parse(&raw).ok_or_else(|| bad_value(8, "end reason", &raw))?),
+            Some(raw) => {
+                Some(EndReason::parse(&raw).ok_or_else(|| bad_value(8, "end reason", &raw))?)
+            }
             None => None,
         },
         late_join: row.get::<_, i64>(9)? != 0,
@@ -673,8 +769,9 @@ const SEGMENT_COLUMNS: &str = "id, run_id, seq, kind, planned_start_ms, planned_
      ended_at_ms, end_reason, late_join, notice_sent_at_ms";
 
 pub fn list_segments(conn: &Connection, run_id: i64) -> AppResult<Vec<SegmentRow>> {
-    let mut stmt =
-        conn.prepare(&format!("SELECT {SEGMENT_COLUMNS} FROM timer_segments WHERE run_id = ?1 ORDER BY seq"))?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SEGMENT_COLUMNS} FROM timer_segments WHERE run_id = ?1 ORDER BY seq"
+    ))?;
     let rows = stmt.query_map(params![run_id], segment_from_row)?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
@@ -720,7 +817,12 @@ pub fn insert_segment(conn: &Connection, run_id: i64, seg: &NewSegment) -> AppRe
     Ok(conn.last_insert_rowid())
 }
 
-pub fn close_segment(conn: &Connection, segment_id: i64, ended_at_ms: i64, reason: EndReason) -> AppResult<()> {
+pub fn close_segment(
+    conn: &Connection,
+    segment_id: i64,
+    ended_at_ms: i64,
+    reason: EndReason,
+) -> AppResult<()> {
     conn.execute(
         "UPDATE timer_segments SET ended_at_ms = ?2, end_reason = ?3 WHERE id = ?1",
         params![segment_id, ended_at_ms, reason.as_str()],
@@ -732,27 +834,45 @@ pub fn close_segment(conn: &Connection, segment_id: i64, ended_at_ms: i64, reaso
 /// whether the engine was watching when the segment started. A segment the engine opened and
 /// closed in one pass (`late_join` with `started_at == planned_start`) was never watched; any other
 /// segment was watched from its `started_at_ms`.
-pub fn list_unwatched_spans(conn: &Connection, from_ms: i64, to_ms: i64) -> AppResult<Vec<(Interval, bool)>> {
+pub fn list_unwatched_spans(
+    conn: &Connection,
+    from_ms: i64,
+    to_ms: i64,
+) -> AppResult<Vec<(Interval, bool)>> {
     let mut stmt = conn.prepare(
         "SELECT planned_start_ms, started_at_ms, planned_end_ms, late_join FROM timer_segments
          WHERE end_reason = 'elapsed_while_down' AND planned_end_ms > ?1 AND planned_start_ms < ?2
          ORDER BY planned_start_ms",
     )?;
     let rows = stmt.query_map(params![from_ms, to_ms], |row| {
-        let (planned_start, started_at, end): (i64, i64, i64) = (row.get(0)?, row.get(1)?, row.get(2)?);
+        let (planned_start, started_at, end): (i64, i64, i64) =
+            (row.get(0)?, row.get(1)?, row.get(2)?);
         let never_watched = row.get::<_, i64>(3)? != 0 && started_at == planned_start;
-        let start = if never_watched { planned_start } else { started_at };
+        let start = if never_watched {
+            planned_start
+        } else {
+            started_at
+        };
         Ok((Interval { start, end }, !never_watched))
     })?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-pub fn list_downtime_intervals(conn: &Connection, from_ms: i64, to_ms: i64) -> AppResult<Vec<Interval>> {
+pub fn list_downtime_intervals(
+    conn: &Connection,
+    from_ms: i64,
+    to_ms: i64,
+) -> AppResult<Vec<Interval>> {
     let mut stmt = conn.prepare(
         "SELECT start_at_ms, end_at_ms FROM downtime_records
          WHERE end_at_ms > ?1 AND start_at_ms < ?2 ORDER BY start_at_ms",
     )?;
-    let rows = stmt.query_map(params![from_ms, to_ms], |row| Ok(Interval { start: row.get(0)?, end: row.get(1)? }))?;
+    let rows = stmt.query_map(params![from_ms, to_ms], |row| {
+        Ok(Interval {
+            start: row.get(0)?,
+            end: row.get(1)?,
+        })
+    })?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
@@ -773,21 +893,27 @@ fn entry_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<BlockEntry> {
 const ENTRY_COLUMNS: &str = "id, kind, pattern, source, category, enabled, created_at_ms";
 
 pub fn list_block_entries(conn: &Connection) -> AppResult<Vec<BlockEntry>> {
-    let mut stmt = conn.prepare(&format!("SELECT {ENTRY_COLUMNS} FROM block_entries ORDER BY id"))?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {ENTRY_COLUMNS} FROM block_entries ORDER BY id"
+    ))?;
     let rows = stmt.query_map([], entry_from_row)?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
 pub fn get_block_entry(conn: &Connection, id: i64) -> AppResult<Option<BlockEntry>> {
     Ok(conn
-        .query_row(&format!("SELECT {ENTRY_COLUMNS} FROM block_entries WHERE id = ?1"), params![id], entry_from_row)
+        .query_row(
+            &format!("SELECT {ENTRY_COLUMNS} FROM block_entries WHERE id = ?1"),
+            params![id],
+            entry_from_row,
+        )
         .optional()?)
 }
 
 /// Patterns of the enabled entries of one kind, in insertion order.
 pub fn list_enabled_patterns(conn: &Connection, kind: EntryKind) -> AppResult<Vec<String>> {
-    let mut stmt =
-        conn.prepare("SELECT pattern FROM block_entries WHERE kind = ?1 AND enabled = 1 ORDER BY id")?;
+    let mut stmt = conn
+        .prepare("SELECT pattern FROM block_entries WHERE kind = ?1 AND enabled = 1 ORDER BY id")?;
     let rows = stmt.query_map(params![kind.as_str()], |row| row.get(0))?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
@@ -828,7 +954,11 @@ pub fn insert_preset_entry(
 }
 
 /// Switches every preset row of a category; user rows never carry a preset category match.
-pub fn set_preset_category_enabled(conn: &Connection, category: &str, enabled: bool) -> AppResult<()> {
+pub fn set_preset_category_enabled(
+    conn: &Connection,
+    category: &str,
+    enabled: bool,
+) -> AppResult<()> {
     conn.execute(
         "UPDATE block_entries SET enabled = ?2 WHERE source = 'preset' AND category = ?1",
         params![category, i64::from(enabled)],
@@ -915,20 +1045,28 @@ fn study_app_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StudyApp> {
 const STUDY_APP_COLUMNS: &str = "id, kind, app_id, enabled, created_at_ms";
 
 pub fn list_study_apps(conn: &Connection) -> AppResult<Vec<StudyApp>> {
-    let mut stmt = conn.prepare(&format!("SELECT {STUDY_APP_COLUMNS} FROM study_apps ORDER BY id"))?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {STUDY_APP_COLUMNS} FROM study_apps ORDER BY id"
+    ))?;
     let rows = stmt.query_map([], study_app_from_row)?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
 /// Ids of the enabled study apps of one kind.
 pub fn list_enabled_study_app_ids(conn: &Connection, kind: EntryKind) -> AppResult<Vec<String>> {
-    let mut stmt = conn.prepare("SELECT app_id FROM study_apps WHERE kind = ?1 AND enabled = 1 ORDER BY id")?;
+    let mut stmt =
+        conn.prepare("SELECT app_id FROM study_apps WHERE kind = ?1 AND enabled = 1 ORDER BY id")?;
     let rows = stmt.query_map(params![kind.as_str()], |row| row.get(0))?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
 /// Inserts a study app; false when the (kind, app id) pair already exists.
-pub fn insert_study_app(conn: &Connection, kind: EntryKind, app_id: &str, at_ms: i64) -> AppResult<bool> {
+pub fn insert_study_app(
+    conn: &Connection,
+    kind: EntryKind,
+    app_id: &str,
+    at_ms: i64,
+) -> AppResult<bool> {
     let changed = conn.execute(
         "INSERT OR IGNORE INTO study_apps (kind, app_id, enabled, created_at_ms) VALUES (?1, ?2, 1, ?3)",
         params![kind.as_str(), app_id, at_ms],
@@ -941,7 +1079,10 @@ pub fn delete_study_app(conn: &Connection, id: i64) -> AppResult<bool> {
 }
 
 pub fn set_study_app_enabled(conn: &Connection, id: i64, enabled: bool) -> AppResult<bool> {
-    Ok(conn.execute("UPDATE study_apps SET enabled = ?2 WHERE id = ?1", params![id, i64::from(enabled)])? == 1)
+    Ok(conn.execute(
+        "UPDATE study_apps SET enabled = ?2 WHERE id = ?1",
+        params![id, i64::from(enabled)],
+    )? == 1)
 }
 
 pub fn insert_focus_event(conn: &Connection, event: &NewFocusEvent<'_>) -> AppResult<()> {
@@ -953,7 +1094,11 @@ pub fn insert_focus_event(conn: &Connection, event: &NewFocusEvent<'_>) -> AppRe
 }
 
 /// Time of the newest event of `kind` in a segment, if any.
-pub fn last_focus_event_at(conn: &Connection, segment_id: i64, kind: FocusEventKind) -> AppResult<Option<i64>> {
+pub fn last_focus_event_at(
+    conn: &Connection,
+    segment_id: i64,
+    kind: FocusEventKind,
+) -> AppResult<Option<i64>> {
     Ok(conn.query_row(
         "SELECT MAX(at_ms) FROM focus_events WHERE segment_id = ?1 AND kind = ?2",
         params![segment_id, kind.as_str()],
@@ -963,8 +1108,9 @@ pub fn last_focus_event_at(conn: &Connection, segment_id: i64, kind: FocusEventK
 
 /// Events of one segment, oldest first.
 pub fn list_focus_events(conn: &Connection, segment_id: i64) -> AppResult<Vec<FocusEventRow>> {
-    let mut stmt =
-        conn.prepare("SELECT at_ms, kind, app_id FROM focus_events WHERE segment_id = ?1 ORDER BY at_ms, id")?;
+    let mut stmt = conn.prepare(
+        "SELECT at_ms, kind, app_id FROM focus_events WHERE segment_id = ?1 ORDER BY at_ms, id",
+    )?;
     let rows = stmt.query_map(params![segment_id], |row| {
         let raw: String = row.get(1)?;
         Ok((row.get::<_, i64>(0)?, raw, row.get::<_, Option<String>>(2)?))
@@ -973,7 +1119,11 @@ pub fn list_focus_events(conn: &Connection, segment_id: i64) -> AppResult<Vec<Fo
         let (at_ms, raw, app_id) = row?;
         let kind = FocusEventKind::parse(&raw)
             .ok_or_else(|| AppError::Internal(format!("unknown focus event kind {raw:?}")))?;
-        Ok(FocusEventRow { at_ms, kind, app_id })
+        Ok(FocusEventRow {
+            at_ms,
+            kind,
+            app_id,
+        })
     })
     .collect()
 }
@@ -987,13 +1137,23 @@ pub fn add_focus_minute(conn: &Connection, segment_id: i64, delta: &MinuteDelta)
              credited_ms = credited_ms + excluded.credited_ms,
              away_ms = away_ms + excluded.away_ms,
              idle_ms = idle_ms + excluded.idle_ms",
-        params![segment_id, delta.minute_start_ms, delta.credited_ms, delta.away_ms, delta.idle_ms],
+        params![
+            segment_id,
+            delta.minute_start_ms,
+            delta.credited_ms,
+            delta.away_ms,
+            delta.idle_ms
+        ],
     )?;
     Ok(())
 }
 
 /// Bucket totals of a run, or of one of its segments.
-pub fn focus_totals(conn: &Connection, run_id: i64, segment_id: Option<i64>) -> AppResult<FocusTotals> {
+pub fn focus_totals(
+    conn: &Connection,
+    run_id: i64,
+    segment_id: Option<i64>,
+) -> AppResult<FocusTotals> {
     Ok(conn.query_row(
         "SELECT COALESCE(SUM(m.credited_ms), 0), COALESCE(SUM(m.away_ms), 0), COALESCE(SUM(m.idle_ms), 0)
          FROM focus_minutes m JOIN timer_segments s ON s.id = m.segment_id
@@ -1023,8 +1183,9 @@ pub fn insert_ledger_entry(
 
 /// Newest first.
 pub fn list_ledger(conn: &Connection, limit: i64) -> AppResult<Vec<crate::points::LedgerEntry>> {
-    let mut stmt = conn
-        .prepare("SELECT id, at_ms, delta, reason_code, ref_key FROM point_ledger ORDER BY id DESC LIMIT ?1")?;
+    let mut stmt = conn.prepare(
+        "SELECT id, at_ms, delta, reason_code, ref_key FROM point_ledger ORDER BY id DESC LIMIT ?1",
+    )?;
     let rows = stmt.query_map(params![limit], |row| {
         Ok(crate::points::LedgerEntry {
             id: row.get(0)?,
@@ -1059,7 +1220,12 @@ pub fn list_run_minutes(conn: &Connection, run_id: i64) -> AppResult<Vec<(i64, M
         let minute_start_ms: i64 = row.get(0)?;
         Ok((
             minute_start_ms,
-            MinuteDelta { minute_start_ms, credited_ms: row.get(1)?, away_ms: row.get(2)?, idle_ms: row.get(3)? },
+            MinuteDelta {
+                minute_start_ms,
+                credited_ms: row.get(1)?,
+                away_ms: row.get(2)?,
+                idle_ms: row.get(3)?,
+            },
         ))
     })?;
     Ok(rows.collect::<Result<_, _>>()?)

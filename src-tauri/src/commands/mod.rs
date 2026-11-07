@@ -24,8 +24,8 @@ pub mod release;
 pub mod remote;
 pub mod retro;
 pub mod rooms;
-pub mod shared_wiki;
 pub mod settings;
+pub mod shared_wiki;
 pub mod shop;
 pub mod study;
 pub mod timer;
@@ -41,9 +41,9 @@ use crate::error::AppResult;
 use crate::platform::{AutostartBackend, FocusProbe, ProcessControl, QuitReason};
 use crate::settings::{Outcome, Reason};
 use crate::store;
+use crate::timer::HighWater;
 use crate::timer::engine::{EngineHandle, EngineHealth};
 use crate::timer::release::ReleaseDesk;
-use crate::timer::HighWater;
 
 pub use power::PowerSourceStatus;
 
@@ -79,7 +79,10 @@ pub fn lock_db(db: &Mutex<Connection>) -> AppResult<MutexGuard<'_, Connection>> 
     match db.lock() {
         Ok(guard) => Ok(guard),
         Err(poisoned) => {
-            tracing::error!(event = "db_lock_recovered", "database lock was poisoned by a panic");
+            tracing::error!(
+                event = "db_lock_recovered",
+                "database lock was poisoned by a panic"
+            );
             db.clear_poison();
             Ok(poisoned.into_inner())
         }
@@ -99,7 +102,15 @@ pub fn allow_exit(state: &AppState) -> AppResult<bool> {
 pub(crate) fn exit_decision(conn: &mut Connection, session_id: i64, at_ms: i64) -> AppResult<bool> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     if crate::study::lock_held(&tx)? {
-        store::append_history(&tx, at_ms, "appExit", None, "exit", Reason::User, Outcome::RejectedLocked)?;
+        store::append_history(
+            &tx,
+            at_ms,
+            "appExit",
+            None,
+            "exit",
+            Reason::User,
+            Outcome::RejectedLocked,
+        )?;
         tx.commit()?;
         return Ok(false);
     }
@@ -140,7 +151,15 @@ pub(crate) fn quit_decision(
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     if crate::study::lock_held(&tx)? {
         let after = format!("system_{}", reason.as_str());
-        store::append_history(&tx, at_ms, "appExit", None, &after, Reason::User, Outcome::Applied)?;
+        store::append_history(
+            &tx,
+            at_ms,
+            "appExit",
+            None,
+            &after,
+            Reason::User,
+            Outcome::Applied,
+        )?;
     } else {
         store::set_clean_exit(&tx, session_id, true, at_ms)?;
     }
@@ -159,7 +178,11 @@ mod tests {
         let session = store::insert_session(&conn, 1).expect("session");
         assert!(exit_decision(&mut conn, session, 2).expect("exit"));
         let clean: Option<i64> = conn
-            .query_row("SELECT clean_exit FROM sessions WHERE id = ?1", [session], |r| r.get(0))
+            .query_row(
+                "SELECT clean_exit FROM sessions WHERE id = ?1",
+                [session],
+                |r| r.get(0),
+            )
             .expect("row");
         assert_eq!(clean, Some(1));
     }
@@ -171,9 +194,16 @@ mod tests {
         conn.execute("DELETE FROM study_state", []).expect("delete");
         assert!(exit_decision(&mut conn, session, 2).is_err());
         let clean: Option<i64> = conn
-            .query_row("SELECT clean_exit FROM sessions WHERE id = ?1", [session], |r| r.get(0))
+            .query_row(
+                "SELECT clean_exit FROM sessions WHERE id = ?1",
+                [session],
+                |r| r.get(0),
+            )
             .expect("row");
-        assert_eq!(clean, None, "an unknown lock must not mark the session clean");
+        assert_eq!(
+            clean, None,
+            "an unknown lock must not mark the session clean"
+        );
     }
 
     #[test]
@@ -183,9 +213,16 @@ mod tests {
         crate::testutil::set_lock_for_test(&conn, true);
         assert!(!exit_decision(&mut conn, session, 3).expect("exit"));
         let clean: Option<i64> = conn
-            .query_row("SELECT clean_exit FROM sessions WHERE id = ?1", [session], |r| r.get(0))
+            .query_row(
+                "SELECT clean_exit FROM sessions WHERE id = ?1",
+                [session],
+                |r| r.get(0),
+            )
             .expect("row");
-        assert_eq!(clean, None, "a refused exit must not mark the session clean");
+        assert_eq!(
+            clean, None,
+            "a refused exit must not mark the session clean"
+        );
         let latest = &crate::settings::read_history(&conn, 1).expect("history")[0];
         assert_eq!(latest.key, "appExit");
         assert_eq!(latest.outcome, "rejected_locked");
@@ -198,7 +235,10 @@ mod tests {
         crate::testutil::set_lock_for_test(&conn, true);
         assert!(!quit_decision(&mut conn, session, 3, QuitReason::Requested).expect("quit"));
         let latest = &crate::settings::read_history(&conn, 1).expect("history")[0];
-        assert_eq!((latest.key.as_str(), latest.outcome.as_str()), ("appExit", "rejected_locked"));
+        assert_eq!(
+            (latest.key.as_str(), latest.outcome.as_str()),
+            ("appExit", "rejected_locked")
+        );
     }
 
     #[test]
@@ -211,12 +251,20 @@ mod tests {
 
     #[test]
     fn system_quit_under_lock_is_allowed_recorded_and_left_unclean_for_forced_quit() {
-        for reason in [QuitReason::LogOut, QuitReason::Restart, QuitReason::ShutDown] {
+        for reason in [
+            QuitReason::LogOut,
+            QuitReason::Restart,
+            QuitReason::ShutDown,
+        ] {
             let mut conn = open_in_memory().expect("db");
             let session = store::insert_session(&conn, 1).expect("session");
             crate::testutil::set_lock_for_test(&conn, true);
             assert!(quit_decision(&mut conn, session, 3, reason).expect("quit"));
-            assert_eq!(clean_exit_of(&conn, session), None, "must be recovered as forced_quit");
+            assert_eq!(
+                clean_exit_of(&conn, session),
+                None,
+                "must be recovered as forced_quit"
+            );
             let latest = &crate::settings::read_history(&conn, 1).expect("history")[0];
             assert_eq!(latest.key, "appExit");
             assert_eq!(latest.outcome, "applied");
@@ -235,6 +283,11 @@ mod tests {
     }
 
     fn clean_exit_of(conn: &Connection, session: i64) -> Option<i64> {
-        conn.query_row("SELECT clean_exit FROM sessions WHERE id = ?1", [session], |r| r.get(0)).expect("row")
+        conn.query_row(
+            "SELECT clean_exit FROM sessions WHERE id = ?1",
+            [session],
+            |r| r.get(0),
+        )
+        .expect("row")
     }
 }

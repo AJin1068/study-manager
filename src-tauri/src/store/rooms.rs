@@ -4,13 +4,17 @@
 
 use std::collections::HashSet;
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use crate::enforce::model::BlockAction;
 use crate::error::AppResult;
 use crate::rooms::model::{RoomRole, RoomSummary};
 
-pub fn replace_membership_cache(conn: &mut Connection, rooms: &[RoomSummary], at_ms: i64) -> AppResult<()> {
+pub fn replace_membership_cache(
+    conn: &mut Connection,
+    rooms: &[RoomSummary],
+    at_ms: i64,
+) -> AppResult<()> {
     let tx = conn.transaction()?;
     tx.execute("DELETE FROM room_membership_cache", [])?;
     for room in rooms {
@@ -25,7 +29,10 @@ pub fn replace_membership_cache(conn: &mut Connection, rooms: &[RoomSummary], at
         )?;
     }
     // A room that left the list also loses its local nickname and copy marks.
-    tx.execute("DELETE FROM room_prefs WHERE room_id NOT IN (SELECT room_id FROM room_membership_cache)", [])?;
+    tx.execute(
+        "DELETE FROM room_prefs WHERE room_id NOT IN (SELECT room_id FROM room_membership_cache)",
+        [],
+    )?;
     tx.execute("DELETE FROM together_imports WHERE room_id NOT IN (SELECT room_id FROM room_membership_cache)", [])?;
     tx.commit()?;
     Ok(())
@@ -43,7 +50,11 @@ pub fn read_membership_cache(conn: &Connection) -> AppResult<(Vec<RoomSummary>, 
             RoomSummary {
                 room_id: row.get(0)?,
                 name: row.get(1)?,
-                role: if role == "owner" { RoomRole::Owner } else { RoomRole::Member },
+                role: if role == "owner" {
+                    RoomRole::Owner
+                } else {
+                    RoomRole::Member
+                },
                 member_count: row.get(3)?,
                 capacity: row.get(4)?,
             },
@@ -61,10 +72,19 @@ pub fn read_membership_cache(conn: &Connection) -> AppResult<(Vec<RoomSummary>, 
 }
 
 pub fn has_rooms(conn: &Connection) -> AppResult<bool> {
-    Ok(conn.query_row("SELECT EXISTS (SELECT 1 FROM room_membership_cache)", [], |row| row.get::<_, i64>(0))? == 1)
+    Ok(conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM room_membership_cache)",
+        [],
+        |row| row.get::<_, i64>(0),
+    )? == 1)
 }
 
-pub fn set_room_pref(conn: &Connection, room_id: &str, nickname: &str, ack_ms: i64) -> AppResult<()> {
+pub fn set_room_pref(
+    conn: &Connection,
+    room_id: &str,
+    nickname: &str,
+    ack_ms: i64,
+) -> AppResult<()> {
     conn.execute(
         "INSERT INTO room_prefs (room_id, nickname, notice_ack_ms) VALUES (?1, ?2, ?3)
          ON CONFLICT(room_id) DO UPDATE SET nickname = excluded.nickname, notice_ack_ms = excluded.notice_ack_ms",
@@ -74,14 +94,29 @@ pub fn set_room_pref(conn: &Connection, room_id: &str, nickname: &str, ack_ms: i
 }
 
 pub fn forget_room(conn: &Connection, room_id: &str) -> AppResult<()> {
-    conn.execute("DELETE FROM room_membership_cache WHERE room_id = ?1", params![room_id])?;
-    conn.execute("DELETE FROM room_prefs WHERE room_id = ?1", params![room_id])?;
-    conn.execute("DELETE FROM together_imports WHERE room_id = ?1", params![room_id])?;
+    conn.execute(
+        "DELETE FROM room_membership_cache WHERE room_id = ?1",
+        params![room_id],
+    )?;
+    conn.execute(
+        "DELETE FROM room_prefs WHERE room_id = ?1",
+        params![room_id],
+    )?;
+    conn.execute(
+        "DELETE FROM together_imports WHERE room_id = ?1",
+        params![room_id],
+    )?;
     Ok(())
 }
 
 /// Returns false when the block was already copied (the primary key refused the second row).
-pub fn record_import(conn: &Connection, room_id: &str, item_key: &str, plan_id: i64, at_ms: i64) -> AppResult<bool> {
+pub fn record_import(
+    conn: &Connection,
+    room_id: &str,
+    item_key: &str,
+    plan_id: i64,
+    at_ms: i64,
+) -> AppResult<bool> {
     let added = conn.execute(
         "INSERT OR IGNORE INTO together_imports (room_id, item_key, plan_id, at_ms) VALUES (?1, ?2, ?3, ?4)",
         params![room_id, item_key, plan_id, at_ms],
@@ -116,49 +151,91 @@ mod tests {
     use rusqlite::OptionalExtension;
 
     fn room_nickname(conn: &Connection, room_id: &str) -> AppResult<Option<String>> {
-        Ok(conn.query_row("SELECT nickname FROM room_prefs WHERE room_id = ?1", params![room_id], |row| row.get(0)).optional()?)
+        Ok(conn
+            .query_row(
+                "SELECT nickname FROM room_prefs WHERE room_id = ?1",
+                params![room_id],
+                |row| row.get(0),
+            )
+            .optional()?)
     }
     use super::*;
     use crate::db::open_in_memory;
 
     fn room(id: &str, name: &str) -> RoomSummary {
-        RoomSummary { room_id: id.into(), name: name.into(), role: RoomRole::Member, member_count: 2, capacity: 8 }
+        RoomSummary {
+            room_id: id.into(),
+            name: name.into(),
+            role: RoomRole::Member,
+            member_count: 2,
+            capacity: 8,
+        }
     }
 
     #[test]
     fn the_cache_is_replaced_as_a_whole_and_drops_local_facts_of_rooms_that_left() {
         let mut conn = open_in_memory().expect("db");
-        replace_membership_cache(&mut conn, &[room("room-aaaa-1", "A"), room("room-bbbb-2", "B")], 10).expect("cache");
+        replace_membership_cache(
+            &mut conn,
+            &[room("room-aaaa-1", "A"), room("room-bbbb-2", "B")],
+            10,
+        )
+        .expect("cache");
         set_room_pref(&conn, "room-aaaa-1", "나", 10).expect("pref");
         set_room_pref(&conn, "room-bbbb-2", "나", 10).expect("pref");
         assert!(record_import(&conn, "room-bbbb-2", "123", 7, 11).expect("import"));
-        assert!(!record_import(&conn, "room-bbbb-2", "123", 8, 12).expect("second"), "the same block twice is refused");
+        assert!(
+            !record_import(&conn, "room-bbbb-2", "123", 8, 12).expect("second"),
+            "the same block twice is refused"
+        );
 
         replace_membership_cache(&mut conn, &[room("room-aaaa-1", "A")], 20).expect("cache");
         let (rooms, refreshed) = read_membership_cache(&conn).expect("read");
         assert_eq!((rooms.len(), refreshed), (1, Some(20)));
         assert_eq!(room_nickname(&conn, "room-bbbb-2").expect("nick"), None);
-        assert!(imported_keys(&conn, "room-bbbb-2").expect("keys").is_empty());
-        assert_eq!(room_nickname(&conn, "room-aaaa-1").expect("nick").as_deref(), Some("나"));
+        assert!(
+            imported_keys(&conn, "room-bbbb-2")
+                .expect("keys")
+                .is_empty()
+        );
+        assert_eq!(
+            room_nickname(&conn, "room-aaaa-1")
+                .expect("nick")
+                .as_deref(),
+            Some("나")
+        );
     }
 
     #[test]
     fn an_empty_cache_has_no_rooms_and_no_refresh_time() {
         let conn = open_in_memory().expect("db");
         assert!(!has_rooms(&conn).expect("has"));
-        assert_eq!(read_membership_cache(&conn).expect("read"), (Vec::new(), None));
+        assert_eq!(
+            read_membership_cache(&conn).expect("read"),
+            (Vec::new(), None)
+        );
     }
 
     #[test]
     fn attempts_are_counted_inside_the_half_open_window_only() {
         let conn = open_in_memory().expect("db");
-        for (at, action) in [(5, "would_terminate"), (10, "terminate_requested"), (10, "terminated"), (11, "site_blocked"), (20, "would_terminate")] {
+        for (at, action) in [
+            (5, "would_terminate"),
+            (10, "terminate_requested"),
+            (10, "terminated"),
+            (11, "site_blocked"),
+            (20, "would_terminate"),
+        ] {
             conn.execute(
                 "INSERT INTO block_events (at_ms, target_kind, target_id, action, mode) VALUES (?1, 'app', 'x', ?2, 'dryRun')",
                 params![at, action],
             )
             .expect("event");
         }
-        assert_eq!(count_attempts_between(&conn, 10, 20).expect("count"), 2, "[10,20): the attempt and the site block, not the outcome row");
+        assert_eq!(
+            count_attempts_between(&conn, 10, 20).expect("count"),
+            2,
+            "[10,20): the attempt and the site block, not the outcome row"
+        );
     }
 }

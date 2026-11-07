@@ -65,11 +65,18 @@ pub fn collect<Tz: TimeZone>(conn: &Connection, tz: &Tz, now_ms: i64) -> AppResu
         _ => None,
     };
 
-    let grass = repo::study_minutes(conn, &date(today - Duration::days(GRASS_DAYS - 1)), &date(today))?
-        .into_iter()
-        .filter(|(_, minutes)| *minutes > 0)
-        .map(|(day, study_min)| GrassEntry { day, study_min: study_min.min(1440) })
-        .collect();
+    let grass = repo::study_minutes(
+        conn,
+        &date(today - Duration::days(GRASS_DAYS - 1)),
+        &date(today),
+    )?
+    .into_iter()
+    .filter(|(_, minutes)| *minutes > 0)
+    .map(|(day, study_min)| GrassEntry {
+        day,
+        study_min: study_min.min(1440),
+    })
+    .collect();
 
     Ok(LocalFacts {
         name: repo::local(conn)?.display_name,
@@ -84,7 +91,11 @@ pub fn collect<Tz: TimeZone>(conn: &Connection, tz: &Tz, now_ms: i64) -> AppResu
 }
 
 fn scope_of(facts: &LocalFacts, section: Section) -> Scope {
-    facts.scopes.get(&section).copied().unwrap_or(Scope::Private)
+    facts
+        .scopes
+        .get(&section)
+        .copied()
+        .unwrap_or(Scope::Private)
 }
 
 fn shown(facts: &LocalFacts, section: Section) -> bool {
@@ -106,10 +117,31 @@ pub fn settings_args(facts: &LocalFacts) -> SetProfileArgs {
         vis_subject: scope(Section::Subject),
         vis_gifts: scope(Section::Gifts),
         level: shown(facts, Section::Level).then_some(facts.level),
-        badges: if shown(facts, Section::Badges) { facts.badges.clone() } else { Vec::new() },
-        furniture: if shown(facts, Section::Room) { facts.furniture.clone() } else { Vec::new() },
-        wiki_titles: if shown(facts, Section::Wiki) { facts.wiki_titles.iter().take(MAX_WIKI_TITLES).cloned().collect() } else { Vec::new() },
-        subject_now: if shown(facts, Section::Subject) { facts.subject.clone() } else { None },
+        badges: if shown(facts, Section::Badges) {
+            facts.badges.clone()
+        } else {
+            Vec::new()
+        },
+        furniture: if shown(facts, Section::Room) {
+            facts.furniture.clone()
+        } else {
+            Vec::new()
+        },
+        wiki_titles: if shown(facts, Section::Wiki) {
+            facts
+                .wiki_titles
+                .iter()
+                .take(MAX_WIKI_TITLES)
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        },
+        subject_now: if shown(facts, Section::Subject) {
+            facts.subject.clone()
+        } else {
+            None
+        },
     }
 }
 

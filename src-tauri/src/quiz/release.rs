@@ -36,8 +36,12 @@ pub enum ReleasePlan {
     Typing,
     /// Answer all of these.
     Quiz(Vec<QuizItem>),
-    CoolingDown { retry_after_ms: i64 },
-    Exhausted { max_attempts: i64 },
+    CoolingDown {
+        retry_after_ms: i64,
+    },
+    Exhausted {
+        max_attempts: i64,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,7 +52,12 @@ enum Gate {
     Exhausted,
 }
 
-fn gate<Tz: TimeZone>(conn: &Connection, tz: &Tz, config: &QuizConfig, now_ms: i64) -> AppResult<(Gate, i64)> {
+fn gate<Tz: TimeZone>(
+    conn: &Connection,
+    tz: &Tz,
+    config: &QuizConfig,
+    now_ms: i64,
+) -> AppResult<(Gate, i64)> {
     let date = date_of(tz, now_ms)?;
     let (attempts, last_ms) = repo::release_state(conn, &date)?.unwrap_or((0, 0));
     if attempts >= config.release_max_attempts_per_day {
@@ -70,11 +79,18 @@ fn gate<Tz: TimeZone>(conn: &Connection, tz: &Tz, config: &QuizConfig, now_ms: i
 }
 
 /// Decides the proof for a new early-release challenge and, when it is a quiz, counts the attempt.
-pub fn begin_attempt<Tz: TimeZone>(conn: &Connection, tz: &Tz, now_ms: i64, seed: u64) -> AppResult<ReleasePlan> {
+pub fn begin_attempt<Tz: TimeZone>(
+    conn: &Connection,
+    tz: &Tz,
+    now_ms: i64,
+    seed: u64,
+) -> AppResult<ReleasePlan> {
     let config = QuizConfig::load(conn)?;
     let (decided, _) = gate(conn, tz, &config, now_ms)?;
     match decided {
-        Gate::Exhausted => Ok(ReleasePlan::Exhausted { max_attempts: config.release_max_attempts_per_day }),
+        Gate::Exhausted => Ok(ReleasePlan::Exhausted {
+            max_attempts: config.release_max_attempts_per_day,
+        }),
         Gate::CoolingDown { retry_after_ms } => Ok(ReleasePlan::CoolingDown { retry_after_ms }),
         Gate::Typing => Ok(ReleasePlan::Typing),
         Gate::Quiz => {
@@ -84,7 +100,12 @@ pub fn begin_attempt<Tz: TimeZone>(conn: &Connection, tz: &Tz, now_ms: i64, seed
                 return Ok(ReleasePlan::Typing);
             }
             repo::open_release_attempt(conn, &date_of(tz, now_ms)?, now_ms)?;
-            Ok(ReleasePlan::Quiz(picked.into_iter().map(|i| candidates[i].item.clone()).collect()))
+            Ok(ReleasePlan::Quiz(
+                picked
+                    .into_iter()
+                    .map(|i| candidates[i].item.clone())
+                    .collect(),
+            ))
         }
     }
 }
@@ -95,7 +116,14 @@ pub fn fail_attempt<Tz: TimeZone>(conn: &Connection, tz: &Tz, now_ms: i64) -> Ap
 }
 
 /// Writes one attempt row per question (right or wrong), tagged as the early-release proof.
-pub fn record_answers(conn: &Connection, items: &[QuizItem], correct: &[bool], run_id: Option<i64>, response_ms: i64, at_ms: i64) -> AppResult<()> {
+pub fn record_answers(
+    conn: &Connection,
+    items: &[QuizItem],
+    correct: &[bool],
+    run_id: Option<i64>,
+    response_ms: i64,
+    at_ms: i64,
+) -> AppResult<()> {
     for (item, ok) in items.iter().zip(correct) {
         repo::insert_attempt(
             conn,
@@ -129,7 +157,11 @@ pub struct ReleaseQuizStatus {
     pub cooldown_min: i64,
 }
 
-pub fn status<Tz: TimeZone>(conn: &Connection, tz: &Tz, now_ms: i64) -> AppResult<ReleaseQuizStatus> {
+pub fn status<Tz: TimeZone>(
+    conn: &Connection,
+    tz: &Tz,
+    now_ms: i64,
+) -> AppResult<ReleaseQuizStatus> {
     let config = QuizConfig::load(conn)?;
     let (decided, attempts) = gate(conn, tz, &config, now_ms)?;
     let (mode, cooldown_remaining_ms) = match decided {

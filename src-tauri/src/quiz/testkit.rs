@@ -18,10 +18,17 @@ pub struct Bank {
 pub fn seed_bank(conn: &Connection, n: usize) -> Bank {
     let subject_id = wiki_repo::insert_subject(conn, "수학", "수학", 1).expect("subject");
     wiki_repo::upsert_page(conn, subject_id, "미분", "pages/미분.md", "h", 1).expect("page");
-    let page_id = wiki_repo::get_page(conn, subject_id, "미분").expect("page").expect("row").id;
+    let page_id = wiki_repo::get_page(conn, subject_id, "미분")
+        .expect("page")
+        .expect("row")
+        .id;
     add_items(conn, page_id, 0..n);
     let items = (0..n).map(|i| find(conn, page_id, i)).collect();
-    Bank { subject_id, page_id, items }
+    Bank {
+        subject_id,
+        page_id,
+        items,
+    }
 }
 
 fn new_item(i: usize) -> NewItem {
@@ -37,7 +44,12 @@ fn new_item(i: usize) -> NewItem {
         NewItem {
             kind: ItemKind::Mcq,
             prompt: format!("문제 {i} 의 답은?"),
-            choices: vec![format!("보기{i}가"), format!("보기{i}나"), format!("보기{i}다"), format!("보기{i}라")],
+            choices: vec![
+                format!("보기{i}가"),
+                format!("보기{i}나"),
+                format!("보기{i}다"),
+                format!("보기{i}라"),
+            ],
             answer_key: format!("보기{i}다"),
             evidence_quote: format!("문제 {i} 의 근거"),
         }
@@ -52,7 +64,11 @@ pub fn add_items(conn: &Connection, page_id: i64, range: std::ops::Range<usize>)
 
 fn find(conn: &Connection, page_id: i64, i: usize) -> QuizItem {
     let id: i64 = conn
-        .query_row("SELECT id FROM quiz_items WHERE page_id = ?1 AND prompt = ?2", rusqlite::params![page_id, new_item(i).prompt], |r| r.get(0))
+        .query_row(
+            "SELECT id FROM quiz_items WHERE page_id = ?1 AND prompt = ?2",
+            rusqlite::params![page_id, new_item(i).prompt],
+            |r| r.get(0),
+        )
         .expect("id");
     repo::get_item(conn, id).expect("read").expect("item")
 }

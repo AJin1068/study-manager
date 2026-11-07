@@ -44,17 +44,28 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn decide(&self, conn: &Connection, state: &TimerState, cfg: &MessageConfig, now_ms: i64) -> AppResult<Option<Trigger>> {
+    pub fn decide(
+        &self,
+        conn: &Connection,
+        state: &TimerState,
+        cfg: &MessageConfig,
+        now_ms: i64,
+    ) -> AppResult<Option<Trigger>> {
         let latest_attempt = quiz_repo::latest_attempt_event_id(conn)?;
         let in_block = crate::enforce::study_window(state).is_some();
 
         let (new_attempt, set_done, since) = {
-            let mut marks = self.marks.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut marks = self
+                .marks
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             let new_attempt = marks.last_attempt.is_some_and(|seen| latest_attempt > seen);
             marks.last_attempt = Some(latest_attempt);
 
             let set_done = match (state.run_id, marks.last_set) {
-                (Some(run), Some((prev_run, prev_set))) => prev_run == run && state.set_index > prev_set,
+                (Some(run), Some((prev_run, prev_set))) => {
+                    prev_run == run && state.set_index > prev_set
+                }
                 _ => false,
             };
             marks.last_set = state.run_id.map(|run| (run, state.set_index));
@@ -79,14 +90,24 @@ impl Engine {
         } else {
             None
         };
-        if candidate.is_none() || repo::count_since(conn, now_ms.saturating_sub(HOUR_MS))? >= cfg.max_per_hour {
+        if candidate.is_none()
+            || repo::count_since(conn, now_ms.saturating_sub(HOUR_MS))? >= cfg.max_per_hour
+        {
             return Ok(None);
         }
         Ok(candidate)
     }
 
-    fn random_due(&self, conn: &Connection, cfg: &MessageConfig, since: Option<i64>, now_ms: i64) -> AppResult<bool> {
-        let quiet_since = repo::last_at(conn)?.unwrap_or(i64::MIN).max(since.unwrap_or(now_ms));
+    fn random_due(
+        &self,
+        conn: &Connection,
+        cfg: &MessageConfig,
+        since: Option<i64>,
+        now_ms: i64,
+    ) -> AppResult<bool> {
+        let quiet_since = repo::last_at(conn)?
+            .unwrap_or(i64::MIN)
+            .max(since.unwrap_or(now_ms));
         Ok(now_ms.saturating_sub(quiet_since) >= cfg.random_interval_min.saturating_mul(60_000))
     }
 }

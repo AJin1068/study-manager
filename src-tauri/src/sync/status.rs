@@ -101,16 +101,26 @@ mod tests {
         status.beat(10, Err("connect_failed"));
         status.set_presence_degraded(true);
         let view = status.view();
-        assert_eq!((view.beat_error, view.degraded_code), (Some("connect_failed"), Some(PRESENCE_UNREACHABLE)));
+        assert_eq!(
+            (view.beat_error, view.degraded_code),
+            (Some("connect_failed"), Some(PRESENCE_UNREACHABLE))
+        );
         status.beat(20, Ok(()));
         status.sync(25, Ok(()));
         assert_eq!(status.view().beat_error, None);
-        assert_eq!((status.view().last_beat_ok_ms, status.view().last_sync_ok_ms), (Some(20), Some(25)));
+        assert_eq!(
+            (status.view().last_beat_ok_ms, status.view().last_sync_ok_ms),
+            (Some(20), Some(25))
+        );
         status.sync(30, Err("http_error"));
         status.set_active(false);
         let view = status.view();
         assert!(!view.active);
         assert_eq!((view.sync_error, view.degraded_code), (None, None));
-        assert_eq!(view.last_beat_ok_ms, Some(20), "the last success time is kept for display");
+        assert_eq!(
+            view.last_beat_ok_ms,
+            Some(20),
+            "the last success time is kept for display"
+        );
     }
 }

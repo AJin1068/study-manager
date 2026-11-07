@@ -11,12 +11,17 @@ const FORBIDDEN: &str = "/\\:*?\"<>|";
 
 /// Device names Windows refuses as file names, with or without an extension.
 const RESERVED: [&str; 22] = [
-    "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9", "lpt1", "lpt2", "lpt3",
-    "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+    "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8",
+    "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
 ];
 
 fn is_reserved(name: &str) -> bool {
-    let stem = name.split('.').next().unwrap_or(name).trim_end().to_ascii_lowercase();
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or(name)
+        .trim_end()
+        .to_ascii_lowercase();
     RESERVED.contains(&stem.as_str())
 }
 
@@ -37,7 +42,9 @@ pub fn subject_slug(name: &str) -> AppResult<String> {
     let slug: String = trimmed.chars().take(MAX_NAME_CHARS).collect();
     let slug = slug.trim_end_matches(['.', '-']).to_string();
     if slug.is_empty() {
-        return Err(AppError::Invalid("the subject name has no usable characters".into()));
+        return Err(AppError::Invalid(
+            "the subject name has no usable characters".into(),
+        ));
     }
     if is_reserved(&slug) {
         return Ok(format!("{slug}-과목"));
@@ -50,7 +57,9 @@ pub fn page_name(raw: &str) -> Option<String> {
     let name = squeeze_spaces(raw);
     let ok = !name.is_empty()
         && name.chars().count() <= MAX_NAME_CHARS
-        && !name.chars().any(|c| c.is_control() || FORBIDDEN.contains(c))
+        && !name
+            .chars()
+            .any(|c| c.is_control() || FORBIDDEN.contains(c))
         && !name.starts_with('.')
         && !name.ends_with('.')
         && !name.contains("..")
@@ -83,11 +92,21 @@ mod tests {
             ("끝점.", "끝점"),
             ("tab\tnew\nline", "tab-new-line"),
         ] {
-            assert_eq!(subject_slug(input).as_deref().ok(), Some(expected), "{input:?}");
+            assert_eq!(
+                subject_slug(input).as_deref().ok(),
+                Some(expected),
+                "{input:?}"
+            );
         }
         assert_eq!(subject_slug("CON").expect("reserved"), "CON-과목");
         assert_eq!(subject_slug("nul.txt").expect("reserved"), "nul.txt-과목");
-        assert_eq!(subject_slug(&"가".repeat(200)).expect("long").chars().count(), MAX_NAME_CHARS);
+        assert_eq!(
+            subject_slug(&"가".repeat(200))
+                .expect("long")
+                .chars()
+                .count(),
+            MAX_NAME_CHARS
+        );
     }
 
     #[test]
@@ -100,10 +119,29 @@ mod tests {
     #[test]
     fn page_names_are_validated_not_repaired() {
         assert_eq!(page_name("  미분   기초 ").as_deref(), Some("미분 기초"));
-        for bad in ["", "   ", "../x", "a/b", "a\\b", "x:y", ".hidden", "trail.", "a..b", "nul", "con.md", "bell\u{7}", "q?", "a|b", &"x".repeat(81)] {
+        for bad in [
+            "",
+            "   ",
+            "../x",
+            "a/b",
+            "a\\b",
+            "x:y",
+            ".hidden",
+            "trail.",
+            "a..b",
+            "nul",
+            "con.md",
+            "bell\u{7}",
+            "q?",
+            "a|b",
+            &"x".repeat(81),
+        ] {
             assert_eq!(page_name(bad), None, "{bad:?}");
         }
-        assert_eq!(page_name(&"가".repeat(80)).map(|n| n.chars().count()), Some(80));
+        assert_eq!(
+            page_name(&"가".repeat(80)).map(|n| n.chars().count()),
+            Some(80)
+        );
     }
 
     #[test]
@@ -111,7 +149,11 @@ mod tests {
         assert_eq!(page_file_name("미분"), "미분.md");
         assert_eq!(page_name_of_file("미분.md").as_deref(), Some("미분"));
         assert_eq!(page_name_of_file("미분.txt"), None);
-        assert_eq!(page_name_of_file(" 미분 .md"), None, "padding would change the name");
+        assert_eq!(
+            page_name_of_file(" 미분 .md"),
+            None,
+            "padding would change the name"
+        );
         assert_eq!(page_name_of_file("a  b.md"), None);
         assert_eq!(page_name_of_file(".md"), None);
     }

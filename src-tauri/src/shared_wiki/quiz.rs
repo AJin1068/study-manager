@@ -30,15 +30,31 @@ impl SharedQuiz {
     pub fn draw(pages: &[WirePage], seed: u64) -> Self {
         let mut pool: Vec<(QuizItem, String)> = Vec::new();
         for page in pages {
-            let merged = page.revisions.iter().filter(|r| r.kind == RevisionKind::Merge && !r.body.trim().is_empty()).max_by_key(|r| r.created_at_ms);
+            let merged = page
+                .revisions
+                .iter()
+                .filter(|r| r.kind == RevisionKind::Merge && !r.body.trim().is_empty())
+                .max_by_key(|r| r.created_at_ms);
             let bodies: Vec<&str> = match merged {
                 Some(m) => vec![m.body.as_str()],
-                None => page.revisions.iter().filter(|r| !r.body.trim().is_empty()).map(|r| r.body.as_str()).collect(),
+                None => page
+                    .revisions
+                    .iter()
+                    .filter(|r| !r.body.trim().is_empty())
+                    .map(|r| r.body.as_str())
+                    .collect(),
             };
             for body in bodies {
                 for item in template_items(body) {
                     pool.push((
-                        QuizItem { id: 0, page_id: 0, kind: item.kind, prompt: item.prompt, choices: item.choices, answer_key: item.answer_key },
+                        QuizItem {
+                            id: 0,
+                            page_id: 0,
+                            kind: item.kind,
+                            prompt: item.prompt,
+                            choices: item.choices,
+                            answer_key: item.answer_key,
+                        },
                         page.title.clone(),
                     ));
                 }
@@ -65,12 +81,18 @@ impl SharedQuiz {
 
     /// What the UI shows: no answer, no evidence.
     pub fn questions(&self) -> Vec<(QuizQuestion, String)> {
-        self.items.iter().map(|(item, title)| (item.view(self.seed), title.clone())).collect()
+        self.items
+            .iter()
+            .map(|(item, title)| (item.view(self.seed), title.clone()))
+            .collect()
     }
 
     /// Whether `answer` is right for question `item_id`; `None` for an unknown question.
     pub fn grade(&self, item_id: i64, answer: &str) -> Option<bool> {
-        self.items.iter().find(|(item, _)| item.id == item_id).map(|(item, _)| is_correct(item, answer))
+        self.items
+            .iter()
+            .find(|(item, _)| item.id == item_id)
+            .map(|(item, _)| is_correct(item, answer))
     }
 }
 
@@ -107,7 +129,11 @@ mod tests {
         let b = SharedQuiz::draw(&pages, 7);
         assert!(!a.is_empty() && a.len() <= ROUND_QUESTIONS);
         assert_eq!(a.questions(), b.questions());
-        assert!(a.questions().iter().all(|(q, title)| !q.prompt.is_empty() && title == "미분"));
+        assert!(
+            a.questions()
+                .iter()
+                .all(|(q, title)| !q.prompt.is_empty() && title == "미분")
+        );
     }
 
     #[test]
@@ -116,7 +142,12 @@ mod tests {
         let (question, _) = &quiz.questions()[0];
         assert_eq!(quiz.grade(question.item_id, "전혀 아닌 답"), Some(false));
         assert_eq!(quiz.grade(999, "x"), None);
-        let right = quiz.items.iter().find(|(i, _)| i.id == question.item_id).map(|(i, _)| i.answer_key.clone()).expect("item");
+        let right = quiz
+            .items
+            .iter()
+            .find(|(i, _)| i.id == question.item_id)
+            .map(|(i, _)| i.answer_key.clone())
+            .expect("item");
         assert_eq!(quiz.grade(question.item_id, &right), Some(true));
     }
 
@@ -124,7 +155,11 @@ mod tests {
     fn no_question_text_carries_the_answer_to_the_ui() {
         let quiz = SharedQuiz::draw(&[page("미분", RevisionKind::Edit, BODY, 1)], 3);
         for (item, _) in &quiz.items {
-            let (q, _) = quiz.questions().into_iter().find(|(q, _)| q.item_id == item.id).expect("question");
+            let (q, _) = quiz
+                .questions()
+                .into_iter()
+                .find(|(q, _)| q.item_id == item.id)
+                .expect("question");
             if item.choices.is_empty() {
                 assert!(!q.prompt.contains(&item.answer_key));
             }
@@ -133,10 +168,23 @@ mod tests {
 
     #[test]
     fn a_merged_revision_replaces_the_single_edits_as_the_source() {
-        let mut p = page("미분", RevisionKind::Edit, "- 단독 편집만 있는 문장은 여기에 하나 있다.\n", 1);
-        p.revisions.push(page("미분", RevisionKind::Merge, BODY, 2).revisions.remove(0));
+        let mut p = page(
+            "미분",
+            RevisionKind::Edit,
+            "- 단독 편집만 있는 문장은 여기에 하나 있다.\n",
+            1,
+        );
+        p.revisions.push(
+            page("미분", RevisionKind::Merge, BODY, 2)
+                .revisions
+                .remove(0),
+        );
         let quiz = SharedQuiz::draw(&[p], 1);
-        assert!(quiz.questions().iter().all(|(q, _)| !q.prompt.contains("단독")));
+        assert!(
+            quiz.questions()
+                .iter()
+                .all(|(q, _)| !q.prompt.contains("단독"))
+        );
     }
 
     #[test]

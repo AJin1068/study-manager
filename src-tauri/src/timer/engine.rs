@@ -3,7 +3,7 @@
 //! wake-up; after `DEGRADED_AFTER` failures in a row the UI is told the automatic transitions
 //! stopped (the emergency release in `release` keeps working without this thread).
 
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
@@ -23,9 +23,9 @@ use crate::platform::{self, Notifier};
 use crate::tray;
 
 use super::model::TimerState;
-use super::notice::{self, BreakEndingSoon, BREAK_ENDING_SOON_EVENT};
-use super::summary::{self, RunSummary, SetSummary, RUN_SUMMARY_EVENT, SET_SUMMARY_EVENT};
-use super::{reconcile, HighWater};
+use super::notice::{self, BREAK_ENDING_SOON_EVENT, BreakEndingSoon};
+use super::summary::{self, RUN_SUMMARY_EVENT, RunSummary, SET_SUMMARY_EVENT, SetSummary};
+use super::{HighWater, reconcile};
 
 pub const TIMER_CHANGED_EVENT: &str = "timer_changed";
 pub const PLAN_RECHECKED_EVENT: &str = "plan_rechecked";
@@ -116,12 +116,19 @@ impl EngineHealth {
             }
             Ok(Err(err)) => {
                 tracing::error!(event = "engine_tick_failed", error = %err);
-                Supervised::Failed { just_degraded: self.fail() }
+                Supervised::Failed {
+                    just_degraded: self.fail(),
+                }
             }
             Err(_) => {
                 self.restarts.fetch_add(1, Ordering::SeqCst);
-                tracing::error!(event = "engine_restart", "timer tick panicked; retrying on the next wake-up");
-                Supervised::Failed { just_degraded: self.fail() }
+                tracing::error!(
+                    event = "engine_restart",
+                    "timer tick panicked; retrying on the next wake-up"
+                );
+                Supervised::Failed {
+                    just_degraded: self.fail(),
+                }
             }
         }
     }
@@ -138,7 +145,13 @@ pub enum Emission {
 
 /// Whether two states differ in anything the UI shows (the clock reading alone is not a change).
 fn same_view(a: &TimerState, b: &TimerState) -> bool {
-    TimerState { now_ms: 0, ..a.clone() } == TimerState { now_ms: 0, ..b.clone() }
+    TimerState {
+        now_ms: 0,
+        ..a.clone()
+    } == TimerState {
+        now_ms: 0,
+        ..b.clone()
+    }
 }
 
 /// One wake-up: reconcile at the effective time and decide which events to send. Pure in its
@@ -155,9 +168,18 @@ pub fn tick_once<Tz: TimeZone>(
     let previous_high = high_water.get();
     let effective = high_water.observe(now);
     if now < previous_high {
-        tracing::warn!(event = "clock_regression_held", behind_ms = previous_high - now);
-    } else if reason == WakeReason::Tick && previous_high > 0 && now - previous_high > DISCONTINUITY_MS {
-        tracing::info!(event = "clock_discontinuity", ahead_ms = now - previous_high);
+        tracing::warn!(
+            event = "clock_regression_held",
+            behind_ms = previous_high - now
+        );
+    } else if reason == WakeReason::Tick
+        && previous_high > 0
+        && now - previous_high > DISCONTINUITY_MS
+    {
+        tracing::info!(
+            event = "clock_discontinuity",
+            ahead_ms = now - previous_high
+        );
     }
     let reconciled = {
         let mut conn = lock_db(db)?;
@@ -230,7 +252,10 @@ struct DegradedPayload {
 }
 
 fn emit_health(app: &AppHandle, health: &EngineHealth, degraded: bool) {
-    let payload = DegradedPayload { degraded, consecutive_failures: health.snapshot().consecutive_failures };
+    let payload = DegradedPayload {
+        degraded,
+        consecutive_failures: health.snapshot().consecutive_failures,
+    };
     if let Err(err) = app.emit(ENGINE_DEGRADED_EVENT, payload) {
         tracing::error!(error = %err, "failed to emit engine_degraded");
     }
@@ -259,25 +284,36 @@ pub fn spawn(
         let mut tray_label: Option<tray::TrayLabel> = None;
         let mut next_tick = Instant::now();
         loop {
-            let reason = match wakes.recv_timeout(next_tick.saturating_duration_since(Instant::now())) {
-                Ok(reason) => reason,
-                Err(RecvTimeoutError::Timeout) => {
-                    let late = Instant::now().saturating_duration_since(next_tick).as_millis();
-                    if late > LATE_LOG_MS {
-                        tracing::warn!(event = "tick_late", tick_late_ms = late);
+            let reason =
+                match wakes.recv_timeout(next_tick.saturating_duration_since(Instant::now())) {
+                    Ok(reason) => reason,
+                    Err(RecvTimeoutError::Timeout) => {
+                        let late = Instant::now()
+                            .saturating_duration_since(next_tick)
+                            .as_millis();
+                        if late > LATE_LOG_MS {
+                            tracing::warn!(event = "tick_late", tick_late_ms = late);
+                        }
+                        WakeReason::Tick
                     }
-                    WakeReason::Tick
-                }
-                Err(RecvTimeoutError::Disconnected) => {
-                    tracing::error!("timer wake channel closed; engine stopping");
-                    return;
-                }
-            };
+                    Err(RecvTimeoutError::Disconnected) => {
+                        tracing::error!("timer wake channel closed; engine stopping");
+                        return;
+                    }
+                };
             if reason == WakeReason::Tick {
                 next_tick = Instant::now() + TICK;
             }
             let outcome = health.run(|| {
-                tick_once(&db, &Local, &high_water, now_ms()?, reason, &mut last, notifier.as_ref())
+                tick_once(
+                    &db,
+                    &Local,
+                    &high_water,
+                    now_ms()?,
+                    reason,
+                    &mut last,
+                    notifier.as_ref(),
+                )
             });
             match outcome {
                 Supervised::Done { value, recovered } => {

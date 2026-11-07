@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
 use crate::plan::ModeLookup;
-use crate::plan_shift::{preview_day, shift_after_mode_change_with, LlmProposal, ModeChange, ModeTrigger, ShiftItem};
+use crate::plan_shift::{
+    LlmProposal, ModeChange, ModeTrigger, ShiftItem, preview_day, shift_after_mode_change_with,
+};
 use crate::settings::{Outcome, Reason, UpdateOutcome};
 use crate::store;
 
@@ -84,7 +86,10 @@ pub fn lock_held(conn: &Connection) -> AppResult<bool> {
 
 pub fn read_lock_state(conn: &Connection) -> AppResult<LockState> {
     let (lock_held, changed_at_ms) = store::read_study_state(conn)?;
-    Ok(LockState { lock_held, changed_at_ms })
+    Ok(LockState {
+        lock_held,
+        changed_at_ms,
+    })
 }
 
 fn effective_level(conn: &Connection, date: &str) -> AppResult<(StudyLevel, bool)> {
@@ -116,7 +121,9 @@ pub fn preview_daily_mode<Tz: TimeZone>(
     level: StudyLevel,
     at_ms: i64,
 ) -> AppResult<Option<(Vec<ShiftItem>, i64)>> {
-    preview_day(conn, tz, date, at_ms, |tx| store::put_daily_mode(tx, date, level, at_ms))
+    preview_day(conn, tz, date, at_ms, |tx| {
+        store::put_daily_mode(tx, date, level, at_ms)
+    })
 }
 
 /// `set_daily_mode` where a valid LLM proposal decides the new start times (see `plan_shift`).
@@ -154,10 +161,19 @@ pub fn set_daily_mode_with<Tz: TimeZone>(
         Reason::User,
         Outcome::Applied,
     )?;
-    let trigger = ModeTrigger::Daily { date: date.to_string(), before: current, after: level };
+    let trigger = ModeTrigger::Daily {
+        date: date.to_string(),
+        before: current,
+        after: level,
+    };
     let shift = shift_after_mode_change_with(&tx, tz, date, &old, &trigger, at_ms, proposal)?;
     tx.commit()?;
-    Ok(ModeChange { outcome: UpdateOutcome::Applied { key: "studyMode".into() }, shift: Some(shift) })
+    Ok(ModeChange {
+        outcome: UpdateOutcome::Applied {
+            key: "studyMode".into(),
+        },
+        shift: Some(shift),
+    })
 }
 
 /// Allowed minutes for any mode length (D-9).
@@ -180,7 +196,11 @@ fn check_minutes(label: &str, value: i64) -> AppResult<()> {
 fn validate_mode_config(config: &ModeConfig) -> AppResult<()> {
     check_minutes("studyMin", config.study_min)?;
     check_minutes("breakMin", config.break_min)?;
-    match (config.level, config.long_break_min, config.sets_before_long_break) {
+    match (
+        config.level,
+        config.long_break_min,
+        config.sets_before_long_break,
+    ) {
         (StudyLevel::Easy, Some(long), Some(sets)) => {
             check_minutes("longBreakMin", long)?;
             if SETS_BEFORE_LONG_BREAK_RANGE.contains(&sets) {
@@ -227,7 +247,9 @@ pub fn preview_mode_config<Tz: TimeZone>(
     at_ms: i64,
 ) -> AppResult<Option<(Vec<ShiftItem>, i64)>> {
     validate_mode_config(config)?;
-    preview_day(conn, tz, today, at_ms, |tx| store::put_mode_config(tx, config))
+    preview_day(conn, tz, today, at_ms, |tx| {
+        store::put_mode_config(tx, config)
+    })
 }
 
 /// `update_mode_config` where a valid LLM proposal decides the new start times.
@@ -245,30 +267,61 @@ pub fn update_mode_config_with<Tz: TimeZone>(
     let before = store::list_mode_configs(&tx)?
         .into_iter()
         .find(|c| c.level == config.level)
-        .ok_or_else(|| AppError::Internal(format!("mode config row missing for {}", config.level.as_str())))?;
+        .ok_or_else(|| {
+            AppError::Internal(format!(
+                "mode config row missing for {}",
+                config.level.as_str()
+            ))
+        })?;
     let before_json = serde_json::to_string(&before)
         .map_err(|e| AppError::Internal(format!("mode config serialization failed: {e}")))?;
     let after_json = serde_json::to_string(&config)
         .map_err(|e| AppError::Internal(format!("mode config serialization failed: {e}")))?;
 
     if lock_held(&tx)? {
-        store::append_history(&tx, at_ms, &key, Some(&before_json), &after_json, Reason::User, Outcome::RejectedLocked)?;
+        store::append_history(
+            &tx,
+            at_ms,
+            &key,
+            Some(&before_json),
+            &after_json,
+            Reason::User,
+            Outcome::RejectedLocked,
+        )?;
         tx.commit()?;
         return Ok(ModeChange::rejected(key));
     }
     let old = ModeLookup::load(&tx)?;
     store::put_mode_config(&tx, &config)?;
-    store::append_history(&tx, at_ms, &key, Some(&before_json), &after_json, Reason::User, Outcome::Applied)?;
-    let trigger = ModeTrigger::Config { before, after: config };
+    store::append_history(
+        &tx,
+        at_ms,
+        &key,
+        Some(&before_json),
+        &after_json,
+        Reason::User,
+        Outcome::Applied,
+    )?;
+    let trigger = ModeTrigger::Config {
+        before,
+        after: config,
+    };
     let shift = shift_after_mode_change_with(&tx, tz, today, &old, &trigger, at_ms, proposal)?;
     tx.commit()?;
-    Ok(ModeChange { outcome: UpdateOutcome::Applied { key }, shift: Some(shift) })
+    Ok(ModeChange {
+        outcome: UpdateOutcome::Applied { key },
+        shift: Some(shift),
+    })
 }
 
 pub fn mode_snapshot(conn: &Connection, date: &str) -> AppResult<ModeSnapshot> {
     let (level, stored) = effective_level(conn, date)?;
     Ok(ModeSnapshot {
-        today: TodayMode { date: date.to_string(), level, stored },
+        today: TodayMode {
+            date: date.to_string(),
+            level,
+            stored,
+        },
         configs: store::list_mode_configs(conn)?,
     })
 }
@@ -279,19 +332,35 @@ mod tests {
     use crate::db::open_in_memory;
     use chrono::Utc;
 
-    fn set_daily_mode(conn: &mut Connection, date: &str, level: StudyLevel, at_ms: i64) -> AppResult<UpdateOutcome> {
+    fn set_daily_mode(
+        conn: &mut Connection,
+        date: &str,
+        level: StudyLevel,
+        at_ms: i64,
+    ) -> AppResult<UpdateOutcome> {
         super::set_daily_mode(conn, &Utc, date, level, at_ms).map(|change| change.outcome)
     }
 
-    fn update_mode_config(conn: &mut Connection, config: ModeConfig, at_ms: i64) -> AppResult<UpdateOutcome> {
-        super::update_mode_config(conn, &Utc, "2026-11-05", config, at_ms).map(|change| change.outcome)
+    fn update_mode_config(
+        conn: &mut Connection,
+        config: ModeConfig,
+        at_ms: i64,
+    ) -> AppResult<UpdateOutcome> {
+        super::update_mode_config(conn, &Utc, "2026-11-05", config, at_ms)
+            .map(|change| change.outcome)
     }
 
     #[test]
     fn mode_config_matches_spec_values() {
         let conn = open_in_memory().expect("db");
         let configs = store::list_mode_configs(&conn).expect("configs");
-        let by_level = |level| configs.iter().find(|c| c.level == level).expect("row").clone();
+        let by_level = |level| {
+            configs
+                .iter()
+                .find(|c| c.level == level)
+                .expect("row")
+                .clone()
+        };
         assert_eq!(
             by_level(StudyLevel::Easy),
             ModeConfig {
@@ -330,12 +399,19 @@ mod tests {
     }
 
     fn config_of(conn: &Connection, level: StudyLevel) -> ModeConfig {
-        store::list_mode_configs(conn).expect("configs").into_iter().find(|c| c.level == level).expect("row")
+        store::list_mode_configs(conn)
+            .expect("configs")
+            .into_iter()
+            .find(|c| c.level == level)
+            .expect("row")
     }
 
     #[test]
     fn mode_config_serialization_matches_shared_fixture() {
-        let fixture_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../src/api/fixtures/mode-config.json");
+        let fixture_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../src/api/fixtures/mode-config.json"
+        );
         let raw = std::fs::read_to_string(fixture_path).expect("fixture");
         let expected: serde_json::Value = serde_json::from_str(&raw).expect("json");
         let conn = open_in_memory().expect("db");
@@ -347,13 +423,34 @@ mod tests {
     #[test]
     fn mode_config_edit_is_stored_and_logged_as_json() {
         let mut conn = open_in_memory().expect("db");
-        let outcome = update_mode_config(&mut conn, easy(30, 10, Some(25), Some(3)), 5).expect("edit");
-        assert_eq!(outcome, UpdateOutcome::Applied { key: "modeConfig.easy".into() });
-        assert_eq!(config_of(&conn, StudyLevel::Easy), easy(30, 10, Some(25), Some(3)));
-        assert_eq!(config_of(&conn, StudyLevel::Medium).study_min, 50, "other levels stay untouched");
+        let outcome =
+            update_mode_config(&mut conn, easy(30, 10, Some(25), Some(3)), 5).expect("edit");
+        assert_eq!(
+            outcome,
+            UpdateOutcome::Applied {
+                key: "modeConfig.easy".into()
+            }
+        );
+        assert_eq!(
+            config_of(&conn, StudyLevel::Easy),
+            easy(30, 10, Some(25), Some(3))
+        );
+        assert_eq!(
+            config_of(&conn, StudyLevel::Medium).study_min,
+            50,
+            "other levels stay untouched"
+        );
         let latest = &crate::settings::read_history(&conn, 1).expect("h")[0];
-        assert_eq!((latest.key.as_str(), latest.reason.as_str(), latest.outcome.as_str()), ("modeConfig.easy", "user", "applied"));
-        let before: serde_json::Value = serde_json::from_str(latest.before.as_deref().expect("before")).expect("json");
+        assert_eq!(
+            (
+                latest.key.as_str(),
+                latest.reason.as_str(),
+                latest.outcome.as_str()
+            ),
+            ("modeConfig.easy", "user", "applied")
+        );
+        let before: serde_json::Value =
+            serde_json::from_str(latest.before.as_deref().expect("before")).expect("json");
         let after: serde_json::Value = serde_json::from_str(&latest.after).expect("json");
         assert_eq!(before["studyMin"], 25);
         assert_eq!(after["studyMin"], 30);
@@ -363,13 +460,26 @@ mod tests {
     #[test]
     fn mode_minutes_outside_one_to_240_are_rejected_without_a_record() {
         let mut conn = open_in_memory().expect("db");
-        for bad in [medium(0, 15), medium(241, 15), medium(50, 0), medium(50, 241), medium(-5, 15)] {
-            assert!(update_mode_config(&mut conn, bad.clone(), 1).is_err(), "{bad:?}");
+        for bad in [
+            medium(0, 15),
+            medium(241, 15),
+            medium(50, 0),
+            medium(50, 241),
+            medium(-5, 15),
+        ] {
+            assert!(
+                update_mode_config(&mut conn, bad.clone(), 1).is_err(),
+                "{bad:?}"
+            );
         }
         assert!(update_mode_config(&mut conn, easy(25, 5, Some(0), Some(4)), 1).is_err());
         assert!(update_mode_config(&mut conn, easy(25, 5, Some(241), Some(4)), 1).is_err());
         assert_eq!(config_of(&conn, StudyLevel::Medium).study_min, 50);
-        assert!(crate::settings::read_history(&conn, 10).expect("h").is_empty());
+        assert!(
+            crate::settings::read_history(&conn, 10)
+                .expect("h")
+                .is_empty()
+        );
         // Boundaries are inclusive.
         update_mode_config(&mut conn, medium(1, 240), 2).expect("1/240");
         update_mode_config(&mut conn, medium(240, 1), 3).expect("240/1");
@@ -389,7 +499,11 @@ mod tests {
         hard.long_break_min = None;
         hard.sets_before_long_break = Some(4);
         assert!(update_mode_config(&mut conn, hard, 1).is_err());
-        assert!(crate::settings::read_history(&conn, 10).expect("h").is_empty());
+        assert!(
+            crate::settings::read_history(&conn, 10)
+                .expect("h")
+                .is_empty()
+        );
     }
 
     #[test]
@@ -397,10 +511,18 @@ mod tests {
         let mut conn = open_in_memory().expect("db");
         crate::testutil::set_lock_for_test(&conn, true);
         let outcome = update_mode_config(&mut conn, medium(60, 20), 2).expect("attempt");
-        assert_eq!(outcome, UpdateOutcome::RejectedLocked { key: "modeConfig.medium".into() });
+        assert_eq!(
+            outcome,
+            UpdateOutcome::RejectedLocked {
+                key: "modeConfig.medium".into()
+            }
+        );
         assert_eq!(config_of(&conn, StudyLevel::Medium), medium(50, 15));
         let latest = &crate::settings::read_history(&conn, 1).expect("h")[0];
-        assert_eq!((latest.key.as_str(), latest.outcome.as_str()), ("modeConfig.medium", "rejected_locked"));
+        assert_eq!(
+            (latest.key.as_str(), latest.outcome.as_str()),
+            ("modeConfig.medium", "rejected_locked")
+        );
         assert!(latest.after.contains("\"studyMin\":60"));
     }
 
@@ -410,7 +532,11 @@ mod tests {
         conn.execute("DELETE FROM study_state", []).expect("delete");
         assert!(update_mode_config(&mut conn, medium(60, 20), 1).is_err());
         assert_eq!(config_of(&conn, StudyLevel::Medium), medium(50, 15));
-        assert!(crate::settings::read_history(&conn, 10).expect("h").is_empty());
+        assert!(
+            crate::settings::read_history(&conn, 10)
+                .expect("h")
+                .is_empty()
+        );
     }
 
     #[test]
@@ -420,7 +546,10 @@ mod tests {
         assert_eq!(snap.today.level, StudyLevel::Medium);
         assert!(!snap.today.stored);
         // Reading must not write a row.
-        assert_eq!(store::read_daily_mode(&conn, "2026-11-05").expect("read"), None);
+        assert_eq!(
+            store::read_daily_mode(&conn, "2026-11-05").expect("read"),
+            None
+        );
     }
 
     #[test]
@@ -438,8 +567,16 @@ mod tests {
         let mut conn = open_in_memory().expect("db");
         crate::testutil::set_lock_for_test(&conn, true);
         let outcome = set_daily_mode(&mut conn, "2026-11-05", StudyLevel::Easy, 2).expect("set");
-        assert_eq!(outcome, UpdateOutcome::RejectedLocked { key: "studyMode".into() });
-        assert_eq!(store::read_daily_mode(&conn, "2026-11-05").expect("read"), None);
+        assert_eq!(
+            outcome,
+            UpdateOutcome::RejectedLocked {
+                key: "studyMode".into()
+            }
+        );
+        assert_eq!(
+            store::read_daily_mode(&conn, "2026-11-05").expect("read"),
+            None
+        );
         let latest = &crate::settings::read_history(&conn, 1).expect("h")[0];
         assert_eq!(latest.key, "studyMode");
         assert_eq!(latest.outcome, "rejected_locked");
@@ -489,9 +626,13 @@ mod tests {
             conn.execute("DELETE FROM study_state", []).expect("delete");
         }
         let reopened = crate::db::open(&path).expect("reopen");
-        assert!(lock_held(&reopened).is_err(), "missing row must error, not read as free");
         assert!(
-            store::put_study_state(&crate::db::open(&path).expect("reopen again"), true, 3).is_err(),
+            lock_held(&reopened).is_err(),
+            "missing row must error, not read as free"
+        );
+        assert!(
+            store::put_study_state(&crate::db::open(&path).expect("reopen again"), true, 3)
+                .is_err(),
             "a write must not recreate the deleted row"
         );
     }
@@ -500,7 +641,8 @@ mod tests {
     #[test]
     fn missing_lock_row_is_an_error_not_free() {
         let conn = open_in_memory().expect("db");
-        conn.execute("DELETE FROM study_state", []).expect("delete setup row");
+        conn.execute("DELETE FROM study_state", [])
+            .expect("delete setup row");
         assert!(lock_held(&conn).is_err());
         assert!(read_lock_state(&conn).is_err());
     }
@@ -512,8 +654,15 @@ mod tests {
         let mut conn = open_in_memory().expect("db");
         conn.execute("DELETE FROM study_state", []).expect("delete");
         assert!(set_daily_mode(&mut conn, "2026-11-05", StudyLevel::Hard, 1).is_err());
-        assert_eq!(store::read_daily_mode(&conn, "2026-11-05").expect("read"), None);
-        assert!(crate::settings::read_history(&conn, 10).expect("h").is_empty());
+        assert_eq!(
+            store::read_daily_mode(&conn, "2026-11-05").expect("read"),
+            None
+        );
+        assert!(
+            crate::settings::read_history(&conn, 10)
+                .expect("h")
+                .is_empty()
+        );
     }
 
     #[test]
@@ -521,6 +670,10 @@ mod tests {
         let conn = open_in_memory().expect("db");
         conn.execute("DELETE FROM study_state", []).expect("delete");
         assert!(store::put_study_state(&conn, true, 1).is_err());
-        assert!(crate::settings::read_history(&conn, 10).expect("h").is_empty());
+        assert!(
+            crate::settings::read_history(&conn, 10)
+                .expect("h")
+                .is_empty()
+        );
     }
 }

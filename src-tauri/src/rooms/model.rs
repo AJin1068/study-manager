@@ -253,7 +253,13 @@ pub struct RoomSummary {
 
 impl From<WireRoom> for RoomSummary {
     fn from(wire: WireRoom) -> Self {
-        Self { room_id: wire.room_id, name: wire.name, role: wire.role, member_count: wire.member_count, capacity: wire.capacity }
+        Self {
+            room_id: wire.room_id,
+            name: wire.name,
+            role: wire.role,
+            member_count: wire.member_count,
+            capacity: wire.capacity,
+        }
     }
 }
 
@@ -324,7 +330,13 @@ pub struct CharacterView {
 
 impl From<WireCharacter> for CharacterView {
     fn from(c: WireCharacter) -> Self {
-        Self { species: c.species, hat: c.hat, top: c.top, accessory: c.accessory, hand: c.hand }
+        Self {
+            species: c.species,
+            hat: c.hat,
+            top: c.top,
+            accessory: c.accessory,
+            hand: c.hand,
+        }
     }
 }
 

@@ -35,12 +35,20 @@ pub fn is_due(seg: &SegmentRow, now_ms: i64) -> bool {
 
 /// Claims the notice for the break `state` is in, if due. The claim is the send decision: the
 /// caller notifies only when this returns `Some`, so a failed notification is not retried.
-pub fn claim_due(conn: &Connection, state: &TimerState, now_ms: i64) -> AppResult<Option<BreakEndingSoon>> {
+pub fn claim_due(
+    conn: &Connection,
+    state: &TimerState,
+    now_ms: i64,
+) -> AppResult<Option<BreakEndingSoon>> {
     if !matches!(state.phase, Phase::Break | Phase::LongBreak) {
         return Ok(None);
     }
-    let (Some(run_id), Some(segment_id)) = (state.run_id, state.segment_id) else { return Ok(None) };
-    let Some(seg) = store::get_segment(conn, segment_id)? else { return Ok(None) };
+    let (Some(run_id), Some(segment_id)) = (state.run_id, state.segment_id) else {
+        return Ok(None);
+    };
+    let Some(seg) = store::get_segment(conn, segment_id)? else {
+        return Ok(None);
+    };
     if !is_due(&seg, now_ms) || !store::claim_segment_notice(conn, segment_id, now_ms)? {
         return Ok(None);
     }

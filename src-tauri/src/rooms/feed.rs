@@ -16,7 +16,11 @@ pub const OPEN_POLL_MS: i64 = 5_000;
 pub const CLOSED_POLL_MS: i64 = 30_000;
 
 pub fn poll_interval_ms(room_open: bool) -> i64 {
-    if room_open { OPEN_POLL_MS } else { CLOSED_POLL_MS }
+    if room_open {
+        OPEN_POLL_MS
+    } else {
+        CLOSED_POLL_MS
+    }
 }
 
 pub trait FeedSource: Send + Sync {
@@ -116,7 +120,10 @@ impl PollingFeed {
             return TickResult::default();
         };
 
-        let mut result = TickResult { polled: true, notices: Vec::new() };
+        let mut result = TickResult {
+            polled: true,
+            notices: Vec::new(),
+        };
         match &open {
             Some(room_id) => match api.snapshot(room_id) {
                 Ok(snapshot) => {
@@ -180,13 +187,13 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
-    use crate::rooms::port::{RoomFeed, RoomReporter, RoomService};
-    use crate::rooms::prefs::FriendSettings;
-    use crate::rooms::testkit::{Person, World, T0};
     use crate::remote::Clock;
-    use crate::rooms::view::{presence, OFFLINE_AFTER_SEC};
     use crate::remote::payload::StatusReportArgs;
     use crate::rooms::model::{PresenceKind, RoomCode};
+    use crate::rooms::port::{RoomFeed, RoomReporter, RoomService};
+    use crate::rooms::prefs::FriendSettings;
+    use crate::rooms::testkit::{Person, T0, World};
+    use crate::rooms::view::{OFFLINE_AFTER_SEC, presence};
 
     struct Source {
         api: Option<Arc<dyn RoomApi>>,
@@ -208,11 +215,20 @@ mod tests {
 
     fn source(person: &Person, receive: bool) -> Source {
         let api: Arc<dyn RoomApi> = person.rooms.clone();
-        Source { api: Some(api), receive, listed: AtomicUsize::new(0) }
+        Source {
+            api: Some(api),
+            receive,
+            listed: AtomicUsize::new(0),
+        }
     }
 
     fn studying(remaining: i64) -> StatusReportArgs {
-        StatusReportArgs { state: "studying", remaining_sec: remaining, level: 3, attempts_today: None }
+        StatusReportArgs {
+            state: "studying",
+            remaining_sec: remaining,
+            level: 3,
+            attempts_today: None,
+        }
     }
 
     /// Two people in one room; returns the room id.
@@ -221,7 +237,9 @@ mod tests {
         let bob = world.person("b@example.test");
         let room = alice.rooms.create_room("스터디", "앨리스").expect("room");
         let invite = alice.rooms.create_invite(&room, 24, 10).expect("invite");
-        bob.rooms.join_room(&invite.invite_code, "밥").expect("join");
+        bob.rooms
+            .join_room(&invite.invite_code, "밥")
+            .expect("join");
         (alice, bob, room)
     }
 
@@ -251,8 +269,15 @@ mod tests {
                 closed_polls += 1;
             }
         }
-        assert_eq!(calls(&world), before, "no snapshot is requested while no room is open");
-        assert_eq!(closed_polls, 2, "the room list every 30 s: at 25 s and 55 s after the last open poll");
+        assert_eq!(
+            calls(&world),
+            before,
+            "no snapshot is requested while no room is open"
+        );
+        assert_eq!(
+            closed_polls, 2,
+            "the room list every 30 s: at 25 s and 55 s after the last open poll"
+        );
         assert_eq!(src.listed.load(Ordering::SeqCst), 2);
     }
 
@@ -275,7 +300,11 @@ mod tests {
             world.clock.set(now);
             feed.tick(now, &src);
             let snapshot = feed.state().snapshot.expect("snapshot").0;
-            let bob_view = snapshot.members.iter().find(|m| m.user_id == bob.user_id).expect("bob");
+            let bob_view = snapshot
+                .members
+                .iter()
+                .find(|m| m.user_id == bob.user_id)
+                .expect("bob");
             if bob_view.status.is_some() {
                 seen_at = Some(now - (T0 + 1_000));
                 break;
@@ -294,14 +323,26 @@ mod tests {
         let feed = PollingFeed::new();
         feed.set_open(Some(room), T0);
 
-        for (advance_ms, expect) in [(0, PresenceKind::Studying), (60_000, PresenceKind::Studying), (31_000, PresenceKind::Offline)] {
+        for (advance_ms, expect) in [
+            (0, PresenceKind::Studying),
+            (60_000, PresenceKind::Studying),
+            (31_000, PresenceKind::Offline),
+        ] {
             world.clock.advance(advance_ms);
             let now = world.clock.now_ms().expect("now");
             feed.set_open(feed.open_room(), now);
             feed.tick(now, &src);
             let (snapshot, fetched) = feed.state().snapshot.expect("snapshot");
-            let status = snapshot.members.iter().find(|m| m.user_id == bob.user_id).and_then(|m| m.status.clone());
-            assert_eq!(presence(status.as_ref(), now - fetched).kind, expect, "after +{advance_ms} ms");
+            let status = snapshot
+                .members
+                .iter()
+                .find(|m| m.user_id == bob.user_id)
+                .and_then(|m| m.status.clone());
+            assert_eq!(
+                presence(status.as_ref(), now - fetched).kind,
+                expect,
+                "after +{advance_ms} ms"
+            );
         }
         assert_eq!(OFFLINE_AFTER_SEC, 90);
     }
@@ -326,7 +367,10 @@ mod tests {
         world.backend.set_outage(false);
         feed.tick(T0 + 10_000, &src);
         let state = feed.state();
-        assert_eq!((state.degraded_code, state.last_ok_ms), (None, Some(T0 + 10_000)));
+        assert_eq!(
+            (state.degraded_code, state.last_ok_ms),
+            (None, Some(T0 + 10_000))
+        );
     }
 
     #[test]
@@ -357,7 +401,16 @@ mod tests {
             distraction_receive: true,
         };
         bob.rooms.set_prefs(&on.as_args()).expect("bob prefs");
-        alice.rooms.set_prefs(&FriendSettings { distraction_publish: false, ..on }.as_args()).expect("alice prefs");
+        alice
+            .rooms
+            .set_prefs(
+                &FriendSettings {
+                    distraction_publish: false,
+                    ..on
+                }
+                .as_args(),
+            )
+            .expect("alice prefs");
 
         let feed = PollingFeed::new();
         let alice_src = source(&alice, true);
@@ -373,7 +426,16 @@ mod tests {
         assert!(again.notices.is_empty(), "the cursor moved past the event");
 
         // Alice turned receiving off: even though Bob publishes, nothing is delivered.
-        alice.rooms.set_prefs(&FriendSettings { distraction_receive: false, ..on }.as_args()).expect("prefs");
+        alice
+            .rooms
+            .set_prefs(
+                &FriendSettings {
+                    distraction_receive: false,
+                    ..on
+                }
+                .as_args(),
+            )
+            .expect("prefs");
         world.clock.set(T0 + 70_000);
         bob.rooms.report_distraction().expect("event");
         assert!(alice.rooms.poll_distractions(0).expect("poll").is_empty());

@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use tauri::State;
 
-use super::{lock_db, AppState};
+use super::{AppState, lock_db};
 use crate::clock::now_ms;
 use crate::error::{AppError, AppResult};
 use crate::settings::UpdateOutcome;
@@ -26,8 +26,17 @@ where
 
 /// Saves the note of a finished run and prepares its merge into the wiki.
 #[tauri::command]
-pub async fn submit_retro(service: Service<'_>, run_id: i64, subject_id: i64, page_name: Option<String>, note: String) -> AppResult<RetroOutcome> {
-    blocking(&service, move |s| s.submit(run_id, subject_id, page_name.as_deref(), &note)).await
+pub async fn submit_retro(
+    service: Service<'_>,
+    run_id: i64,
+    subject_id: i64,
+    page_name: Option<String>,
+    note: String,
+) -> AppResult<RetroOutcome> {
+    blocking(&service, move |s| {
+        s.submit(run_id, subject_id, page_name.as_deref(), &note)
+    })
+    .await
 }
 
 #[tauri::command]

@@ -3,7 +3,7 @@
 use chrono::Local;
 use tauri::State;
 
-use super::{lock_db, AppState};
+use super::{AppState, lock_db};
 use crate::error::AppResult;
 use crate::wiki::topic::{self, AssignReport, AssignmentView, TodayTopic};
 
@@ -22,17 +22,36 @@ pub fn assign_next_topics(state: State<'_, AppState>) -> AppResult<AssignReport>
 
 /// The user chooses the page; refused while the lock is held.
 #[tauri::command]
-pub fn set_topic_assignment(state: State<'_, AppState>, plan_id: i64, date: String, page_id: i64) -> AppResult<()> {
-    topic::set_manual(&*lock_db(&state.db)?, plan_id, &date, page_id, crate::clock::now_ms()?)
+pub fn set_topic_assignment(
+    state: State<'_, AppState>,
+    plan_id: i64,
+    date: String,
+    page_id: i64,
+) -> AppResult<()> {
+    topic::set_manual(
+        &*lock_db(&state.db)?,
+        plan_id,
+        &date,
+        page_id,
+        crate::clock::now_ms()?,
+    )
 }
 
 #[tauri::command]
-pub fn list_topic_assignments(state: State<'_, AppState>, from: String, to: String) -> AppResult<Vec<AssignmentView>> {
+pub fn list_topic_assignments(
+    state: State<'_, AppState>,
+    from: String,
+    to: String,
+) -> AppResult<Vec<AssignmentView>> {
     topic::list_assignments(&*lock_db(&state.db)?, &from, &to)
 }
 
 /// Every assignment ever made for one occurrence, newest first.
 #[tauri::command]
-pub fn get_topic_history(state: State<'_, AppState>, plan_id: i64, date: String) -> AppResult<Vec<AssignmentView>> {
+pub fn get_topic_history(
+    state: State<'_, AppState>,
+    plan_id: i64,
+    date: String,
+) -> AppResult<Vec<AssignmentView>> {
     topic::assignment_history(&*lock_db(&state.db)?, plan_id, &date)
 }

@@ -6,7 +6,11 @@ use crate::error::AppResult;
 
 /// Recognized study time over the app's whole life.
 pub fn total_credited_ms(conn: &Connection) -> AppResult<i64> {
-    Ok(conn.query_row("SELECT COALESCE(SUM(credited_ms), 0) FROM focus_minutes", [], |r| r.get(0))?)
+    Ok(conn.query_row(
+        "SELECT COALESCE(SUM(credited_ms), 0) FROM focus_minutes",
+        [],
+        |r| r.get(0),
+    )?)
 }
 
 /// Pages in subjects that are not archived.

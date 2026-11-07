@@ -120,7 +120,7 @@ egress_payload!(GiftIdArgs);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::remote::payload::{forbidden_key, EgressPayload};
+    use crate::remote::payload::{EgressPayload, forbidden_key};
 
     fn json<P: EgressPayload>(p: &P) -> serde_json::Value {
         serde_json::to_value(p).expect("serialize")
@@ -163,13 +163,30 @@ mod tests {
     fn no_payload_has_a_forbidden_or_deviation_key() {
         let samples = [
             json(&sample_settings()),
-            json(&GrassArgs { entries: vec![GrassEntry { day: "2026-11-06".into(), study_min: 5 }] }),
+            json(&GrassArgs {
+                entries: vec![GrassEntry {
+                    day: "2026-11-06".into(),
+                    study_min: 5,
+                }],
+            }),
             json(&MemberArgs { user: "u".into() }),
-            json(&SignGuestbookArgs { owner: "u".into(), body: "hi".into() }),
+            json(&SignGuestbookArgs {
+                owner: "u".into(),
+                body: "hi".into(),
+            }),
             json(&EntryIdArgs { id: 1 }),
-            json(&SendGiftArgs { idem_key: "k".into(), recipient: "u".into(), item_id: "hat_beanie".into(), message: "m".into() }),
-            json(&GiftKeyArgs { idem_key: "k".into() }),
-            json(&GiftIdArgs { gift_id: "g".into() }),
+            json(&SendGiftArgs {
+                idem_key: "k".into(),
+                recipient: "u".into(),
+                item_id: "hat_beanie".into(),
+                message: "m".into(),
+            }),
+            json(&GiftKeyArgs {
+                idem_key: "k".into(),
+            }),
+            json(&GiftIdArgs {
+                gift_id: "g".into(),
+            }),
         ];
         for sample in samples {
             let mut found = Vec::new();
@@ -178,7 +195,13 @@ mod tests {
             for key in found {
                 let lower = key.to_ascii_lowercase();
                 assert!(!forbidden_key(&key), "{key}");
-                assert!(!lower.contains("attempt") && !lower.contains("deviation") && !lower.contains("distraction") && !lower.contains("app_name"), "{key}");
+                assert!(
+                    !lower.contains("attempt")
+                        && !lower.contains("deviation")
+                        && !lower.contains("distraction")
+                        && !lower.contains("app_name"),
+                    "{key}"
+                );
                 assert!(!lower.contains("point"), "points never travel: {key}");
             }
         }
@@ -187,14 +210,19 @@ mod tests {
     #[test]
     fn every_settings_argument_is_an_rpc_parameter() {
         let value = json(&sample_settings());
-        let contract: serde_json::Value = serde_json::from_str(include_str!("../../../fixtures/profile/rpc-contract.json")).expect("contract");
+        let contract: serde_json::Value =
+            serde_json::from_str(include_str!("../../../fixtures/profile/rpc-contract.json"))
+                .expect("contract");
         let params: Vec<&str> = contract["rpcs"]
             .as_array()
             .and_then(|r| r.iter().find(|x| x["name"] == "set_profile_settings"))
             .and_then(|x| x["params"].as_array())
             .map(|p| p.iter().filter_map(|v| v.as_str()).collect())
             .unwrap_or_default();
-        let mut sent: Vec<&str> = value.as_object().map(|m| m.keys().map(String::as_str).collect()).unwrap_or_default();
+        let mut sent: Vec<&str> = value
+            .as_object()
+            .map(|m| m.keys().map(String::as_str).collect())
+            .unwrap_or_default();
         sent.sort_unstable();
         let mut expected = params.clone();
         expected.sort_unstable();
@@ -203,7 +231,10 @@ mod tests {
 
     #[test]
     fn debug_hides_values() {
-        let args = SignGuestbookArgs { owner: "u".into(), body: "SECRET-LINE".into() };
+        let args = SignGuestbookArgs {
+            owner: "u".into(),
+            body: "SECRET-LINE".into(),
+        };
         assert!(!format!("{args:?}").contains("SECRET-LINE"));
     }
 }

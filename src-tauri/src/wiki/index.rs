@@ -33,18 +33,38 @@ pub fn content_hash(text: &str) -> String {
 }
 
 /// Records one page's current text in the index.
-pub fn index_page(conn: &Connection, subject: &SubjectRow, name: &str, text: &str, at_ms: i64) -> AppResult<()> {
+pub fn index_page(
+    conn: &Connection,
+    subject: &SubjectRow,
+    name: &str,
+    text: &str,
+    at_ms: i64,
+) -> AppResult<()> {
     let rel_path = format!("pages/{}", names::page_file_name(name));
-    repo::upsert_page(conn, subject.id, name, &rel_path, &content_hash(text), at_ms)
+    repo::upsert_page(
+        conn,
+        subject.id,
+        name,
+        &rel_path,
+        &content_hash(text),
+        at_ms,
+    )
 }
 
-pub fn reindex(conn: &Connection, wiki: &WikiFs, subject: &SubjectRow, at_ms: i64) -> AppResult<ReindexReport> {
+pub fn reindex(
+    conn: &Connection,
+    wiki: &WikiFs,
+    subject: &SubjectRow,
+    at_ms: i64,
+) -> AppResult<ReindexReport> {
     let on_disk = wiki.list_pages(&subject.slug)?;
     let known = repo::list_pages(conn, subject.id)?;
     let (mut added, mut updated, mut removed) = (0, 0, 0);
 
     for name in &on_disk {
-        let Some(text) = wiki.read_page(&subject.slug, name)? else { continue };
+        let Some(text) = wiki.read_page(&subject.slug, name)? else {
+            continue;
+        };
         match known.iter().find(|p| &p.page_name == name) {
             None => added += 1,
             Some(row) if row.content_hash != content_hash(&text) => updated += 1,
@@ -58,7 +78,13 @@ pub fn reindex(conn: &Connection, wiki: &WikiFs, subject: &SubjectRow, at_ms: i6
             removed += 1;
         }
     }
-    Ok(ReindexReport { pages: on_disk.len(), added, updated, removed, folder_missing: !wiki.subject_dir_exists(&subject.slug) })
+    Ok(ReindexReport {
+        pages: on_disk.len(),
+        added,
+        updated,
+        removed,
+        folder_missing: !wiki.subject_dir_exists(&subject.slug),
+    })
 }
 
 #[cfg(test)]
@@ -78,7 +104,11 @@ mod tests {
     }
 
     fn names_in_index(conn: &Connection, subject: &SubjectRow) -> Vec<String> {
-        repo::list_pages(conn, subject.id).expect("pages").into_iter().map(|p| p.page_name).collect()
+        repo::list_pages(conn, subject.id)
+            .expect("pages")
+            .into_iter()
+            .map(|p| p.page_name)
+            .collect()
     }
 
     #[test]
@@ -87,7 +117,16 @@ mod tests {
         wiki.write_page("수학", "미분", "# 미분").expect("write");
         wiki.write_page("수학", "적분", "# 적분").expect("write");
         let first = reindex(&conn, &wiki, &subject, 10).expect("reindex");
-        assert_eq!((first.pages, first.added, first.updated, first.removed, first.folder_missing), (2, 2, 0, 0, false));
+        assert_eq!(
+            (
+                first.pages,
+                first.added,
+                first.updated,
+                first.removed,
+                first.folder_missing
+            ),
+            (2, 2, 0, 0, false)
+        );
         assert_eq!(names_in_index(&conn, &subject), ["미분", "적분"]);
 
         let pages = wiki.root().join("수학").join("pages");
@@ -96,13 +135,25 @@ mod tests {
         std::fs::remove_file(pages.join("적분.md")).expect("hand delete");
         std::fs::write(pages.join("notes.txt"), "not a page").expect("stray");
         let second = reindex(&conn, &wiki, &subject, 20).expect("reindex");
-        assert_eq!((second.pages, second.added, second.updated, second.removed), (2, 1, 1, 1));
+        assert_eq!(
+            (second.pages, second.added, second.updated, second.removed),
+            (2, 1, 1, 1)
+        );
         assert_eq!(names_in_index(&conn, &subject), ["미분", "확률"]);
 
         let third = reindex(&conn, &wiki, &subject, 30).expect("reindex");
-        assert_eq!((third.added, third.updated, third.removed), (0, 0, 0), "nothing changed, nothing rewritten");
-        let row = repo::get_page(&conn, subject.id, "미분").expect("get").expect("row");
-        assert_eq!((row.updated_at_ms, row.rel_path.as_str()), (20, "pages/미분.md"));
+        assert_eq!(
+            (third.added, third.updated, third.removed),
+            (0, 0, 0),
+            "nothing changed, nothing rewritten"
+        );
+        let row = repo::get_page(&conn, subject.id, "미분")
+            .expect("get")
+            .expect("row");
+        assert_eq!(
+            (row.updated_at_ms, row.rel_path.as_str()),
+            (20, "pages/미분.md")
+        );
     }
 
     #[test]
@@ -110,10 +161,13 @@ mod tests {
         let (_dir, wiki, conn, subject) = setup();
         wiki.write_page("수학", "미분", "v1").expect("write");
         reindex(&conn, &wiki, &subject, 1).expect("reindex");
-        conn.execute("UPDATE wiki_pages SET quiz_total = 3, quiz_correct = 2", []).expect("quiz");
+        conn.execute("UPDATE wiki_pages SET quiz_total = 3, quiz_correct = 2", [])
+            .expect("quiz");
         wiki.write_page("수학", "미분", "v2").expect("edit");
         reindex(&conn, &wiki, &subject, 2).expect("reindex");
-        let row = repo::get_page(&conn, subject.id, "미분").expect("get").expect("row");
+        let row = repo::get_page(&conn, subject.id, "미분")
+            .expect("get")
+            .expect("row");
         assert_eq!((row.quiz_total, row.quiz_correct), (3, 2));
     }
 
@@ -124,7 +178,10 @@ mod tests {
         reindex(&conn, &wiki, &subject, 1).expect("reindex");
         std::fs::remove_dir_all(wiki.root().join("수학")).expect("delete folder");
         let report = reindex(&conn, &wiki, &subject, 2).expect("reindex");
-        assert_eq!((report.pages, report.removed, report.folder_missing), (0, 1, true));
+        assert_eq!(
+            (report.pages, report.removed, report.folder_missing),
+            (0, 1, true)
+        );
         assert!(names_in_index(&conn, &subject).is_empty());
     }
 

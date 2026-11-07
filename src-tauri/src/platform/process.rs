@@ -121,12 +121,20 @@ mod tests {
     #[test]
     fn ids_are_normalized_case_and_separators() {
         assert_eq!(normalize_app_id("  Com.Apple.Safari "), "com.apple.safari");
-        assert_eq!(normalize_app_id("C:\\Program Files\\Game\\Game.EXE"), "c:/program files/game/game.exe");
+        assert_eq!(
+            normalize_app_id("C:\\Program Files\\Game\\Game.EXE"),
+            "c:/program files/game/game.exe"
+        );
     }
 
     #[test]
     fn macos_system_and_security_apps_are_protected() {
-        for id in ["com.apple.finder", "com.apple.dock", "com.apple.loginwindow", "com.apple.securityd"] {
+        for id in [
+            "com.apple.finder",
+            "com.apple.dock",
+            "com.apple.loginwindow",
+            "com.apple.securityd",
+        ] {
             assert!(is_protected_id(id), "{id}");
         }
         assert!(!is_protected_id("com.apple.safari"));
@@ -156,7 +164,8 @@ mod tests {
 
     #[test]
     fn the_self_bundle_id_matches_the_tauri_identifier() {
-        let conf = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tauri.conf.json")).expect("conf");
+        let conf = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tauri.conf.json"))
+            .expect("conf");
         assert!(conf.contains(&format!("\"identifier\": \"{SELF_BUNDLE_ID}\"")));
     }
 
@@ -173,9 +182,23 @@ mod tests {
     #[test]
     fn unsupported_control_reports_unsupported_for_every_call() {
         let control = UnsupportedProcessControl;
-        let app = AppIdentity { id: "x".into(), display_name: "X".into(), pid: 1, is_protected: false };
-        assert!(matches!(control.list_running(), Err(PlatformError::Unsupported(_))));
-        assert!(matches!(control.request_quit(&app), Err(PlatformError::Unsupported(_))));
-        assert!(matches!(control.force_kill(&app), Err(PlatformError::Unsupported(_))));
+        let app = AppIdentity {
+            id: "x".into(),
+            display_name: "X".into(),
+            pid: 1,
+            is_protected: false,
+        };
+        assert!(matches!(
+            control.list_running(),
+            Err(PlatformError::Unsupported(_))
+        ));
+        assert!(matches!(
+            control.request_quit(&app),
+            Err(PlatformError::Unsupported(_))
+        ));
+        assert!(matches!(
+            control.force_kill(&app),
+            Err(PlatformError::Unsupported(_))
+        ));
     }
 }

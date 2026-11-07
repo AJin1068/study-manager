@@ -4,10 +4,12 @@
 //! applying its output twice changes nothing.
 
 use crate::error::{AppError, AppResult};
-use crate::plan::{block_sequence, Block, BlockKind, ModeLookup, Occurrence};
+use crate::plan::{Block, BlockKind, ModeLookup, Occurrence, block_sequence};
 use crate::study::{ModeConfig, StudyLevel};
 
-use super::model::{EndReason, NewRun, NewSegment, NextPlan, Phase, RunRow, RunStatus, SegmentRow, TimerState};
+use super::model::{
+    EndReason, NewRun, NewSegment, NextPlan, Phase, RunRow, RunStatus, SegmentRow, TimerState,
+};
 
 /// A boundary observed this much after it happened still counts as seen live (tick jitter,
 /// App Nap). Beyond it the engine was not watching: the segment is marked `late_join` or
@@ -119,13 +121,23 @@ fn frozen_of(run: &RunRow) -> AppResult<Frozen> {
 }
 
 fn lag_reason(lag_ms: i64) -> EndReason {
-    if lag_ms <= LATE_TOLERANCE_MS { EndReason::Elapsed } else { EndReason::ElapsedWhileDown }
+    if lag_ms <= LATE_TOLERANCE_MS {
+        EndReason::Elapsed
+    } else {
+        EndReason::ElapsedWhileDown
+    }
 }
 
 /// Walks a run's blocks and decides what to close and open at `now`. `force_late` marks the first
 /// opened segment `late_join` even when seen on time (a run pushed back by an earlier one).
 fn progress(now: i64, frozen: &Frozen, existing: &[SegmentRow], force_late: bool) -> Progress {
-    let mut out = Progress { closes: Vec::new(), opens: Vec::new(), finished: false, last_reason: None, current: None };
+    let mut out = Progress {
+        closes: Vec::new(),
+        opens: Vec::new(),
+        finished: false,
+        last_reason: None,
+        current: None,
+    };
     let mut start = frozen.planned_start_ms;
     let mut first_open = true;
     for (index, block) in frozen.blocks.iter().enumerate() {
@@ -138,7 +150,11 @@ fn progress(now: i64, frozen: &Frozen, existing: &[SegmentRow], force_late: bool
             Some(seg) => {
                 if now >= end {
                     let reason = lag_reason(now - end);
-                    out.closes.push(SegmentClose { segment_id: seg.id, ended_at_ms: end, reason });
+                    out.closes.push(SegmentClose {
+                        segment_id: seg.id,
+                        ended_at_ms: end,
+                        reason,
+                    });
                     out.last_reason = Some(reason);
                 } else {
                     out.current = Some(Current {
@@ -171,7 +187,11 @@ fn progress(now: i64, frozen: &Frozen, existing: &[SegmentRow], force_late: bool
                     out.last_reason = Some(reason);
                 } else {
                     // A segment found already running starts when it was found, not in the past.
-                    let started = if now - seg_start > LATE_TOLERANCE_MS { now } else { seg_start };
+                    let started = if now - seg_start > LATE_TOLERANCE_MS {
+                        now
+                    } else {
+                        seg_start
+                    };
                     out.opens.push(NewSegment {
                         seq,
                         kind: block.kind,
@@ -182,7 +202,12 @@ fn progress(now: i64, frozen: &Frozen, existing: &[SegmentRow], force_late: bool
                         end_reason: None,
                         late_join: late,
                     });
-                    out.current = Some(Current { segment_id: None, seq, kind: block.kind, planned_end_ms: end });
+                    out.current = Some(Current {
+                        segment_id: None,
+                        seq,
+                        kind: block.kind,
+                        planned_end_ms: end,
+                    });
                     return out;
                 }
             }
@@ -193,8 +218,12 @@ fn progress(now: i64, frozen: &Frozen, existing: &[SegmentRow], force_late: bool
 }
 
 fn set_index(frozen: &Frozen, seq: i64) -> i64 {
-    let upto = usize::try_from(seq).map_or(frozen.blocks.len(), |s| (s + 1).min(frozen.blocks.len()));
-    let studies = frozen.blocks[..upto].iter().filter(|b| b.kind == BlockKind::Study).count();
+    let upto =
+        usize::try_from(seq).map_or(frozen.blocks.len(), |s| (s + 1).min(frozen.blocks.len()));
+    let studies = frozen.blocks[..upto]
+        .iter()
+        .filter(|b| b.kind == BlockKind::Study)
+        .count();
     i64::try_from(studies).unwrap_or(i64::MAX)
 }
 
@@ -214,7 +243,11 @@ pub fn derive(input: &DeriveInput<'_>) -> AppResult<Derived> {
     }
     // `plan_runs` is unique per (plan, date); a plan with two occurrences on one date (a move
     // onto a day that already has one) gets a run for the earlier only.
-    let mut seen: Vec<(i64, &str)> = input.runs.iter().map(|r| (r.run.plan_id, r.run.date.as_str())).collect();
+    let mut seen: Vec<(i64, &str)> = input
+        .runs
+        .iter()
+        .map(|r| (r.run.plan_id, r.run.date.as_str()))
+        .collect();
     for o in input.occurrences {
         let key = (o.plan_id, o.date.as_str());
         if !seen.contains(&key) {
@@ -238,7 +271,8 @@ pub fn derive(input: &DeriveInput<'_>) -> AppResult<Derived> {
                     let p = progress(now, &frozen, &r.segments, false);
                     cursor = cursor.max(r.run.planned_end_ms);
                     if p.finished {
-                        let detail = (p.last_reason == Some(EndReason::ElapsedWhileDown)).then_some("ended_while_down");
+                        let detail = (p.last_reason == Some(EndReason::ElapsedWhileDown))
+                            .then_some("ended_while_down");
                         deltas.push(RunDelta {
                             target: RunTarget::Existing(r.run.id),
                             closes: p.closes,
@@ -261,7 +295,10 @@ pub fn derive(input: &DeriveInput<'_>) -> AppResult<Derived> {
                         if active.is_none() {
                             active = Some(ActiveView {
                                 run_id: Some(r.run.id),
-                                set_index: p.current.as_ref().map_or(0, |c| set_index(&frozen, c.seq)),
+                                set_index: p
+                                    .current
+                                    .as_ref()
+                                    .map_or(0, |c| set_index(&frozen, c.seq)),
                                 current: p.current,
                                 sets_total: frozen.sets_total,
                                 planned_end_ms: r.run.planned_end_ms,
@@ -283,7 +320,10 @@ pub fn derive(input: &DeriveInput<'_>) -> AppResult<Derived> {
                 let eff_start = o.planned_start_ms.max(cursor);
                 let shifted = eff_start > o.planned_start_ms;
                 let end = eff_start + o.duration_min * MINUTE_MS;
-                let new_run = |status: RunStatus, actual: Option<i64>, ended: Option<i64>, detail: Option<&'static str>| {
+                let new_run = |status: RunStatus,
+                               actual: Option<i64>,
+                               ended: Option<i64>,
+                               detail: Option<&'static str>| {
                     NewRun {
                         plan_id: o.plan_id,
                         date: o.date.clone(),
@@ -316,7 +356,12 @@ pub fn derive(input: &DeriveInput<'_>) -> AppResult<Derived> {
                     }
                 } else if now >= end {
                     deltas.push(RunDelta {
-                        target: RunTarget::New(new_run(RunStatus::Missed, None, Some(end), Some("not_started"))),
+                        target: RunTarget::New(new_run(
+                            RunStatus::Missed,
+                            None,
+                            Some(end),
+                            Some("not_started"),
+                        )),
                         closes: Vec::new(),
                         opens: Vec::new(),
                         finish: None,
@@ -347,7 +392,12 @@ pub fn derive(input: &DeriveInput<'_>) -> AppResult<Derived> {
                             planned_end_ms: end,
                         });
                     }
-                    deltas.push(RunDelta { target: RunTarget::New(run), closes: p.closes, opens: p.opens, finish: None });
+                    deltas.push(RunDelta {
+                        target: RunTarget::New(run),
+                        closes: p.closes,
+                        opens: p.opens,
+                        finish: None,
+                    });
                 }
             }
         }
@@ -356,12 +406,19 @@ pub fn derive(input: &DeriveInput<'_>) -> AppResult<Derived> {
     let lock_target = active.is_some();
     let state = match active {
         Some(view) => TimerState {
-            phase: view.current.as_ref().map_or(Phase::Idle, |c| Phase::of(c.kind)),
+            phase: view
+                .current
+                .as_ref()
+                .map_or(Phase::Idle, |c| Phase::of(c.kind)),
             run_id: view.run_id,
             segment_id: view.current.as_ref().and_then(|c| c.segment_id),
             set_index: view.set_index,
             sets_total: view.sets_total,
-            planned_end_ms: Some(view.current.as_ref().map_or(view.planned_end_ms, |c| c.planned_end_ms)),
+            planned_end_ms: Some(
+                view.current
+                    .as_ref()
+                    .map_or(view.planned_end_ms, |c| c.planned_end_ms),
+            ),
             lock_held: true,
             now_ms: now,
             next,
@@ -378,5 +435,9 @@ pub fn derive(input: &DeriveInput<'_>) -> AppResult<Derived> {
             next,
         },
     };
-    Ok(Derived { deltas, lock_target, state })
+    Ok(Derived {
+        deltas,
+        lock_target,
+        state,
+    })
 }

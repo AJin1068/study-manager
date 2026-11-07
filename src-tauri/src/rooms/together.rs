@@ -23,16 +23,24 @@ pub const MAX_SHARED_BLOCKS: usize = 20;
 pub const SHARE_HORIZON_DAYS: i64 = 7;
 
 /// The owner's upcoming blocks, earliest first, as the server accepts them.
-pub fn shareable_items<Tz: TimeZone>(conn: &Connection, tz: &Tz, now_ms: i64) -> AppResult<Vec<ScheduleItemRow>> {
+pub fn shareable_items<Tz: TimeZone>(
+    conn: &Connection,
+    tz: &Tz,
+    now_ms: i64,
+) -> AppResult<Vec<ScheduleItemRow>> {
     let today = tz
         .timestamp_millis_opt(now_ms)
         .single()
         .ok_or_else(|| AppError::Internal("timestamp has no local date".into()))?
         .date_naive();
     let from = today.format("%Y-%m-%d").to_string();
-    let to = (today + Duration::days(SHARE_HORIZON_DAYS)).format("%Y-%m-%d").to_string();
-    let mut upcoming: Vec<plan::Occurrence> =
-        plan::list_occurrences(conn, tz, &from, &to)?.into_iter().filter(|o| o.planned_start_ms >= now_ms).collect();
+    let to = (today + Duration::days(SHARE_HORIZON_DAYS))
+        .format("%Y-%m-%d")
+        .to_string();
+    let mut upcoming: Vec<plan::Occurrence> = plan::list_occurrences(conn, tz, &from, &to)?
+        .into_iter()
+        .filter(|o| o.planned_start_ms >= now_ms)
+        .collect();
     upcoming.sort_by_key(|o| (o.planned_start_ms, o.plan_id));
     Ok(upcoming
         .into_iter()
@@ -82,8 +90,16 @@ pub fn import_items<Tz: TimeZone>(
     let already = store::rooms::imported_keys(conn, room_id)?;
     let mut results = Vec::with_capacity(keys.len());
     for key in keys {
-        let result = |outcome, plan_id| ImportResult { key: key.clone(), outcome, plan_id };
-        let Some(item) = schedule.items.iter().find(|i| schedule_key(i.start_at_utc_ms) == *key) else {
+        let result = |outcome, plan_id| ImportResult {
+            key: key.clone(),
+            outcome,
+            plan_id,
+        };
+        let Some(item) = schedule
+            .items
+            .iter()
+            .find(|i| schedule_key(i.start_at_utc_ms) == *key)
+        else {
             results.push(result(ImportOutcome::NotShared, None));
             continue;
         };
@@ -136,31 +152,54 @@ mod tests {
     }
 
     fn item(start: i64, name: &str) -> WireScheduleItem {
-        WireScheduleItem { start_at_utc_ms: start, name: name.into(), subject: "수학".into(), sets: 2 }
+        WireScheduleItem {
+            start_at_utc_ms: start,
+            name: name.into(),
+            subject: "수학".into(),
+            sets: 2,
+        }
     }
 
     fn schedule(items: Vec<WireScheduleItem>) -> WireSchedule {
-        WireSchedule { items, updated_at_ms: 1 }
+        WireSchedule {
+            items,
+            updated_at_ms: 1,
+        }
     }
 
     // 2026-11-07 10:00 in Seoul = 01:00 UTC. A block starting after T0 (2026-11-06T14:30Z).
     const NEXT_DAY_10_KST: i64 = 1_794_013_200_000;
 
     fn plan_input(day: &str, time: &str) -> CreatePlanInput {
-        CreatePlanInput { name: "내 계획".into(), subject: "영어".into(), start_date: day.into(), start_time: time.into(), sets: 2, repeat: None }
+        CreatePlanInput {
+            name: "내 계획".into(),
+            subject: "영어".into(),
+            start_date: day.into(),
+            start_time: time.into(),
+            sets: 2,
+            repeat: None,
+        }
     }
 
     #[test]
     fn the_owner_shares_only_upcoming_blocks_in_order_with_nothing_but_the_four_fields() {
         let mut conn = open_in_memory().expect("db");
-        plan::create_plan(&mut conn, &seoul(), plan_input("2026-11-08", "09:00"), T0).expect("later");
-        plan::create_plan(&mut conn, &seoul(), plan_input("2026-11-07", "20:00"), T0).expect("sooner");
-        plan::create_plan(&mut conn, &seoul(), plan_input("2026-11-30", "09:00"), T0).expect("beyond the week");
+        plan::create_plan(&mut conn, &seoul(), plan_input("2026-11-08", "09:00"), T0)
+            .expect("later");
+        plan::create_plan(&mut conn, &seoul(), plan_input("2026-11-07", "20:00"), T0)
+            .expect("sooner");
+        plan::create_plan(&mut conn, &seoul(), plan_input("2026-11-30", "09:00"), T0)
+            .expect("beyond the week");
         let items = shareable_items(&conn, &seoul(), T0).expect("items");
         assert_eq!(items.len(), 2);
         assert!(items[0].start_at_utc_ms < items[1].start_at_utc_ms);
         let json = serde_json::to_value(&items[0]).expect("json");
-        let mut keys: Vec<&str> = json.as_object().expect("object").keys().map(String::as_str).collect();
+        let mut keys: Vec<&str> = json
+            .as_object()
+            .expect("object")
+            .keys()
+            .map(String::as_str)
+            .collect();
         keys.sort_unstable();
         assert_eq!(keys, ["name", "sets", "start_at_utc_ms", "subject"]);
     }
@@ -171,16 +210,37 @@ mod tests {
         let key = schedule_key(NEXT_DAY_10_KST);
         let shared = schedule(vec![item(NEXT_DAY_10_KST, "수학 집중")]);
 
-        let first = import_items(&mut conn, &seoul(), "room-aaaa-1", &shared, std::slice::from_ref(&key), T0).expect("import");
+        let first = import_items(
+            &mut conn,
+            &seoul(),
+            "room-aaaa-1",
+            &shared,
+            std::slice::from_ref(&key),
+            T0,
+        )
+        .expect("import");
         assert_eq!(first[0].outcome, ImportOutcome::Applied);
-        let plans = plan::list_occurrences(&conn, &seoul(), "2026-11-07", "2026-11-07").expect("list");
-        assert_eq!((plans[0].name.as_str(), plans[0].start_time.as_str()), ("수학 집중", "10:00"));
+        let plans =
+            plan::list_occurrences(&conn, &seoul(), "2026-11-07", "2026-11-07").expect("list");
+        assert_eq!(
+            (plans[0].name.as_str(), plans[0].start_time.as_str()),
+            ("수학 집중", "10:00")
+        );
         let history = plan::plan_history(&conn, first[0].plan_id, 10).expect("history");
-        assert_eq!(history[0].action, "create", "the ordinary plan history records the copy");
+        assert_eq!(
+            history[0].action, "create",
+            "the ordinary plan history records the copy"
+        );
 
-        let second = import_items(&mut conn, &seoul(), "room-aaaa-1", &shared, &[key], T0 + 1).expect("import");
+        let second = import_items(&mut conn, &seoul(), "room-aaaa-1", &shared, &[key], T0 + 1)
+            .expect("import");
         assert_eq!(second[0].outcome, ImportOutcome::AlreadyImported);
-        assert_eq!(plan::list_occurrences(&conn, &seoul(), "2026-11-07", "2026-11-07").expect("list").len(), 1);
+        assert_eq!(
+            plan::list_occurrences(&conn, &seoul(), "2026-11-07", "2026-11-07")
+                .expect("list")
+                .len(),
+            1
+        );
     }
 
     #[test]
@@ -196,7 +256,10 @@ mod tests {
             T0,
         )
         .expect("import");
-        assert_eq!(results.iter().map(|r| r.outcome).collect::<Vec<_>>(), [ImportOutcome::InPast, ImportOutcome::NotShared]);
+        assert_eq!(
+            results.iter().map(|r| r.outcome).collect::<Vec<_>>(),
+            [ImportOutcome::InPast, ImportOutcome::NotShared]
+        );
     }
 
     #[test]
@@ -206,14 +269,33 @@ mod tests {
         let key = schedule_key(NEXT_DAY_10_KST);
 
         set_lock_for_test(&conn, true);
-        let locked = import_items(&mut conn, &seoul(), "room-aaaa-1", &shared, std::slice::from_ref(&key), T0).expect("import");
+        let locked = import_items(
+            &mut conn,
+            &seoul(),
+            "room-aaaa-1",
+            &shared,
+            std::slice::from_ref(&key),
+            T0,
+        )
+        .expect("import");
         assert_eq!(locked[0].outcome, ImportOutcome::RejectedLocked);
         set_lock_for_test(&conn, false);
-        assert!(plan::list_occurrences(&conn, &seoul(), "2026-11-07", "2026-11-07").expect("list").is_empty());
-        assert!(store::rooms::imported_keys(&conn, "room-aaaa-1").expect("keys").is_empty(), "a refused copy is not marked as done");
+        assert!(
+            plan::list_occurrences(&conn, &seoul(), "2026-11-07", "2026-11-07")
+                .expect("list")
+                .is_empty()
+        );
+        assert!(
+            store::rooms::imported_keys(&conn, "room-aaaa-1")
+                .expect("keys")
+                .is_empty(),
+            "a refused copy is not marked as done"
+        );
 
-        plan::create_plan(&mut conn, &seoul(), plan_input("2026-11-07", "10:00"), T0).expect("existing plan");
-        let overlap = import_items(&mut conn, &seoul(), "room-aaaa-1", &shared, &[key], T0).expect("import");
+        plan::create_plan(&mut conn, &seoul(), plan_input("2026-11-07", "10:00"), T0)
+            .expect("existing plan");
+        let overlap =
+            import_items(&mut conn, &seoul(), "room-aaaa-1", &shared, &[key], T0).expect("import");
         assert_eq!(overlap[0].outcome, ImportOutcome::Invalid);
     }
 }

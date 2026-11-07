@@ -10,7 +10,9 @@ use serde::{Deserialize, Serialize};
 
 use super::{IntegrationPort, ModeSetting};
 use crate::error::AppResult;
-use crate::settings::{self, FreeShape, Reason, SettingSpec, SettingValue, UpdateOutcome, ValueKind};
+use crate::settings::{
+    self, FreeShape, Reason, SettingSpec, SettingValue, UpdateOutcome, ValueKind,
+};
 use crate::store;
 
 const CATEGORY: &str = "remote";
@@ -18,14 +20,20 @@ const CATEGORY: &str = "remote";
 pub const SUPABASE_ENDPOINT: SettingSpec = SettingSpec {
     name: "supabase.endpoint",
     category: CATEGORY,
-    kind: ValueKind::Free { max_len: 200, shape: FreeShape::Endpoint },
+    kind: ValueKind::Free {
+        max_len: 200,
+        shape: FreeShape::Endpoint,
+    },
     default: "",
     tighten_to: None,
 };
 pub const SUPABASE_ANON_KEY: SettingSpec = SettingSpec {
     name: "supabase.anon_key",
     category: CATEGORY,
-    kind: ValueKind::Free { max_len: 1024, shape: FreeShape::Token },
+    kind: ValueKind::Free {
+        max_len: 1024,
+        shape: FreeShape::Token,
+    },
     default: "",
     tighten_to: None,
 };
@@ -33,14 +41,19 @@ pub const SUPABASE_ANON_KEY: SettingSpec = SettingSpec {
 pub const SUPABASE_USER_ID: SettingSpec = SettingSpec {
     name: "supabase.user_id",
     category: CATEGORY,
-    kind: ValueKind::Free { max_len: 64, shape: FreeShape::Token },
+    kind: ValueKind::Free {
+        max_len: 64,
+        shape: FreeShape::Token,
+    },
     default: "",
     tighten_to: None,
 };
 pub const NOTIFY_CHANNEL: SettingSpec = SettingSpec {
     name: "notify.channel",
     category: CATEGORY,
-    kind: ValueKind::Text { allowed: &["none", "ntfy", "telegram", "phone_app"] },
+    kind: ValueKind::Text {
+        allowed: &["none", "ntfy", "telegram", "phone_app"],
+    },
     default: "none",
     // Turning the channel off narrows what leaves the device, so it works during a run.
     tighten_to: Some("none"),
@@ -48,14 +61,20 @@ pub const NOTIFY_CHANNEL: SettingSpec = SettingSpec {
 pub const NOTIFY_NTFY_SERVER: SettingSpec = SettingSpec {
     name: "notify.ntfy_server",
     category: CATEGORY,
-    kind: ValueKind::Free { max_len: 200, shape: FreeShape::Endpoint },
+    kind: ValueKind::Free {
+        max_len: 200,
+        shape: FreeShape::Endpoint,
+    },
     default: "https://ntfy.sh",
     tighten_to: None,
 };
 pub const NOTIFY_TELEGRAM_CHAT_ID: SettingSpec = SettingSpec {
     name: "notify.telegram_chat_id",
     category: CATEGORY,
-    kind: ValueKind::Free { max_len: 40, shape: FreeShape::Token },
+    kind: ValueKind::Free {
+        max_len: 40,
+        shape: FreeShape::Token,
+    },
     default: "",
     tighten_to: None,
 };
@@ -107,31 +126,54 @@ pub fn mode_spec(port: IntegrationPort) -> SettingSpec {
     SettingSpec {
         name,
         category: CATEGORY,
-        kind: ValueKind::Text { allowed: &["auto", "mock"] },
+        kind: ValueKind::Text {
+            allowed: &["auto", "mock"],
+        },
         default: "auto",
         tighten_to: Some("mock"),
     }
 }
 
-pub fn update_setting(conn: &mut Connection, key: RemoteSettingKey, value: SettingValue, at_ms: i64) -> AppResult<UpdateOutcome> {
+pub fn update_setting(
+    conn: &mut Connection,
+    key: RemoteSettingKey,
+    value: SettingValue,
+    at_ms: i64,
+) -> AppResult<UpdateOutcome> {
     settings::apply_setting(conn, &key.spec(), &value, at_ms, || Ok(()))
 }
 
-pub fn set_mode(conn: &mut Connection, port: IntegrationPort, mode: ModeSetting, at_ms: i64) -> AppResult<UpdateOutcome> {
-    settings::apply_setting(conn, &mode_spec(port), &SettingValue::Text(mode.as_str().to_string()), at_ms, || Ok(()))
+pub fn set_mode(
+    conn: &mut Connection,
+    port: IntegrationPort,
+    mode: ModeSetting,
+    at_ms: i64,
+) -> AppResult<UpdateOutcome> {
+    settings::apply_setting(
+        conn,
+        &mode_spec(port),
+        &SettingValue::Text(mode.as_str().to_string()),
+        at_ms,
+        || Ok(()),
+    )
 }
 
 pub fn read_mode(conn: &Connection, port: IntegrationPort) -> AppResult<ModeSetting> {
     match settings::read_value(conn, &mode_spec(port))? {
         SettingValue::Text(raw) => ModeSetting::parse(&raw),
-        other => Err(crate::error::AppError::Internal(format!("mode setting has the wrong type: {other:?}"))),
+        other => Err(crate::error::AppError::Internal(format!(
+            "mode setting has the wrong type: {other:?}"
+        ))),
     }
 }
 
 fn read_text(conn: &Connection, spec: &SettingSpec) -> AppResult<String> {
     match settings::read_value(conn, spec)? {
         SettingValue::Text(text) => Ok(text),
-        other => Err(crate::error::AppError::Internal(format!("{} is not text: {other:?}", spec.name))),
+        other => Err(crate::error::AppError::Internal(format!(
+            "{} is not text: {other:?}",
+            spec.name
+        ))),
     }
 }
 
@@ -153,7 +195,9 @@ impl RemoteConfig {
         let grace = match settings::read_value(conn, &NOTIFY_MISSED_GRACE_MIN)? {
             SettingValue::Int(v) => v,
             other => {
-                return Err(crate::error::AppError::Internal(format!("grace is not an integer: {other:?}")));
+                return Err(crate::error::AppError::Internal(format!(
+                    "grace is not an integer: {other:?}"
+                )));
             }
         };
         Ok(Self {
@@ -202,7 +246,15 @@ pub fn ensure_device_id(conn: &Connection, at_ms: i64) -> AppResult<String> {
     }
     let id = uuid::Uuid::new_v4().to_string();
     store::put_setting(conn, DEVICE_ID_KEY, CATEGORY, &id, at_ms)?;
-    store::append_history(conn, at_ms, DEVICE_ID_KEY, None, &id, Reason::Default, settings::Outcome::Applied)?;
+    store::append_history(
+        conn,
+        at_ms,
+        DEVICE_ID_KEY,
+        None,
+        &id,
+        Reason::Default,
+        settings::Outcome::Applied,
+    )?;
     Ok(id)
 }
 
@@ -246,10 +298,31 @@ mod tests {
     #[test]
     fn grace_above_three_minutes_is_rejected() {
         let mut conn = open_in_memory().expect("db");
-        assert!(update_setting(&mut conn, RemoteSettingKey::NotifyMissedGraceMin, SettingValue::Int(4), 1).is_err());
-        assert!(update_setting(&mut conn, RemoteSettingKey::NotifyMissedGraceMin, SettingValue::Int(0), 1).is_err());
+        assert!(
+            update_setting(
+                &mut conn,
+                RemoteSettingKey::NotifyMissedGraceMin,
+                SettingValue::Int(4),
+                1
+            )
+            .is_err()
+        );
+        assert!(
+            update_setting(
+                &mut conn,
+                RemoteSettingKey::NotifyMissedGraceMin,
+                SettingValue::Int(0),
+                1
+            )
+            .is_err()
+        );
         assert!(matches!(
-            update_setting(&mut conn, RemoteSettingKey::NotifyMissedGraceMin, SettingValue::Int(2), 1),
+            update_setting(
+                &mut conn,
+                RemoteSettingKey::NotifyMissedGraceMin,
+                SettingValue::Int(2),
+                1
+            ),
             Ok(UpdateOutcome::Applied { .. })
         ));
     }
@@ -257,37 +330,93 @@ mod tests {
     #[test]
     fn endpoint_must_be_https_without_credentials_and_errors_do_not_echo_the_text() {
         let mut conn = open_in_memory().expect("db");
-        for bad in ["http://abc.supabase.co", "https://u:p@abc.supabase.co", "abc.supabase.co", "https://x.co/?apikey=SECRETKEY"] {
-            let err = update_setting(&mut conn, RemoteSettingKey::SupabaseEndpoint, SettingValue::Text(bad.into()), 1)
-                .expect_err("rejected");
+        for bad in [
+            "http://abc.supabase.co",
+            "https://u:p@abc.supabase.co",
+            "abc.supabase.co",
+            "https://x.co/?apikey=SECRETKEY",
+        ] {
+            let err = update_setting(
+                &mut conn,
+                RemoteSettingKey::SupabaseEndpoint,
+                SettingValue::Text(bad.into()),
+                1,
+            )
+            .expect_err("rejected");
             assert!(!err.to_string().contains("SECRETKEY"), "{err}");
         }
-        assert!(update_setting(&mut conn, RemoteSettingKey::SupabaseEndpoint, SettingValue::Text("https://abc.supabase.co".into()), 1).is_ok());
+        assert!(
+            update_setting(
+                &mut conn,
+                RemoteSettingKey::SupabaseEndpoint,
+                SettingValue::Text("https://abc.supabase.co".into()),
+                1
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn locked_run_rejects_entry_but_allows_tightening_with_its_own_outcome() {
         let mut conn = open_in_memory().expect("db");
-        update_setting(&mut conn, RemoteSettingKey::NotifyChannel, SettingValue::Text("ntfy".into()), 1).expect("set");
+        update_setting(
+            &mut conn,
+            RemoteSettingKey::NotifyChannel,
+            SettingValue::Text("ntfy".into()),
+            1,
+        )
+        .expect("set");
         set_lock_for_test(&conn, true);
 
         // Widening or entering a value during a run: refused, recorded, unchanged.
-        let locked = update_setting(&mut conn, RemoteSettingKey::SupabaseEndpoint, SettingValue::Text("https://abc.supabase.co".into()), 2)
-            .expect("outcome");
-        assert_eq!(locked, UpdateOutcome::RejectedLocked { key: "supabase.endpoint".into() });
-        assert_eq!(RemoteConfig::load(&conn).expect("load").supabase_endpoint, "");
-        let widen = set_mode(&mut conn, IntegrationPort::Supabase, ModeSetting::Auto, 3).expect("outcome");
-        assert_eq!(widen, UpdateOutcome::RejectedLocked { key: "integration.supabase.mode".into() });
+        let locked = update_setting(
+            &mut conn,
+            RemoteSettingKey::SupabaseEndpoint,
+            SettingValue::Text("https://abc.supabase.co".into()),
+            2,
+        )
+        .expect("outcome");
+        assert_eq!(
+            locked,
+            UpdateOutcome::RejectedLocked {
+                key: "supabase.endpoint".into()
+            }
+        );
+        assert_eq!(
+            RemoteConfig::load(&conn).expect("load").supabase_endpoint,
+            ""
+        );
+        let widen =
+            set_mode(&mut conn, IntegrationPort::Supabase, ModeSetting::Auto, 3).expect("outcome");
+        assert_eq!(
+            widen,
+            UpdateOutcome::RejectedLocked {
+                key: "integration.supabase.mode".into()
+            }
+        );
 
         // Tightening: allowed during the run.
-        let tighten = update_setting(&mut conn, RemoteSettingKey::NotifyChannel, SettingValue::Text("none".into()), 4).expect("outcome");
+        let tighten = update_setting(
+            &mut conn,
+            RemoteSettingKey::NotifyChannel,
+            SettingValue::Text("none".into()),
+            4,
+        )
+        .expect("outcome");
         assert!(matches!(tighten, UpdateOutcome::Applied { .. }));
-        let mock = set_mode(&mut conn, IntegrationPort::Notify, ModeSetting::Mock, 5).expect("outcome");
+        let mock =
+            set_mode(&mut conn, IntegrationPort::Notify, ModeSetting::Mock, 5).expect("outcome");
         assert!(matches!(mock, UpdateOutcome::Applied { .. }));
-        assert_eq!(read_mode(&conn, IntegrationPort::Notify).expect("mode"), ModeSetting::Mock);
+        assert_eq!(
+            read_mode(&conn, IntegrationPort::Notify).expect("mode"),
+            ModeSetting::Mock
+        );
 
         let history = settings::read_history(&conn, 10).expect("history");
-        let outcomes: Vec<(&str, &str)> = history.iter().map(|h| (h.key.as_str(), h.outcome.as_str())).collect();
+        let outcomes: Vec<(&str, &str)> = history
+            .iter()
+            .map(|h| (h.key.as_str(), h.outcome.as_str()))
+            .collect();
         assert!(outcomes.contains(&("supabase.endpoint", "rejected_locked")));
         assert!(outcomes.contains(&("notify.channel", "applied_privacy_tighten")));
         assert!(outcomes.contains(&("integration.notify.mode", "applied_privacy_tighten")));
@@ -298,9 +427,18 @@ mod tests {
         let mut conn = open_in_memory().expect("db");
         set_mode(&mut conn, IntegrationPort::Supabase, ModeSetting::Mock, 1).expect("mock");
         set_lock_for_test(&conn, true);
-        let outcome = set_mode(&mut conn, IntegrationPort::Supabase, ModeSetting::Auto, 2).expect("outcome");
-        assert_eq!(outcome, UpdateOutcome::RejectedLocked { key: "integration.supabase.mode".into() });
-        assert_eq!(read_mode(&conn, IntegrationPort::Supabase).expect("mode"), ModeSetting::Mock);
+        let outcome =
+            set_mode(&mut conn, IntegrationPort::Supabase, ModeSetting::Auto, 2).expect("outcome");
+        assert_eq!(
+            outcome,
+            UpdateOutcome::RejectedLocked {
+                key: "integration.supabase.mode".into()
+            }
+        );
+        assert_eq!(
+            read_mode(&conn, IntegrationPort::Supabase).expect("mode"),
+            ModeSetting::Mock
+        );
     }
 
     #[test]
@@ -318,20 +456,55 @@ mod tests {
         let mut config = RemoteConfig::load(&open_in_memory().expect("db")).expect("load");
         let none = SecretFlags::default();
         config.supabase_endpoint = "https://abc.supabase.co".into();
-        assert!(!is_configured(IntegrationPort::Supabase, &config, none), "anon key missing");
+        assert!(
+            !is_configured(IntegrationPort::Supabase, &config, none),
+            "anon key missing"
+        );
         config.supabase_anon_key = "anon".into();
         assert!(is_configured(IntegrationPort::Supabase, &config, none));
         config.notify_channel = "ntfy".into();
         assert!(!is_configured(IntegrationPort::Notify, &config, none));
-        assert!(is_configured(IntegrationPort::Notify, &config, SecretFlags { ntfy_topic: true, ..none }));
+        assert!(is_configured(
+            IntegrationPort::Notify,
+            &config,
+            SecretFlags {
+                ntfy_topic: true,
+                ..none
+            }
+        ));
         config.notify_channel = "phone_app".into();
-        assert!(!is_configured(IntegrationPort::Notify, &config, none), "the phone app subscribes to the ntfy topic");
-        assert!(is_configured(IntegrationPort::Notify, &config, SecretFlags { ntfy_topic: true, ..none }));
+        assert!(
+            !is_configured(IntegrationPort::Notify, &config, none),
+            "the phone app subscribes to the ntfy topic"
+        );
+        assert!(is_configured(
+            IntegrationPort::Notify,
+            &config,
+            SecretFlags {
+                ntfy_topic: true,
+                ..none
+            }
+        ));
         config.notify_channel = "telegram".into();
         assert!(!is_configured(IntegrationPort::Notify, &config, none));
         config.notify_telegram_chat_id = "123".into();
         assert!(is_configured(IntegrationPort::Notify, &config, none));
-        assert!(is_configured(IntegrationPort::Llm, &config, SecretFlags { anthropic_api_key: true, ..none }));
-        assert!(!is_configured(IntegrationPort::Push, &config, SecretFlags { anthropic_api_key: true, ntfy_topic: true, supabase_refresh_token: true }));
+        assert!(is_configured(
+            IntegrationPort::Llm,
+            &config,
+            SecretFlags {
+                anthropic_api_key: true,
+                ..none
+            }
+        ));
+        assert!(!is_configured(
+            IntegrationPort::Push,
+            &config,
+            SecretFlags {
+                anthropic_api_key: true,
+                ntfy_topic: true,
+                supabase_refresh_token: true
+            }
+        ));
     }
 }

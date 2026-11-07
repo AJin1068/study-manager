@@ -20,7 +20,9 @@ pub enum BlockerStatus {
     ServiceDisabled,
     /// The plugin did not answer; the state is not known.
     Unreachable,
-    Unsupported { reason: UnsupportedReason },
+    Unsupported {
+        reason: UnsupportedReason,
+    },
 }
 
 /// The iPhone blocker. It holds no state and never reports anything but `Unsupported`.
@@ -32,7 +34,9 @@ pub type UnsupportedBlocker = ScreenTimeBlocker;
 
 impl ScreenTimeBlocker {
     pub fn status(&self) -> BlockerStatus {
-        BlockerStatus::Unsupported { reason: UnsupportedReason::AppleScreenTimeAuthorizationRequired }
+        BlockerStatus::Unsupported {
+            reason: UnsupportedReason::AppleScreenTimeAuthorizationRequired,
+        }
     }
 }
 
@@ -47,7 +51,9 @@ mod tests {
         for _ in 0..3 {
             assert_eq!(
                 blocker.status(),
-                BlockerStatus::Unsupported { reason: UnsupportedReason::AppleScreenTimeAuthorizationRequired }
+                BlockerStatus::Unsupported {
+                    reason: UnsupportedReason::AppleScreenTimeAuthorizationRequired
+                }
             );
         }
         assert_eq!(UnsupportedBlocker::default().status(), blocker.status());
@@ -56,11 +62,26 @@ mod tests {
     #[test]
     fn the_wire_form_carries_the_exact_reason_code() {
         let wire = serde_json::to_value(ScreenTimeBlocker.status()).expect("json");
-        assert_eq!(wire, json!({ "kind": "unsupported", "reason": "apple_screen_time_authorization_required" }));
-        assert_eq!(serde_json::to_value(BlockerStatus::Active).expect("json"), json!({ "kind": "active" }));
-        assert_eq!(serde_json::to_value(BlockerStatus::Inactive).expect("json"), json!({ "kind": "inactive" }));
-        assert_eq!(serde_json::to_value(BlockerStatus::ServiceDisabled).expect("json"), json!({ "kind": "service_disabled" }));
-        assert_eq!(serde_json::to_value(BlockerStatus::Unreachable).expect("json"), json!({ "kind": "unreachable" }));
+        assert_eq!(
+            wire,
+            json!({ "kind": "unsupported", "reason": "apple_screen_time_authorization_required" })
+        );
+        assert_eq!(
+            serde_json::to_value(BlockerStatus::Active).expect("json"),
+            json!({ "kind": "active" })
+        );
+        assert_eq!(
+            serde_json::to_value(BlockerStatus::Inactive).expect("json"),
+            json!({ "kind": "inactive" })
+        );
+        assert_eq!(
+            serde_json::to_value(BlockerStatus::ServiceDisabled).expect("json"),
+            json!({ "kind": "service_disabled" })
+        );
+        assert_eq!(
+            serde_json::to_value(BlockerStatus::Unreachable).expect("json"),
+            json!({ "kind": "unreachable" })
+        );
     }
 
     #[test]
@@ -69,7 +90,9 @@ mod tests {
         let mut found = Vec::new();
         let mut stack = vec![root];
         while let Some(dir) = stack.pop() {
-            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
             for entry in entries.flatten() {
                 let path = entry.path();
                 let name = entry.file_name().to_string_lossy().into_owned();
@@ -82,6 +105,9 @@ mod tests {
                 }
             }
         }
-        assert!(found.is_empty(), "iPhone support is Unsupported-only: {found:?}");
+        assert!(
+            found.is_empty(),
+            "iPhone support is Unsupported-only: {found:?}"
+        );
     }
 }

@@ -40,7 +40,9 @@ pub trait FocusProbe: Send + Sync {
 #[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
 pub(super) fn whole_idle_seconds(raw: f64) -> Result<u64, PlatformError> {
     if !raw.is_finite() || raw < 0.0 {
-        return Err(PlatformError::Process("idle time reading is not a valid duration".into()));
+        return Err(PlatformError::Process(
+            "idle time reading is not a valid duration".into(),
+        ));
     }
     // Saturating float-to-int conversion; the reading is a small positive number of seconds.
     Ok(raw.floor() as u64)
@@ -52,11 +54,15 @@ pub struct UnsupportedFocusProbe;
 
 impl FocusProbe for UnsupportedFocusProbe {
     fn frontmost_app(&self) -> Result<Option<AppIdentity>, PlatformError> {
-        Err(PlatformError::Unsupported("foreground app sensor (Windows pending real-device verification)"))
+        Err(PlatformError::Unsupported(
+            "foreground app sensor (Windows pending real-device verification)",
+        ))
     }
 
     fn idle_seconds(&self) -> Result<u64, PlatformError> {
-        Err(PlatformError::Unsupported("input idle sensor (Windows pending real-device verification)"))
+        Err(PlatformError::Unsupported(
+            "input idle sensor (Windows pending real-device verification)",
+        ))
     }
 
     fn window_title_access(&self) -> TitleAccess {
@@ -81,8 +87,14 @@ mod tests {
     #[test]
     fn the_unsupported_probe_fails_every_call_explicitly() {
         let probe = UnsupportedFocusProbe;
-        assert!(matches!(probe.frontmost_app(), Err(PlatformError::Unsupported(_))));
-        assert!(matches!(probe.idle_seconds(), Err(PlatformError::Unsupported(_))));
+        assert!(matches!(
+            probe.frontmost_app(),
+            Err(PlatformError::Unsupported(_))
+        ));
+        assert!(matches!(
+            probe.idle_seconds(),
+            Err(PlatformError::Unsupported(_))
+        ));
         assert_eq!(probe.window_title_access(), TitleAccess::Unsupported);
     }
 }

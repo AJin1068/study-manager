@@ -16,8 +16,13 @@ pub enum RunStatus {
 
 impl RunStatus {
     #[cfg(test)]
-    pub const ALL: [RunStatus; 5] =
-        [RunStatus::Active, RunStatus::Completed, RunStatus::Missed, RunStatus::Skipped, RunStatus::Aborted];
+    pub const ALL: [RunStatus; 5] = [
+        RunStatus::Active,
+        RunStatus::Completed,
+        RunStatus::Missed,
+        RunStatus::Skipped,
+        RunStatus::Aborted,
+    ];
 
     pub fn as_str(self) -> &'static str {
         match self {

@@ -55,7 +55,10 @@ pub fn connect(dir: &Path) -> io::Result<Box<dyn LinkStream>> {
     #[cfg(not(unix))]
     {
         let _ = dir;
-        Err(io::Error::new(io::ErrorKind::Unsupported, "browser link IPC"))
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "browser link IPC",
+        ))
     }
 }
 
@@ -79,7 +82,10 @@ pub fn read_token(dir: &Path) -> io::Result<String> {
     if is_valid_token(token) {
         Ok(token.to_owned())
     } else {
-        Err(io::Error::new(io::ErrorKind::InvalidData, "malformed token file"))
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "malformed token file",
+        ))
     }
 }
 
@@ -93,7 +99,11 @@ pub fn app_data_dir(identifier: &str) -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
     {
         let home = std::env::var_os("HOME")?;
-        Some(PathBuf::from(home).join("Library/Application Support").join(identifier))
+        Some(
+            PathBuf::from(home)
+                .join("Library/Application Support")
+                .join(identifier),
+        )
     }
     #[cfg(target_os = "windows")]
     {
@@ -111,7 +121,10 @@ pub fn app_data_dir(identifier: &str) -> Option<PathBuf> {
 
 /// Host manifest JSON. `allowed_origins` pins the extension IDs that may start the host.
 pub fn host_manifest_json(host_path: &Path, extension_ids: &[&str]) -> String {
-    let origins: Vec<String> = extension_ids.iter().map(|id| format!("chrome-extension://{id}/")).collect();
+    let origins: Vec<String> = extension_ids
+        .iter()
+        .map(|id| format!("chrome-extension://{id}/"))
+        .collect();
     serde_json::json!({
         "name": HOST_NAME,
         "description": "Study Manager browser link",
@@ -138,7 +151,11 @@ pub fn chrome_manifest_dir(home: &Path) -> Result<PathBuf, PlatformError> {
 
 /// Writes the host manifest into `manifest_dir`. The caller chooses the directory so tests and
 /// tools never write into a real browser profile by accident.
-pub fn register_host(manifest_dir: &Path, host_path: &Path, extension_ids: &[&str]) -> Result<(), PlatformError> {
+pub fn register_host(
+    manifest_dir: &Path,
+    host_path: &Path,
+    extension_ids: &[&str],
+) -> Result<(), PlatformError> {
     let write = || -> io::Result<()> {
         std::fs::create_dir_all(manifest_dir)?;
         let file = manifest_dir.join(format!("{HOST_NAME}.json"));
@@ -171,7 +188,10 @@ mod unix {
     use std::path::Path;
     use std::time::Duration;
 
-    use super::{is_valid_token, LinkListener, LinkStream, MAX_SOCKET_PATH, SOCKET_FILE, TOKEN_BYTES, TOKEN_FILE};
+    use super::{
+        LinkListener, LinkStream, MAX_SOCKET_PATH, SOCKET_FILE, TOKEN_BYTES, TOKEN_FILE,
+        is_valid_token,
+    };
 
     impl LinkStream for UnixStream {
         fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
@@ -195,7 +215,10 @@ mod unix {
     pub fn bind(dir: &Path) -> io::Result<Box<dyn LinkListener>> {
         let path = dir.join(SOCKET_FILE);
         if path.as_os_str().len() > MAX_SOCKET_PATH {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "socket path too long"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "socket path too long",
+            ));
         }
         match std::fs::remove_file(&path) {
             Ok(()) => {}
@@ -223,7 +246,12 @@ mod unix {
         let tmp = dir.join(format!("{TOKEN_FILE}.tmp"));
         {
             use std::io::Write;
-            let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&tmp)?;
             file.write_all(token.as_bytes())?;
         }
         std::fs::rename(tmp, path)?;
@@ -244,19 +272,30 @@ mod tests {
 
     #[test]
     fn manifest_pins_extension_origins_and_host_name() {
-        let json = host_manifest_json(Path::new("/opt/app/study-manager"), &["abcdefghijklmnopabcdefghijklmnop"]);
+        let json = host_manifest_json(
+            Path::new("/opt/app/study-manager"),
+            &["abcdefghijklmnopabcdefghijklmnop"],
+        );
         let value: serde_json::Value = serde_json::from_str(&json).expect("json");
         assert_eq!(value["name"], HOST_NAME);
         assert_eq!(value["type"], "stdio");
         assert_eq!(value["path"], "/opt/app/study-manager");
-        assert_eq!(value["allowed_origins"][0], "chrome-extension://abcdefghijklmnopabcdefghijklmnop/");
+        assert_eq!(
+            value["allowed_origins"][0],
+            "chrome-extension://abcdefghijklmnopabcdefghijklmnop/"
+        );
     }
 
     #[test]
     fn register_and_unregister_use_the_given_directory_only() {
         let dir = temp_dir("manifest");
         let target = dir.join("NativeMessagingHosts");
-        register_host(&target, Path::new("/x/host"), &["abcdefghijklmnopabcdefghijklmnop"]).expect("register");
+        register_host(
+            &target,
+            Path::new("/x/host"),
+            &["abcdefghijklmnopabcdefghijklmnop"],
+        )
+        .expect("register");
         assert!(target.join(format!("{HOST_NAME}.json")).exists());
         unregister_host(&target).expect("unregister");
         assert!(!target.join(format!("{HOST_NAME}.json")).exists());
@@ -280,7 +319,10 @@ mod tests {
         assert!(is_valid_token(&first));
         assert_eq!(ensure_token(&dir).expect("reuse"), first);
         assert_eq!(read_token(&dir).expect("read"), first);
-        let mode = std::fs::metadata(dir.join(TOKEN_FILE)).expect("meta").permissions().mode();
+        let mode = std::fs::metadata(dir.join(TOKEN_FILE))
+            .expect("meta")
+            .permissions()
+            .mode();
         assert_eq!(mode & 0o077, 0, "token must not be group/world readable");
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -289,7 +331,10 @@ mod tests {
     #[test]
     fn socket_round_trip_and_missing_app() {
         let dir = temp_dir("sock");
-        assert!(connect(&dir).is_err(), "no listener means the app is not running");
+        assert!(
+            connect(&dir).is_err(),
+            "no listener means the app is not running"
+        );
         let listener = bind_listener(&dir).expect("bind");
         let mut client = connect(&dir).expect("connect");
         let mut server = listener.accept_stream().expect("accept");

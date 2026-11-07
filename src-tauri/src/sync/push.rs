@@ -8,7 +8,7 @@ use chrono::TimeZone;
 use rusqlite::Connection;
 
 use super::ports::{PlanMirror, SyncError};
-use super::snapshot::{build_snapshot, SkipMark, Snapshot, HORIZON_DAYS};
+use super::snapshot::{HORIZON_DAYS, SkipMark, Snapshot, build_snapshot};
 use crate::commands::lock_db;
 use crate::error::{AppError, AppResult};
 use crate::plan::{self, ModeLookup};
@@ -76,25 +76,44 @@ fn load_inputs(conn: &Connection, from_date: &str) -> AppResult<Inputs> {
 }
 
 /// The snapshot for `now_ms`. The lock is held for the reads only.
-pub fn snapshot_now<Tz: TimeZone>(db: &Mutex<Connection>, tz: &Tz, now_ms: i64) -> Result<Snapshot, PushError> {
+pub fn snapshot_now<Tz: TimeZone>(
+    db: &Mutex<Connection>,
+    tz: &Tz,
+    now_ms: i64,
+) -> Result<Snapshot, PushError> {
     let today = tz
         .timestamp_millis_opt(now_ms)
         .single()
         .map(|dt| dt.date_naive())
         .ok_or(PushError::Local("clock"))?;
     // One day of margin matches the snapshot's own lookback.
-    let from_date = (today - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+    let from_date = (today - chrono::Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string();
     let inputs = {
         let conn = lock_db(db)?;
         load_inputs(&conn, &from_date)?
     };
-    Ok(build_snapshot(tz, &inputs.plans, &inputs.exceptions, &inputs.modes, &inputs.skips, now_ms, HORIZON_DAYS)?)
+    Ok(build_snapshot(
+        tz,
+        &inputs.plans,
+        &inputs.exceptions,
+        &inputs.modes,
+        &inputs.skips,
+        now_ms,
+        HORIZON_DAYS,
+    )?)
 }
 
 /// Sends history rows after the saved position, in batches, saving the position after each
 /// accepted batch. Returns how many rows were sent. A failure leaves the position at the last
 /// accepted batch, so the next cycle continues from there.
-pub fn push_history(db: &Mutex<Connection>, mirror: &dyn PlanMirror, device_id: &str, now_ms: i64) -> Result<u64, PushError> {
+pub fn push_history(
+    db: &Mutex<Connection>,
+    mirror: &dyn PlanMirror,
+    device_id: &str,
+    now_ms: i64,
+) -> Result<u64, PushError> {
     let mut sent = 0u64;
     for _ in 0..MAX_BATCHES_PER_CYCLE {
         let entries = {
@@ -102,7 +121,9 @@ pub fn push_history(db: &Mutex<Connection>, mirror: &dyn PlanMirror, device_id: 
             let position = cursor::get_cursor(&conn, HISTORY_CURSOR)?;
             cursor::list_plan_history_after(&conn, position, HISTORY_BATCH)?
         };
-        let Some(last) = entries.last().map(|e| e.id) else { break };
+        let Some(last) = entries.last().map(|e| e.id) else {
+            break;
+        };
         mirror.push_history(device_id, &entries)?;
         {
             let conn = lock_db(db)?;
@@ -142,18 +163,31 @@ pub(crate) mod tests {
         fn register_device(&self, _device: &DeviceIdentity) -> Result<(), SyncError> {
             Ok(())
         }
-        fn push_snapshot(&self, _device_id: &str, _snapshot: &Snapshot) -> Result<SnapshotOutcome, SyncError> {
+        fn push_snapshot(
+            &self,
+            _device_id: &str,
+            _snapshot: &Snapshot,
+        ) -> Result<SnapshotOutcome, SyncError> {
             Ok(SnapshotOutcome::Replaced)
         }
-        fn push_history(&self, _device_id: &str, rows: &[PlanHistoryEntry]) -> Result<(), SyncError> {
+        fn push_history(
+            &self,
+            _device_id: &str,
+            rows: &[PlanHistoryEntry],
+        ) -> Result<(), SyncError> {
             if let Some(db) = self.db.lock().expect("db").as_ref() {
-                self.db_free_during_request.lock().expect("log").push(db.try_lock().is_ok());
+                self.db_free_during_request
+                    .lock()
+                    .expect("log")
+                    .push(db.try_lock().is_ok());
             }
             {
                 let mut fail = self.fail_next.lock().expect("fail");
                 if *fail > 0 {
                     *fail -= 1;
-                    return Err(SyncError::Remote(crate::remote::supabase::RemoteError::Http { status: 503 }));
+                    return Err(SyncError::Remote(
+                        crate::remote::supabase::RemoteError::Http { status: 503 },
+                    ));
                 }
             }
             self.requests.lock().expect("requests").push(rows.len());
@@ -201,12 +235,24 @@ pub(crate) mod tests {
             }
         }
         assert_eq!(total, 10_000);
-        assert_eq!(cycles, 2, "40 batches per cycle: 20 batches fit in the first cycle, the second finds nothing");
-        assert!(sink.requests.lock().expect("requests").iter().all(|&n| n == 500));
+        assert_eq!(
+            cycles, 2,
+            "40 batches per cycle: 20 batches fit in the first cycle, the second finds nothing"
+        );
+        assert!(
+            sink.requests
+                .lock()
+                .expect("requests")
+                .iter()
+                .all(|&n| n == 500)
+        );
         assert_eq!(sink.requests.lock().expect("requests").len(), 20);
         assert_eq!(sink.seen.lock().expect("seen").len(), 10_000);
         let conn = db.lock().expect("lock");
-        assert_eq!(cursor::get_cursor(&conn, HISTORY_CURSOR).expect("cursor"), 10_000);
+        assert_eq!(
+            cursor::get_cursor(&conn, HISTORY_CURSOR).expect("cursor"),
+            10_000
+        );
     }
 
     #[test]
@@ -216,17 +262,25 @@ pub(crate) mod tests {
         assert_eq!(push_history(&db, &sink, "d", 1).expect("first"), 1_200);
         cursor::reset_cursor(&db.lock().expect("lock"), HISTORY_CURSOR).expect("reset");
         assert_eq!(push_history(&db, &sink, "d", 2).expect("again"), 1_200);
-        assert_eq!(sink.seen.lock().expect("seen").len(), 1_200, "ids are the idempotency key");
+        assert_eq!(
+            sink.seen.lock().expect("seen").len(),
+            1_200,
+            "ids are the idempotency key"
+        );
     }
 
     #[test]
     fn a_failed_batch_keeps_the_cursor_at_the_last_accepted_batch() {
         let db = db_with_history(1_200);
         // The first request is accepted (500 rows), the second fails.
-        let flaky = FailSecond { inner: HistorySink::default(), calls: Mutex::new(0) };
+        let flaky = FailSecond {
+            inner: HistorySink::default(),
+            calls: Mutex::new(0),
+        };
         let result = push_history(&db, &flaky, "d", 3);
         assert!(matches!(result, Err(PushError::Remote(_))));
-        let position = cursor::get_cursor(&db.lock().expect("lock"), HISTORY_CURSOR).expect("cursor");
+        let position =
+            cursor::get_cursor(&db.lock().expect("lock"), HISTORY_CURSOR).expect("cursor");
         assert_eq!(position, 500, "only the accepted batch advanced the cursor");
         // Next cycle continues from there and delivers the rest without resending the first batch.
         assert_eq!(push_history(&db, &flaky, "d", 4), Ok(700));
@@ -242,14 +296,26 @@ pub(crate) mod tests {
         fn register_device(&self, device: &DeviceIdentity) -> Result<(), SyncError> {
             self.inner.register_device(device)
         }
-        fn push_snapshot(&self, device_id: &str, snapshot: &Snapshot) -> Result<SnapshotOutcome, SyncError> {
+        fn push_snapshot(
+            &self,
+            device_id: &str,
+            snapshot: &Snapshot,
+        ) -> Result<SnapshotOutcome, SyncError> {
             self.inner.push_snapshot(device_id, snapshot)
         }
-        fn push_history(&self, device_id: &str, rows: &[PlanHistoryEntry]) -> Result<(), SyncError> {
+        fn push_history(
+            &self,
+            device_id: &str,
+            rows: &[PlanHistoryEntry],
+        ) -> Result<(), SyncError> {
             let mut calls = self.calls.lock().expect("calls");
             *calls += 1;
             if *calls == 2 {
-                return Err(SyncError::Remote(crate::remote::supabase::RemoteError::Transport(crate::remote::http::TransportError::Connect)));
+                return Err(SyncError::Remote(
+                    crate::remote::supabase::RemoteError::Transport(
+                        crate::remote::http::TransportError::Connect,
+                    ),
+                ));
             }
             drop(calls);
             self.inner.push_history(device_id, rows)
@@ -267,7 +333,10 @@ pub(crate) mod tests {
         push_history(&db, &sink, "d", 1).expect("push");
         let log = sink.db_free_during_request.lock().expect("log");
         assert_eq!(log.len(), 3);
-        assert!(log.iter().all(|free| *free), "the lock was held across a request: {log:?}");
+        assert!(
+            log.iter().all(|free| *free),
+            "the lock was held across a request: {log:?}"
+        );
     }
 
     #[test]

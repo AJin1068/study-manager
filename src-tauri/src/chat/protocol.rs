@@ -93,14 +93,18 @@ fn args<T: for<'de> Deserialize<'de>>(value: Value) -> Option<T> {
 
 /// The step in a model answer, or `None` when the answer does not follow the protocol.
 pub fn parse_step(answer: &str) -> Option<Step> {
-    let Value::Object(mut map) = serde_json::from_str::<Value>(answer.trim()).ok()? else { return None };
+    let Value::Object(mut map) = serde_json::from_str::<Value>(answer.trim()).ok()? else {
+        return None;
+    };
     if let Some(reply) = map.remove("reply") {
         let text = reply.as_str()?.trim().to_string();
         let ok = map.is_empty() && !text.is_empty() && text.chars().count() <= MAX_REPLY_CHARS;
         return ok.then_some(Step::Reply(text));
     }
     let name = map.remove("tool")?.as_str()?.to_string();
-    let value = map.remove("args").unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+    let value = map
+        .remove("args")
+        .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
     if !map.is_empty() {
         return None;
     }

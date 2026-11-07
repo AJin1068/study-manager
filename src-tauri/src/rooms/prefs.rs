@@ -18,18 +18,48 @@ use crate::settings::{self, SettingSpec, SettingValue, UpdateOutcome, ValueKind}
 
 const CATEGORY: &str = "friends";
 
-pub const SHARE_LEVEL: SettingSpec =
-    SettingSpec { name: "friends.share_level", category: CATEGORY, kind: ValueKind::Bool, default: "true", tighten_to: Some("false") };
-pub const SHARE_STATUS: SettingSpec =
-    SettingSpec { name: "friends.share_status", category: CATEGORY, kind: ValueKind::Bool, default: "true", tighten_to: Some("false") };
-pub const SHARE_WEEK_TIME: SettingSpec =
-    SettingSpec { name: "friends.share_week_time", category: CATEGORY, kind: ValueKind::Bool, default: "false", tighten_to: Some("false") };
-pub const SHARE_ATTEMPTS: SettingSpec =
-    SettingSpec { name: "friends.share_attempts", category: CATEGORY, kind: ValueKind::Bool, default: "false", tighten_to: Some("false") };
-pub const DISTRACTION_PUBLISH: SettingSpec =
-    SettingSpec { name: "friends.distraction_publish", category: CATEGORY, kind: ValueKind::Bool, default: "false", tighten_to: Some("false") };
-pub const DISTRACTION_RECEIVE: SettingSpec =
-    SettingSpec { name: "friends.distraction_receive", category: CATEGORY, kind: ValueKind::Bool, default: "false", tighten_to: Some("false") };
+pub const SHARE_LEVEL: SettingSpec = SettingSpec {
+    name: "friends.share_level",
+    category: CATEGORY,
+    kind: ValueKind::Bool,
+    default: "true",
+    tighten_to: Some("false"),
+};
+pub const SHARE_STATUS: SettingSpec = SettingSpec {
+    name: "friends.share_status",
+    category: CATEGORY,
+    kind: ValueKind::Bool,
+    default: "true",
+    tighten_to: Some("false"),
+};
+pub const SHARE_WEEK_TIME: SettingSpec = SettingSpec {
+    name: "friends.share_week_time",
+    category: CATEGORY,
+    kind: ValueKind::Bool,
+    default: "false",
+    tighten_to: Some("false"),
+};
+pub const SHARE_ATTEMPTS: SettingSpec = SettingSpec {
+    name: "friends.share_attempts",
+    category: CATEGORY,
+    kind: ValueKind::Bool,
+    default: "false",
+    tighten_to: Some("false"),
+};
+pub const DISTRACTION_PUBLISH: SettingSpec = SettingSpec {
+    name: "friends.distraction_publish",
+    category: CATEGORY,
+    kind: ValueKind::Bool,
+    default: "false",
+    tighten_to: Some("false"),
+};
+pub const DISTRACTION_RECEIVE: SettingSpec = SettingSpec {
+    name: "friends.distraction_receive",
+    category: CATEGORY,
+    kind: ValueKind::Bool,
+    default: "false",
+    tighten_to: Some("false"),
+};
 
 /// The settings the friends card edits. API name = camelCase of the variant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,14 +86,22 @@ impl FriendSettingKey {
     }
 }
 
-pub fn update_setting(conn: &mut Connection, key: FriendSettingKey, value: SettingValue, at_ms: i64) -> AppResult<UpdateOutcome> {
+pub fn update_setting(
+    conn: &mut Connection,
+    key: FriendSettingKey,
+    value: SettingValue,
+    at_ms: i64,
+) -> AppResult<UpdateOutcome> {
     settings::apply_setting(conn, &key.spec(), &value, at_ms, || Ok(()))
 }
 
 fn read_bool(conn: &Connection, spec: &SettingSpec) -> AppResult<bool> {
     match settings::read_value(conn, spec)? {
         SettingValue::Bool(v) => Ok(v),
-        other => Err(AppError::Internal(format!("{} has the wrong type: {other:?}", spec.name))),
+        other => Err(AppError::Internal(format!(
+            "{} has the wrong type: {other:?}",
+            spec.name
+        ))),
     }
 }
 
@@ -148,8 +186,14 @@ pub fn status_report(settings: &FriendSettings, local: &LocalSnapshot) -> Option
     Some(StatusReportArgs {
         state: state.as_str(),
         remaining_sec,
-        level: if settings.share_level { local.level.clamp(1, 999) } else { 1 },
-        attempts_today: settings.share_attempts.then_some(local.attempts_today.max(0)),
+        level: if settings.share_level {
+            local.level.clamp(1, 999)
+        } else {
+            1
+        },
+        attempts_today: settings
+            .share_attempts
+            .then_some(local.attempts_today.max(0)),
     })
 }
 
@@ -161,7 +205,11 @@ pub fn daily_reports(settings: &FriendSettings, local: &LocalSnapshot) -> Vec<Da
     local
         .days
         .iter()
-        .map(|d| DailyReportArgs { day: d.day.clone(), study_min: d.study_min.clamp(0, 1440), plan_min: d.plan_min.clamp(0, 1440) })
+        .map(|d| DailyReportArgs {
+            day: d.day.clone(),
+            study_min: d.study_min.clamp(0, 1440),
+            plan_min: d.plan_min.clamp(0, 1440),
+        })
         .collect()
 }
 
@@ -177,7 +225,11 @@ mod tests {
             remaining_sec: 1_920,
             level: 7,
             attempts_today: 4,
-            days: vec![LocalDay { day: "2026-11-06".into(), study_min: 95, plan_min: 120 }],
+            days: vec![LocalDay {
+                day: "2026-11-06".into(),
+                study_min: 95,
+                plan_min: 120,
+            }],
         }
     }
 
@@ -203,15 +255,29 @@ mod tests {
     #[test]
     fn the_default_payload_carries_level_and_state_only() {
         let report = status_report(&settings(true, true, false, false), &local()).expect("report");
-        assert_eq!((report.state, report.remaining_sec, report.level, report.attempts_today), ("studying", 1_920, 7, None));
-        assert!(daily_reports(&settings(true, true, false, false), &local()).is_empty(), "study minutes stay home by default");
+        assert_eq!(
+            (
+                report.state,
+                report.remaining_sec,
+                report.level,
+                report.attempts_today
+            ),
+            ("studying", 1_920, 7, None)
+        );
+        assert!(
+            daily_reports(&settings(true, true, false, false), &local()).is_empty(),
+            "study minutes stay home by default"
+        );
     }
 
     #[test]
     fn a_scope_is_added_to_the_payload_when_switched_on_and_removed_when_switched_off() {
         let on = status_report(&settings(true, true, true, true), &local()).expect("report");
         assert_eq!(on.attempts_today, Some(4));
-        assert_eq!(daily_reports(&settings(true, true, true, true), &local()).len(), 1);
+        assert_eq!(
+            daily_reports(&settings(true, true, true, true), &local()).len(),
+            1
+        );
 
         let off = status_report(&settings(true, true, false, false), &local()).expect("report");
         assert_eq!(off.attempts_today, None);
@@ -220,33 +286,85 @@ mod tests {
 
     #[test]
     fn a_private_level_or_state_is_replaced_by_a_neutral_value_not_sent() {
-        let no_state = status_report(&settings(true, false, false, false), &local()).expect("report");
-        assert_eq!((no_state.state, no_state.remaining_sec, no_state.level), ("idle", 0, 7));
-        let no_level = status_report(&settings(false, true, false, false), &local()).expect("report");
+        let no_state =
+            status_report(&settings(true, false, false, false), &local()).expect("report");
+        assert_eq!(
+            (no_state.state, no_state.remaining_sec, no_state.level),
+            ("idle", 0, 7)
+        );
+        let no_level =
+            status_report(&settings(false, true, false, false), &local()).expect("report");
         assert_eq!((no_level.state, no_level.level), ("studying", 1));
-        assert_eq!(status_report(&settings(false, false, true, true), &local()), None, "nothing to show, nothing sent");
+        assert_eq!(
+            status_report(&settings(false, false, true, true), &local()),
+            None,
+            "nothing to show, nothing sent"
+        );
     }
 
     #[test]
     fn the_wire_form_of_a_report_has_no_field_for_what_the_distraction_was() {
-        let json = serde_json::to_value(status_report(&settings(true, true, true, true), &local()).expect("report")).expect("json");
-        let mut keys: Vec<&str> = json.as_object().expect("object").keys().map(String::as_str).collect();
+        let json = serde_json::to_value(
+            status_report(&settings(true, true, true, true), &local()).expect("report"),
+        )
+        .expect("json");
+        let mut keys: Vec<&str> = json
+            .as_object()
+            .expect("object")
+            .keys()
+            .map(String::as_str)
+            .collect();
         keys.sort_unstable();
-        assert_eq!(keys, ["p_attempts_today", "p_level", "p_remaining_sec", "p_state"]);
+        assert_eq!(
+            keys,
+            ["p_attempts_today", "p_level", "p_remaining_sec", "p_state"]
+        );
     }
 
     #[test]
     fn during_a_run_switching_off_is_allowed_and_recorded_but_switching_on_is_refused() {
         let mut conn = open_in_memory().expect("db");
-        update_setting(&mut conn, FriendSettingKey::ShareAttempts, SettingValue::Bool(true), 1).expect("on, before the run");
+        update_setting(
+            &mut conn,
+            FriendSettingKey::ShareAttempts,
+            SettingValue::Bool(true),
+            1,
+        )
+        .expect("on, before the run");
         set_lock_for_test(&conn, true);
 
-        let widen = update_setting(&mut conn, FriendSettingKey::ShareWeekTime, SettingValue::Bool(true), 2).expect("outcome");
-        assert_eq!(widen, UpdateOutcome::RejectedLocked { key: "friends.share_week_time".into() });
-        let widen_distraction = update_setting(&mut conn, FriendSettingKey::DistractionPublish, SettingValue::Bool(true), 3).expect("outcome");
-        assert!(matches!(widen_distraction, UpdateOutcome::RejectedLocked { .. }));
+        let widen = update_setting(
+            &mut conn,
+            FriendSettingKey::ShareWeekTime,
+            SettingValue::Bool(true),
+            2,
+        )
+        .expect("outcome");
+        assert_eq!(
+            widen,
+            UpdateOutcome::RejectedLocked {
+                key: "friends.share_week_time".into()
+            }
+        );
+        let widen_distraction = update_setting(
+            &mut conn,
+            FriendSettingKey::DistractionPublish,
+            SettingValue::Bool(true),
+            3,
+        )
+        .expect("outcome");
+        assert!(matches!(
+            widen_distraction,
+            UpdateOutcome::RejectedLocked { .. }
+        ));
 
-        let tighten = update_setting(&mut conn, FriendSettingKey::ShareAttempts, SettingValue::Bool(false), 4).expect("outcome");
+        let tighten = update_setting(
+            &mut conn,
+            FriendSettingKey::ShareAttempts,
+            SettingValue::Bool(false),
+            4,
+        )
+        .expect("outcome");
         assert!(matches!(tighten, UpdateOutcome::Applied { .. }));
         assert!(!FriendSettings::load(&conn).expect("load").share_attempts);
         assert!(!FriendSettings::load(&conn).expect("load").share_week_time);
@@ -256,7 +374,13 @@ mod tests {
             .into_iter()
             .map(|h| (h.key, h.outcome))
             .collect();
-        assert!(outcomes.contains(&("friends.share_attempts".to_string(), "applied_privacy_tighten".to_string())));
-        assert!(outcomes.contains(&("friends.share_week_time".to_string(), "rejected_locked".to_string())));
+        assert!(outcomes.contains(&(
+            "friends.share_attempts".to_string(),
+            "applied_privacy_tighten".to_string()
+        )));
+        assert!(outcomes.contains(&(
+            "friends.share_week_time".to_string(),
+            "rejected_locked".to_string()
+        )));
     }
 }

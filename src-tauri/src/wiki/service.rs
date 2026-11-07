@@ -9,17 +9,20 @@ use std::sync::{Arc, Mutex};
 use rusqlite::Connection;
 use serde::Serialize;
 
-use super::ask::{check_answer, AnswerCheck};
-use super::fs::{WikiFs, MAX_READ_BYTES};
+use super::ask::{AnswerCheck, check_answer};
+use super::fs::{MAX_READ_BYTES, WikiFs};
 use super::index::{self, ReindexReport};
-use super::ingest::{chunk_text, IngestSession, SkippedFile, SourceKind, Step, BATCH_STEPS, MAX_INPUT_CHARS, MAX_STEPS};
+use super::ingest::{
+    BATCH_STEPS, IngestSession, MAX_INPUT_CHARS, MAX_STEPS, SkippedFile, SourceKind, Step,
+    chunk_text,
+};
 use super::names;
-use super::pdf::{extract_isolated, PdfExtractor};
+use super::pdf::{PdfExtractor, extract_isolated};
 use super::retrieve::rank_pages;
 use crate::commands::lock_db;
 use crate::error::{AppError, AppResult};
 use crate::llm::config::LlmConfig;
-use crate::llm::egress::{Prompt, PromptPage, MAX_ASK_PAGES, MAX_CHUNK_CHARS, MAX_QUESTION_CHARS};
+use crate::llm::egress::{MAX_ASK_PAGES, MAX_CHUNK_CHARS, MAX_QUESTION_CHARS, Prompt, PromptPage};
 use crate::llm::service::LlmService;
 use crate::llm::{LlmRequest, PageDraft, Purpose};
 use crate::remote::Clock;
@@ -113,16 +116,28 @@ pub struct MatchView {
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
-#[serde(tag = "status", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "status",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum AskOutcome {
     /// No page matched the question: no model was called.
     NotInWiki { hint: &'static str },
-    Answer { ask_id: String, answer: String, citations: Vec<String>, dropped_citations: usize },
+    Answer {
+        ask_id: String,
+        answer: String,
+        citations: Vec<String>,
+        dropped_citations: usize,
+    },
     /// The model answered without citing any page it was given; the answer was discarded.
     Ungrounded { matches: Vec<MatchView> },
     /// The model could not answer (off, unconfigured, over budget, failed): the pages that matched
     /// are shown instead.
-    Unavailable { code: String, matches: Vec<MatchView> },
+    Unavailable {
+        code: String,
+        matches: Vec<MatchView>,
+    },
 }
 
 struct AskRecord {
@@ -161,15 +176,25 @@ fn is_bare_url(text: &str) -> bool {
 }
 
 fn file_name_of(path: &Path) -> String {
-    path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 fn extension_of(path: &Path) -> String {
-    path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default()
+    path.extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default()
 }
 
 fn excerpt(body: &str) -> String {
-    body.lines().map(str::trim).find(|l| !l.is_empty() && !l.starts_with('#')).unwrap_or("").chars().take(EXCERPT_CHARS).collect()
+    body.lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with('#'))
+        .unwrap_or("")
+        .chars()
+        .take(EXCERPT_CHARS)
+        .collect()
 }
 
 /// The text of a page as written: the proposal, then its links, appended after existing text.
@@ -186,8 +211,19 @@ fn compose_page(existing: Option<&str>, draft: &PageDraft) -> String {
 }
 
 impl WikiService {
-    pub fn new(db: Arc<Mutex<Connection>>, llm: Arc<LlmService>, clock: Arc<dyn Clock>, pdf: Arc<dyn PdfExtractor>) -> Self {
-        Self { db, llm, clock, pdf, hub: Mutex::new(Hub::default()) }
+    pub fn new(
+        db: Arc<Mutex<Connection>>,
+        llm: Arc<LlmService>,
+        clock: Arc<dyn Clock>,
+        pdf: Arc<dyn PdfExtractor>,
+    ) -> Self {
+        Self {
+            db,
+            llm,
+            clock,
+            pdf,
+            hub: Mutex::new(Hub::default()),
+        }
     }
 
     fn now(&self) -> AppResult<i64> {
@@ -213,7 +249,9 @@ impl WikiService {
     fn clean_subject_name(name: &str) -> AppResult<String> {
         let clean = name.split_whitespace().collect::<Vec<_>>().join(" ");
         if clean.is_empty() || clean.chars().count() > MAX_NAME_INPUT_CHARS {
-            return Err(AppError::Invalid("the subject name must be 1 to 80 characters".into()));
+            return Err(AppError::Invalid(
+                "the subject name must be 1 to 80 characters".into(),
+            ));
         }
         Ok(clean)
     }
@@ -236,7 +274,10 @@ impl WikiService {
     pub fn list_subjects(&self, include_archived: bool) -> AppResult<Vec<SubjectView>> {
         let conn = lock_db(&self.db)?;
         let wiki = Self::wiki_fs(&conn)?;
-        repo::list_subjects(&conn, include_archived)?.into_iter().map(|row| Self::view(&conn, &wiki, row)).collect()
+        repo::list_subjects(&conn, include_archived)?
+            .into_iter()
+            .map(|row| Self::view(&conn, &wiki, row))
+            .collect()
     }
 
     /// Creates a subject and its folder. A second subject with the same folder name is refused.
@@ -246,7 +287,9 @@ impl WikiService {
         let at_ms = self.now()?;
         let conn = lock_db(&self.db)?;
         if repo::find_subject_by_slug(&conn, &slug)?.is_some() {
-            return Err(AppError::Invalid("a subject with the same folder name already exists".into()));
+            return Err(AppError::Invalid(
+                "a subject with the same folder name already exists".into(),
+            ));
         }
         let wiki = Self::wiki_fs(&conn)?;
         wiki.create_subject(&slug, &name)?;
@@ -284,7 +327,9 @@ impl WikiService {
         let at_ms = self.now()?;
         let conn = lock_db(&self.db)?;
         if archived && crate::study::lock_held(&conn)? {
-            return Err(AppError::Invalid("subjects cannot be archived while the lock is held".into()));
+            return Err(AppError::Invalid(
+                "subjects cannot be archived while the lock is held".into(),
+            ));
         }
         repo::set_archived(&conn, id, archived.then_some(at_ms))?;
         let wiki = Self::wiki_fs(&conn)?;
@@ -294,7 +339,9 @@ impl WikiService {
     /// The wiki subject a plan's free-text subject belongs to.
     pub fn subject_for_plan(&self, plan_subject: &str) -> AppResult<Option<SubjectView>> {
         let conn = lock_db(&self.db)?;
-        let Some(row) = subject_for_plan(&conn, plan_subject)? else { return Ok(None) };
+        let Some(row) = subject_for_plan(&conn, plan_subject)? else {
+            return Ok(None);
+        };
         let wiki = Self::wiki_fs(&conn)?;
         Ok(Some(Self::view(&conn, &wiki, row)?))
     }
@@ -318,7 +365,10 @@ impl WikiService {
         let markdown = wiki
             .read_page(&subject.slug, page_name)?
             .ok_or_else(|| AppError::Invalid("the page does not exist".into()))?;
-        Ok(PageContent { page_name: page_name.to_string(), markdown })
+        Ok(PageContent {
+            page_name: page_name.to_string(),
+            markdown,
+        })
     }
 
     pub fn reindex(&self, subject_id: i64) -> AppResult<ReindexReport> {
@@ -346,7 +396,11 @@ impl WikiService {
     }
 
     fn session(&self, preview_id: &str) -> AppResult<Arc<Mutex<IngestSession>>> {
-        lock(&self.hub).sessions.get(preview_id).cloned().ok_or_else(|| AppError::Invalid("the preview no longer exists".into()))
+        lock(&self.hub)
+            .sessions
+            .get(preview_id)
+            .cloned()
+            .ok_or_else(|| AppError::Invalid("the preview no longer exists".into()))
     }
 
     fn drop_session(&self, preview_id: &str) {
@@ -355,10 +409,17 @@ impl WikiService {
         hub.session_order.retain(|id| id != preview_id);
     }
 
-    fn ingest_view(&self, preview_id: Option<&str>, session: &IngestSession) -> AppResult<IngestView> {
+    fn ingest_view(
+        &self,
+        preview_id: Option<&str>,
+        session: &IngestSession,
+    ) -> AppResult<IngestView> {
         let (subject, wiki) = {
             let conn = lock_db(&self.db)?;
-            (repo::get_subject(&conn, session.subject_id)?, Self::wiki_fs(&conn)?)
+            (
+                repo::get_subject(&conn, session.subject_id)?,
+                Self::wiki_fs(&conn)?,
+            )
         };
         let mut proposals = Vec::new();
         for draft in session.proposals() {
@@ -406,29 +467,54 @@ impl WikiService {
     }
 
     /// Pasted text, a note, or a memo about a link. The link itself is never fetched.
-    pub fn ingest_text(&self, subject_id: i64, kind: SourceKind, label: &str, text: &str) -> AppResult<IngestView> {
+    pub fn ingest_text(
+        &self,
+        subject_id: i64,
+        kind: SourceKind,
+        label: &str,
+        text: &str,
+    ) -> AppResult<IngestView> {
         let subject = self.active(subject_id)?;
         if kind == SourceKind::Pdf {
-            return Err(AppError::Invalid("PDF files are imported from a file".into()));
+            return Err(AppError::Invalid(
+                "PDF files are imported from a file".into(),
+            ));
         }
         if text.trim().is_empty() {
             return Err(AppError::Invalid("there is no text to import".into()));
         }
         if kind == SourceKind::Link && is_bare_url(text) {
-            return Err(AppError::Invalid("a link needs a memo about it: the app does not open links".into()));
+            return Err(AppError::Invalid(
+                "a link needs a memo about it: the app does not open links".into(),
+            ));
         }
         if text.chars().count() > MAX_INPUT_CHARS {
-            return Err(AppError::Invalid("the text is too long to import at once".into()));
+            return Err(AppError::Invalid(
+                "the text is too long to import at once".into(),
+            ));
         }
-        let steps: Vec<Step> = chunk_text(text, MAX_CHUNK_CHARS).into_iter().map(Step::Chunk).collect();
+        let steps: Vec<Step> = chunk_text(text, MAX_CHUNK_CHARS)
+            .into_iter()
+            .map(Step::Chunk)
+            .collect();
         let default_label = match kind {
             SourceKind::Link => "링크 메모",
             SourceKind::Note => "메모",
             _ => "붙여넣기",
         };
         let label = label.trim();
-        let label = if label.is_empty() { default_label } else { label };
-        self.start(IngestSession::new(subject.id, &subject.name, kind, &label.chars().take(120).collect::<String>(), steps))
+        let label = if label.is_empty() {
+            default_label
+        } else {
+            label
+        };
+        self.start(IngestSession::new(
+            subject.id,
+            &subject.name,
+            kind,
+            &label.chars().take(120).collect::<String>(),
+            steps,
+        ))
     }
 
     fn read_text_file(&self, path: &Path) -> Result<(SourceKind, String), &'static str> {
@@ -442,14 +528,18 @@ impl WikiService {
                     return Err("too_large");
                 }
                 let bytes = std::fs::read(path).map_err(|_| "unreadable")?;
-                String::from_utf8(bytes).map(|t| (SourceKind::Note, t)).map_err(|_| "not_text")
+                String::from_utf8(bytes)
+                    .map(|t| (SourceKind::Note, t))
+                    .map_err(|_| "not_text")
             }
             "pdf" => {
                 if meta.len() > MAX_PDF_BYTES {
                     return Err("too_large");
                 }
                 let bytes = std::fs::read(path).map_err(|_| "unreadable")?;
-                extract_isolated(&self.pdf, bytes).map(|t| (SourceKind::Pdf, t)).map_err(|e| e.code())
+                extract_isolated(&self.pdf, bytes)
+                    .map(|t| (SourceKind::Pdf, t))
+                    .map_err(|e| e.code())
             }
             _ => Err("unsupported_type"),
         }
@@ -465,14 +555,31 @@ impl WikiService {
         let name = file_name_of(path);
         match self.read_text_file(path) {
             Ok((kind, text)) => {
-                let steps: Vec<Step> = chunk_text(&text, MAX_CHUNK_CHARS).into_iter().map(Step::Chunk).collect();
+                let steps: Vec<Step> = chunk_text(&text, MAX_CHUNK_CHARS)
+                    .into_iter()
+                    .map(Step::Chunk)
+                    .collect();
                 if steps.len() > MAX_STEPS {
-                    return Err(AppError::Invalid("the file is too long to import at once".into()));
+                    return Err(AppError::Invalid(
+                        "the file is too long to import at once".into(),
+                    ));
                 }
-                self.start(IngestSession::new(subject.id, &subject.name, kind, &name, steps))
+                self.start(IngestSession::new(
+                    subject.id,
+                    &subject.name,
+                    kind,
+                    &name,
+                    steps,
+                ))
             }
             Err(reason) => {
-                let mut session = IngestSession::new(subject.id, &subject.name, SourceKind::Note, &name, Vec::new());
+                let mut session = IngestSession::new(
+                    subject.id,
+                    &subject.name,
+                    SourceKind::Note,
+                    &name,
+                    Vec::new(),
+                );
                 session.skipped.push(SkippedFile { name, reason });
                 self.ingest_view(None, &session)
             }
@@ -480,7 +587,9 @@ impl WikiService {
     }
 
     fn collect_files(dir: &Path, depth: usize, out: &mut Vec<std::path::PathBuf>) {
-        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
         let mut entries: Vec<_> = entries.flatten().collect();
         entries.sort_by_key(|e| e.file_name());
         for entry in entries {
@@ -488,7 +597,9 @@ impl WikiService {
                 return;
             }
             let name = entry.file_name().to_string_lossy().into_owned();
-            let Ok(kind) = entry.file_type() else { continue };
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
             if name.starts_with('.') || kind.is_symlink() {
                 continue;
             }
@@ -510,7 +621,8 @@ impl WikiService {
         if !dir.is_absolute() {
             return Err(AppError::Invalid("the folder path must be absolute".into()));
         }
-        let meta = std::fs::symlink_metadata(dir).map_err(|_| AppError::Invalid("the folder cannot be opened".into()))?;
+        let meta = std::fs::symlink_metadata(dir)
+            .map_err(|_| AppError::Invalid("the folder cannot be opened".into()))?;
         if meta.file_type().is_symlink() || !meta.is_dir() {
             return Err(AppError::Invalid("the path is not a folder".into()));
         }
@@ -521,11 +633,17 @@ impl WikiService {
         let mut imported = 0usize;
         if files.len() > MAX_FOLDER_FILES {
             files.truncate(MAX_FOLDER_FILES);
-            skipped.push(SkippedFile { name: "…".into(), reason: "too_many_files" });
+            skipped.push(SkippedFile {
+                name: "…".into(),
+                reason: "too_many_files",
+            });
         }
         for path in files {
             if steps.len() >= MAX_STEPS {
-                skipped.push(SkippedFile { name: file_name_of(&path), reason: "too_many_steps" });
+                skipped.push(SkippedFile {
+                    name: file_name_of(&path),
+                    reason: "too_many_steps",
+                });
                 continue;
             }
             match self.read_text_file(&path) {
@@ -533,7 +651,10 @@ impl WikiService {
                     let room = MAX_STEPS - steps.len();
                     let chunks = chunk_text(&text, MAX_CHUNK_CHARS);
                     if chunks.len() > room {
-                        skipped.push(SkippedFile { name: file_name_of(&path), reason: "too_many_steps" });
+                        skipped.push(SkippedFile {
+                            name: file_name_of(&path),
+                            reason: "too_many_steps",
+                        });
                         continue;
                     }
                     steps.extend(chunks.into_iter().map(Step::Chunk));
@@ -542,13 +663,17 @@ impl WikiService {
                 Err("unsupported_type") => {}
                 Err(reason) => {
                     if skipped.len() < MAX_SKIPPED_SHOWN {
-                        skipped.push(SkippedFile { name: file_name_of(&path), reason });
+                        skipped.push(SkippedFile {
+                            name: file_name_of(&path),
+                            reason,
+                        });
                     }
                 }
             }
         }
         let label = format!("폴더 {} ({imported}개 파일)", file_name_of(dir));
-        let mut session = IngestSession::new(subject.id, &subject.name, SourceKind::Note, &label, steps);
+        let mut session =
+            IngestSession::new(subject.id, &subject.name, SourceKind::Note, &label, steps);
         session.skipped = skipped;
         self.start(session)
     }
@@ -556,7 +681,13 @@ impl WikiService {
     /// A table-of-contents draft from the subject name, for a subject with no material yet.
     pub fn outline(&self, subject_id: i64) -> AppResult<IngestView> {
         let subject = self.active(subject_id)?;
-        let mut session = IngestSession::new(subject.id, &subject.name, SourceKind::Note, "목차 초안", vec![Step::Outline]);
+        let mut session = IngestSession::new(
+            subject.id,
+            &subject.name,
+            SourceKind::Note,
+            "목차 초안",
+            vec![Step::Outline],
+        );
         session.record_source = false;
         self.start(session)
     }
@@ -576,24 +707,35 @@ impl WikiService {
 
     /// Writes the chosen proposals (all when `selected` is `None`). An existing page gets the new
     /// text appended after a backup of the old one.
-    pub fn apply_ingest(&self, preview_id: &str, selected: Option<Vec<String>>) -> AppResult<ApplyReport> {
+    pub fn apply_ingest(
+        &self,
+        preview_id: &str,
+        selected: Option<Vec<String>>,
+    ) -> AppResult<ApplyReport> {
         let shared = self.session(preview_id)?;
         let session = lock(&shared);
         let at_ms = self.now()?;
         let conn = lock_db(&self.db)?;
         let subject = Self::active_subject(&conn, session.subject_id)?;
         let wiki = Self::wiki_fs(&conn)?;
-        let wanted: Vec<String> = selected.unwrap_or_else(|| session.proposals().map(|d| d.page_name.clone()).collect());
+        let wanted: Vec<String> =
+            selected.unwrap_or_else(|| session.proposals().map(|d| d.page_name.clone()).collect());
         let (mut written, mut skipped) = (Vec::new(), Vec::new());
         for name in wanted {
             let Some(draft) = session.proposal(&name) else {
-                skipped.push(SkippedPage { page_name: name, reason: "not_in_preview" });
+                skipped.push(SkippedPage {
+                    page_name: name,
+                    reason: "not_in_preview",
+                });
                 continue;
             };
             let existing = match wiki.read_page(&subject.slug, &name) {
                 Ok(text) => text,
                 Err(_) => {
-                    skipped.push(SkippedPage { page_name: name, reason: "unreadable" });
+                    skipped.push(SkippedPage {
+                        page_name: name,
+                        reason: "unreadable",
+                    });
                     continue;
                 }
             };
@@ -601,15 +743,42 @@ impl WikiService {
             match wiki.write_page(&subject.slug, &name, &content) {
                 Ok(report) => {
                     index::index_page(&conn, &subject, &name, &content, at_ms)?;
-                    tracing::info!(event = "wiki_write", op = "ingest", bytes = report.bytes, backup = report.backup.is_some());
-                    written.push(WrittenPage { page_name: name, mode: if existing.is_some() { "append" } else { "create" }, backed_up: report.backup.is_some() });
+                    tracing::info!(
+                        event = "wiki_write",
+                        op = "ingest",
+                        bytes = report.bytes,
+                        backup = report.backup.is_some()
+                    );
+                    written.push(WrittenPage {
+                        page_name: name,
+                        mode: if existing.is_some() {
+                            "append"
+                        } else {
+                            "create"
+                        },
+                        backed_up: report.backup.is_some(),
+                    });
                 }
-                Err(_) => skipped.push(SkippedPage { page_name: name, reason: "write_failed" }),
+                Err(_) => skipped.push(SkippedPage {
+                    page_name: name,
+                    reason: "write_failed",
+                }),
             }
         }
         if session.record_source {
-            let status = if written.is_empty() { "nothing_written" } else { "ingested" };
-            repo::insert_source(&conn, subject.id, session.kind.as_str(), &session.source_ref, status, at_ms)?;
+            let status = if written.is_empty() {
+                "nothing_written"
+            } else {
+                "ingested"
+            };
+            repo::insert_source(
+                &conn,
+                subject.id,
+                session.kind.as_str(),
+                &session.source_ref,
+                status,
+                at_ms,
+            )?;
         }
         drop(conn);
         drop(session);
@@ -620,7 +789,13 @@ impl WikiService {
     // ---- ask ----
 
     fn matches_view(ranked: &[(String, String)]) -> Vec<MatchView> {
-        ranked.iter().map(|(name, body)| MatchView { page_name: name.clone(), excerpt: excerpt(body) }).collect()
+        ranked
+            .iter()
+            .map(|(name, body)| MatchView {
+                page_name: name.clone(),
+                excerpt: excerpt(body),
+            })
+            .collect()
     }
 
     /// Answers from the subject's own pages. The pages are found locally; only the best few,
@@ -628,7 +803,9 @@ impl WikiService {
     pub fn ask(&self, subject_id: i64, question: &str) -> AppResult<AskOutcome> {
         let question = question.split_whitespace().collect::<Vec<_>>().join(" ");
         if question.is_empty() || question.chars().count() > MAX_QUESTION_CHARS {
-            return Err(AppError::Invalid(format!("the question must be 1 to {MAX_QUESTION_CHARS} characters")));
+            return Err(AppError::Invalid(format!(
+                "the question must be 1 to {MAX_QUESTION_CHARS} characters"
+            )));
         }
         let (subject, pages) = {
             let conn = lock_db(&self.db)?;
@@ -644,31 +821,69 @@ impl WikiService {
         };
         let ranked = rank_pages(&question, &pages, MAX_ASK_PAGES);
         if ranked.is_empty() {
-            return Ok(AskOutcome::NotInWiki { hint: "위키에서 찾지 못했어요. 자료를 먼저 넣어 보세요." });
+            return Ok(AskOutcome::NotInWiki {
+                hint: "위키에서 찾지 못했어요. 자료를 먼저 넣어 보세요.",
+            });
         }
         let top: Vec<(String, String)> = ranked.iter().map(|r| pages[r.index].clone()).collect();
-        let prompt_pages: Vec<PromptPage> = top.iter().map(|(name, body)| PromptPage { name: name.clone(), body: body.clone() }).collect();
-        let request = LlmRequest { purpose: Purpose::WikiAsk, prompt: Prompt::ask(&subject.name, &question, prompt_pages), max_tokens: ASK_MAX_TOKENS };
+        let prompt_pages: Vec<PromptPage> = top
+            .iter()
+            .map(|(name, body)| PromptPage {
+                name: name.clone(),
+                body: body.clone(),
+            })
+            .collect();
+        let request = LlmRequest {
+            purpose: Purpose::WikiAsk,
+            prompt: Prompt::ask(&subject.name, &question, prompt_pages),
+            max_tokens: ASK_MAX_TOKENS,
+        };
         let response = match self.llm.complete(&request) {
             Ok(response) => response,
-            Err(err) => return Ok(AskOutcome::Unavailable { code: err.code().to_string(), matches: Self::matches_view(&top) }),
+            Err(err) => {
+                return Ok(AskOutcome::Unavailable {
+                    code: err.code().to_string(),
+                    matches: Self::matches_view(&top),
+                });
+            }
         };
         let retrieved: Vec<String> = top.iter().map(|(name, _)| name.clone()).collect();
         match check_answer(&response.text, &retrieved) {
-            AnswerCheck::Grounded { answer, citations, dropped } => {
+            AnswerCheck::Grounded {
+                answer,
+                citations,
+                dropped,
+            } => {
                 let ask_id = uuid::Uuid::new_v4().to_string();
                 let mut hub = lock(&self.hub);
-                hub.asks.insert(ask_id.clone(), AskRecord { subject_id, question, answer: answer.clone(), citations: citations.clone() });
+                hub.asks.insert(
+                    ask_id.clone(),
+                    AskRecord {
+                        subject_id,
+                        question,
+                        answer: answer.clone(),
+                        citations: citations.clone(),
+                    },
+                );
                 hub.ask_order.push_back(ask_id.clone());
                 while hub.ask_order.len() > MAX_ASKS {
                     if let Some(old) = hub.ask_order.pop_front() {
                         hub.asks.remove(&old);
                     }
                 }
-                Ok(AskOutcome::Answer { ask_id, answer, citations, dropped_citations: dropped })
+                Ok(AskOutcome::Answer {
+                    ask_id,
+                    answer,
+                    citations,
+                    dropped_citations: dropped,
+                })
             }
-            AnswerCheck::NotInWiki => Ok(AskOutcome::NotInWiki { hint: "위키에서 찾지 못했어요. 자료를 먼저 넣어 보세요." }),
-            AnswerCheck::Ungrounded | AnswerCheck::Malformed => Ok(AskOutcome::Ungrounded { matches: Self::matches_view(&top) }),
+            AnswerCheck::NotInWiki => Ok(AskOutcome::NotInWiki {
+                hint: "위키에서 찾지 못했어요. 자료를 먼저 넣어 보세요.",
+            }),
+            AnswerCheck::Ungrounded | AnswerCheck::Malformed => Ok(AskOutcome::Ungrounded {
+                matches: Self::matches_view(&top),
+            }),
         }
     }
 
@@ -676,14 +891,33 @@ impl WikiService {
     pub fn save_answer_preview(&self, ask_id: &str) -> AppResult<IngestView> {
         let (subject_id, question, answer, citations) = {
             let hub = lock(&self.hub);
-            let record = hub.asks.get(ask_id).ok_or_else(|| AppError::Invalid("the answer is no longer available".into()))?;
-            (record.subject_id, record.question.clone(), record.answer.clone(), record.citations.clone())
+            let record = hub
+                .asks
+                .get(ask_id)
+                .ok_or_else(|| AppError::Invalid("the answer is no longer available".into()))?;
+            (
+                record.subject_id,
+                record.question.clone(),
+                record.answer.clone(),
+                record.citations.clone(),
+            )
         };
         let subject = self.active(subject_id)?;
         let prefix: String = question.chars().take(24).collect();
-        let page_name = names::page_name(&format!("질문 {prefix}")).unwrap_or_else(|| "질문 답변".to_string());
-        let draft = PageDraft { page_name, markdown: format!("# {question}\n\n{answer}"), links: citations };
-        let session = IngestSession::from_drafts(subject.id, &subject.name, SourceKind::Note, "묻기 답변", vec![draft]);
+        let page_name =
+            names::page_name(&format!("질문 {prefix}")).unwrap_or_else(|| "질문 답변".to_string());
+        let draft = PageDraft {
+            page_name,
+            markdown: format!("# {question}\n\n{answer}"),
+            links: citations,
+        };
+        let session = IngestSession::from_drafts(
+            subject.id,
+            &subject.name,
+            SourceKind::Note,
+            "묻기 답변",
+            vec![draft],
+        );
         let (id, shared) = self.register(session);
         let guard = lock(&shared);
         self.ingest_view(Some(&id), &guard)
@@ -693,23 +927,28 @@ impl WikiService {
 /// The wiki subject a plan's free-text subject belongs to: same name ignoring case, else same
 /// folder name. Archived subjects do not match.
 pub fn subject_for_plan(conn: &Connection, plan_subject: &str) -> AppResult<Option<SubjectRow>> {
-    let name = plan_subject.split_whitespace().collect::<Vec<_>>().join(" ");
+    let name = plan_subject
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     if name.is_empty() {
         return Ok(None);
     }
     if let Some(row) = repo::find_active_subject_by_name(conn, &name)? {
         return Ok(Some(row));
     }
-    let Ok(slug) = names::subject_slug(&name) else { return Ok(None) };
+    let Ok(slug) = names::subject_slug(&name) else {
+        return Ok(None);
+    };
     Ok(repo::find_subject_by_slug(conn, &slug)?.filter(|row| row.archived_at_ms.is_none()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::config::{update_setting, LlmSettingKey};
+    use crate::llm::config::{LlmSettingKey, update_setting};
     use crate::llm::mock::MockStep;
-    use crate::llm::service::tests::{mock_harness, Harness};
+    use crate::llm::service::tests::{Harness, mock_harness};
     use crate::settings::SettingValue;
     use crate::testutil::TempDir;
     use crate::wiki::pdf::NoPdfExtractor;
@@ -725,9 +964,20 @@ mod tests {
         {
             let mut conn = h.db.lock().expect("db");
             let root = dir.path().join("wiki");
-            update_setting(&mut conn, LlmSettingKey::WikiDir, SettingValue::Text(root.to_string_lossy().into_owned()), 1).expect("dir");
+            update_setting(
+                &mut conn,
+                LlmSettingKey::WikiDir,
+                SettingValue::Text(root.to_string_lossy().into_owned()),
+                1,
+            )
+            .expect("dir");
         }
-        let wiki = WikiService::new(Arc::clone(&h.db), Arc::clone(&h.service), h.clock.clone(), Arc::new(NoPdfExtractor));
+        let wiki = WikiService::new(
+            Arc::clone(&h.db),
+            Arc::clone(&h.service),
+            h.clock.clone(),
+            Arc::new(NoPdfExtractor),
+        );
         Rig { h, wiki, dir }
     }
 
@@ -740,13 +990,27 @@ mod tests {
         let h = mock_harness();
         {
             let mut conn = h.db.lock().expect("db");
-            update_setting(&mut conn, LlmSettingKey::Enabled, SettingValue::Bool(false), 2).expect("off");
+            update_setting(
+                &mut conn,
+                LlmSettingKey::Enabled,
+                SettingValue::Bool(false),
+                2,
+            )
+            .expect("off");
         }
         rig_with(h)
     }
 
     fn page_on_disk(r: &Rig, subject: &SubjectView, page: &str) -> Option<String> {
-        std::fs::read_to_string(r.dir.path().join("wiki").join(&subject.slug).join("pages").join(format!("{page}.md"))).ok()
+        std::fs::read_to_string(
+            r.dir
+                .path()
+                .join("wiki")
+                .join(&subject.slug)
+                .join("pages")
+                .join(format!("{page}.md")),
+        )
+        .ok()
     }
 
     #[test]
@@ -755,15 +1019,32 @@ mod tests {
         let math = r.wiki.create_subject("  수학   기초 ").expect("create");
         assert_eq!(math.name, "수학 기초");
         assert!(!math.folder_missing);
-        assert!(r.wiki.create_subject("수학 기초").is_err(), "same folder name twice");
+        assert!(
+            r.wiki.create_subject("수학 기초").is_err(),
+            "same folder name twice"
+        );
         assert!(r.wiki.create_subject("   ").is_err());
-        assert!(r.wiki.create_subject("..").is_err(), "path-like names are refused");
+        assert!(
+            r.wiki.create_subject("..").is_err(),
+            "path-like names are refused"
+        );
         let archived = r.wiki.set_archived(math.id, true).expect("archive");
         assert!(archived.archived_at_ms.is_some());
         assert!(r.wiki.list_subjects(false).expect("list").is_empty());
         assert_eq!(r.wiki.list_subjects(true).expect("list").len(), 1);
-        assert!(r.wiki.ingest_text(math.id, SourceKind::Paste, "", "# a\nb").is_err(), "archived subjects take no material");
-        assert!(r.wiki.set_archived(math.id, false).expect("restore").archived_at_ms.is_none());
+        assert!(
+            r.wiki
+                .ingest_text(math.id, SourceKind::Paste, "", "# a\nb")
+                .is_err(),
+            "archived subjects take no material"
+        );
+        assert!(
+            r.wiki
+                .set_archived(math.id, false)
+                .expect("restore")
+                .archived_at_ms
+                .is_none()
+        );
     }
 
     #[test]
@@ -772,8 +1053,15 @@ mod tests {
         let first = r.wiki.ensure_subject("물리").expect("ensure");
         assert_eq!(r.wiki.ensure_subject("물리").expect("again").id, first.id);
         r.wiki.set_archived(first.id, true).expect("archive");
-        assert!(r.wiki.ensure_subject("물리").expect("restore").archived_at_ms.is_none());
-        std::fs::remove_dir_all(r.dir.path().join("wiki").join(&first.slug)).expect("delete folder");
+        assert!(
+            r.wiki
+                .ensure_subject("물리")
+                .expect("restore")
+                .archived_at_ms
+                .is_none()
+        );
+        std::fs::remove_dir_all(r.dir.path().join("wiki").join(&first.slug))
+            .expect("delete folder");
         assert!(r.wiki.list_subjects(false).expect("list")[0].folder_missing);
         let rebuilt = r.wiki.ensure_subject("물리").expect("rebuild");
         assert!(!rebuilt.folder_missing);
@@ -784,42 +1072,106 @@ mod tests {
         let r = rig();
         let math = r.wiki.create_subject("수학").expect("create");
         crate::testutil::set_lock_for_test(&r.h.db.lock().expect("db"), true);
-        assert!(r.wiki.set_archived(math.id, true).is_err(), "the quiz bank must not shrink inside a locked block");
-        assert!(r.wiki.list_subjects(false).expect("list").iter().any(|s| s.id == math.id && s.archived_at_ms.is_none()));
+        assert!(
+            r.wiki.set_archived(math.id, true).is_err(),
+            "the quiz bank must not shrink inside a locked block"
+        );
+        assert!(
+            r.wiki
+                .list_subjects(false)
+                .expect("list")
+                .iter()
+                .any(|s| s.id == math.id && s.archived_at_ms.is_none())
+        );
         crate::testutil::set_lock_for_test(&r.h.db.lock().expect("db"), false);
-        r.wiki.set_archived(math.id, true).expect("archive when free");
+        r.wiki
+            .set_archived(math.id, true)
+            .expect("archive when free");
         crate::testutil::set_lock_for_test(&r.h.db.lock().expect("db"), true);
-        assert!(r.wiki.set_archived(math.id, false).expect("restoring only grows the bank").archived_at_ms.is_none());
+        assert!(
+            r.wiki
+                .set_archived(math.id, false)
+                .expect("restoring only grows the bank")
+                .archived_at_ms
+                .is_none()
+        );
     }
 
     #[test]
     fn a_plan_subject_finds_its_wiki_subject() {
         let r = rig();
         let subject = r.wiki.create_subject("Linear Algebra").expect("create");
-        assert_eq!(r.wiki.subject_for_plan(" linear  algebra ").expect("find").map(|s| s.id), Some(subject.id));
+        assert_eq!(
+            r.wiki
+                .subject_for_plan(" linear  algebra ")
+                .expect("find")
+                .map(|s| s.id),
+            Some(subject.id)
+        );
         assert!(r.wiki.subject_for_plan("other").expect("find").is_none());
         r.wiki.set_archived(subject.id, true).expect("archive");
-        assert!(r.wiki.subject_for_plan("Linear Algebra").expect("find").is_none());
+        assert!(
+            r.wiki
+                .subject_for_plan("Linear Algebra")
+                .expect("find")
+                .is_none()
+        );
     }
 
     #[test]
     fn ingest_previews_first_and_writes_only_on_apply() {
         let r = rig();
         let s = r.wiki.create_subject("수학").expect("create");
-        let view = r.wiki.ingest_text(s.id, SourceKind::Paste, "", "# 미분\n도함수는 변화율이다.\n# 적분\n넓이를 구한다.").expect("ingest");
+        let view = r
+            .wiki
+            .ingest_text(
+                s.id,
+                SourceKind::Paste,
+                "",
+                "# 미분\n도함수는 변화율이다.\n# 적분\n넓이를 구한다.",
+            )
+            .expect("ingest");
         assert_eq!(view.status, "ready");
         assert!(!view.used_fallback);
-        assert_eq!(view.proposals.iter().map(|p| p.page_name.as_str()).collect::<Vec<_>>(), ["미분", "적분"]);
-        assert!(page_on_disk(&r, &s, "미분").is_none(), "a preview writes nothing");
+        assert_eq!(
+            view.proposals
+                .iter()
+                .map(|p| p.page_name.as_str())
+                .collect::<Vec<_>>(),
+            ["미분", "적분"]
+        );
+        assert!(
+            page_on_disk(&r, &s, "미분").is_none(),
+            "a preview writes nothing"
+        );
         let id = view.preview_id.expect("preview id");
-        let report = r.wiki.apply_ingest(&id, Some(vec!["미분".into(), "없는 페이지".into()])).expect("apply");
+        let report = r
+            .wiki
+            .apply_ingest(&id, Some(vec!["미분".into(), "없는 페이지".into()]))
+            .expect("apply");
         assert_eq!(report.written.len(), 1);
-        assert_eq!(report.skipped, vec![SkippedPage { page_name: "없는 페이지".into(), reason: "not_in_preview" }]);
-        assert!(page_on_disk(&r, &s, "미분").expect("page").contains("도함수"));
-        assert!(page_on_disk(&r, &s, "적분").is_none(), "unselected proposals are not written");
+        assert_eq!(
+            report.skipped,
+            vec![SkippedPage {
+                page_name: "없는 페이지".into(),
+                reason: "not_in_preview"
+            }]
+        );
+        assert!(
+            page_on_disk(&r, &s, "미분")
+                .expect("page")
+                .contains("도함수")
+        );
+        assert!(
+            page_on_disk(&r, &s, "적분").is_none(),
+            "unselected proposals are not written"
+        );
         assert_eq!(r.wiki.list_pages(s.id).expect("pages").len(), 1);
         assert_eq!(r.wiki.list_sources(s.id).expect("sources").len(), 1);
-        assert!(r.wiki.apply_ingest(&id, None).is_err(), "a preview is single-use");
+        assert!(
+            r.wiki.apply_ingest(&id, None).is_err(),
+            "a preview is single-use"
+        );
     }
 
     #[test]
@@ -827,9 +1179,17 @@ mod tests {
         let r = rig();
         let s = r.wiki.create_subject("수학").expect("create");
         let ingest = |text: &str| {
-            let view = r.wiki.ingest_text(s.id, SourceKind::Paste, "", text).expect("ingest");
+            let view = r
+                .wiki
+                .ingest_text(s.id, SourceKind::Paste, "", text)
+                .expect("ingest");
             let mode = view.proposals[0].mode;
-            (r.wiki.apply_ingest(&view.preview_id.expect("id"), None).expect("apply"), mode)
+            (
+                r.wiki
+                    .apply_ingest(&view.preview_id.expect("id"), None)
+                    .expect("apply"),
+                mode,
+            )
         };
         let (_, first_mode) = ingest("# 미분\n처음 내용");
         assert_eq!(first_mode, "create");
@@ -844,11 +1204,19 @@ mod tests {
     fn with_the_llm_off_the_local_import_still_proposes_pages_and_calls_nothing() {
         let r = rig_off();
         let s = r.wiki.create_subject("수학").expect("create");
-        let view = r.wiki.ingest_text(s.id, SourceKind::Note, "", "# 미분\n내용").expect("ingest");
+        let view = r
+            .wiki
+            .ingest_text(s.id, SourceKind::Note, "", "# 미분\n내용")
+            .expect("ingest");
         assert!(view.used_fallback);
         assert_eq!(view.status, "ready");
         assert_eq!(r.h.remote.mock_llm().call_count(), 0);
-        let rows: i64 = r.h.db.lock().expect("db").query_row("SELECT COUNT(*) FROM llm_usage", [], |row| row.get(0)).expect("count");
+        let rows: i64 =
+            r.h.db
+                .lock()
+                .expect("db")
+                .query_row("SELECT COUNT(*) FROM llm_usage", [], |row| row.get(0))
+                .expect("count");
         assert_eq!(rows, 0);
     }
 
@@ -856,10 +1224,26 @@ mod tests {
     fn a_bare_link_is_refused_but_a_link_with_a_memo_is_taken() {
         let r = rig();
         let s = r.wiki.create_subject("수학").expect("create");
-        assert!(r.wiki.ingest_text(s.id, SourceKind::Link, "", " https://example.com/page ").is_err());
-        let view = r.wiki.ingest_text(s.id, SourceKind::Link, "강의", "https://example.com 강의 요약\n미분의 정의").expect("memo");
+        assert!(
+            r.wiki
+                .ingest_text(s.id, SourceKind::Link, "", " https://example.com/page ")
+                .is_err()
+        );
+        let view = r
+            .wiki
+            .ingest_text(
+                s.id,
+                SourceKind::Link,
+                "강의",
+                "https://example.com 강의 요약\n미분의 정의",
+            )
+            .expect("memo");
         assert_eq!(view.status, "ready");
-        assert!(r.wiki.ingest_text(s.id, SourceKind::Paste, "", "   ").is_err());
+        assert!(
+            r.wiki
+                .ingest_text(s.id, SourceKind::Paste, "", "   ")
+                .is_err()
+        );
         assert!(r.wiki.ingest_text(s.id, SourceKind::Pdf, "", "x").is_err());
     }
 
@@ -874,18 +1258,39 @@ mod tests {
         std::fs::write(src.join("c.pdf"), b"%PDF-1.4").expect("write");
         std::fs::write(src.join("d.bin"), [0u8, 1]).expect("write");
         std::fs::write(src.join("e.md"), [0xffu8, 0xfe]).expect("write");
-        let view = r.wiki.ingest_folder(s.id, &src.to_string_lossy()).expect("folder");
+        let view = r
+            .wiki
+            .ingest_folder(s.id, &src.to_string_lossy())
+            .expect("folder");
         assert_eq!(view.status, "ready");
-        let reasons: Vec<(&str, &str)> = view.skipped.iter().map(|f| (f.name.as_str(), f.reason)).collect();
+        let reasons: Vec<(&str, &str)> = view
+            .skipped
+            .iter()
+            .map(|f| (f.name.as_str(), f.reason))
+            .collect();
         assert!(reasons.contains(&("e.md", "not_text")), "{reasons:?}");
-        assert!(reasons.iter().any(|(n, _)| *n == "c.pdf"), "an unreadable PDF is listed, not fatal: {reasons:?}");
-        assert!(!reasons.iter().any(|(n, _)| *n == "d.bin"), "other file types are ignored silently");
+        assert!(
+            reasons.iter().any(|(n, _)| *n == "c.pdf"),
+            "an unreadable PDF is listed, not fatal: {reasons:?}"
+        );
+        assert!(
+            !reasons.iter().any(|(n, _)| *n == "d.bin"),
+            "other file types are ignored silently"
+        );
 
-        let one = r.wiki.ingest_file(s.id, &src.join("c.pdf").to_string_lossy()).expect("pdf file");
+        let one = r
+            .wiki
+            .ingest_file(s.id, &src.join("c.pdf").to_string_lossy())
+            .expect("pdf file");
         assert_eq!(one.status, "unsupported");
         assert_eq!(one.skipped.len(), 1);
         assert!(r.wiki.ingest_file(s.id, "relative.md").is_err());
-        assert!(r.wiki.ingest_folder(s.id, &src.join("a.md").to_string_lossy()).is_err(), "a file is not a folder");
+        assert!(
+            r.wiki
+                .ingest_folder(s.id, &src.join("a.md").to_string_lossy())
+                .is_err(),
+            "a file is not a folder"
+        );
     }
 
     #[test]
@@ -895,7 +1300,9 @@ mod tests {
         let view = r.wiki.outline(s.id).expect("outline");
         assert_eq!(view.status, "ready");
         assert_eq!(view.proposals.len(), 3);
-        r.wiki.apply_ingest(&view.preview_id.expect("id"), None).expect("apply");
+        r.wiki
+            .apply_ingest(&view.preview_id.expect("id"), None)
+            .expect("apply");
         assert_eq!(r.wiki.list_pages(s.id).expect("pages").len(), 3);
         assert!(r.wiki.list_sources(s.id).expect("sources").is_empty());
     }
@@ -904,8 +1311,13 @@ mod tests {
     fn a_bad_model_answer_is_rejected_and_nothing_is_proposed() {
         let r = rig();
         let s = r.wiki.create_subject("수학").expect("create");
-        r.h.remote.mock_llm().push(MockStep::Text("not json at all".into()));
-        let view = r.wiki.ingest_text(s.id, SourceKind::Paste, "", "# 미분\n내용").expect("ingest");
+        r.h.remote
+            .mock_llm()
+            .push(MockStep::Text("not json at all".into()));
+        let view = r
+            .wiki
+            .ingest_text(s.id, SourceKind::Paste, "", "# 미분\n내용")
+            .expect("ingest");
         assert_eq!(view.status, "empty");
         assert_eq!(view.rejected_steps, 1);
         assert!(view.proposals.is_empty());
@@ -915,19 +1327,49 @@ mod tests {
     fn ask_answers_with_citations_from_the_retrieved_pages_only() {
         let r = rig();
         let s = r.wiki.create_subject("수학").expect("create");
-        let view = r.wiki.ingest_text(s.id, SourceKind::Paste, "", "# 미분\n도함수는 변화율이다.\n# 적분\n넓이를 구한다.").expect("ingest");
-        r.wiki.apply_ingest(&view.preview_id.expect("id"), None).expect("apply");
+        let view = r
+            .wiki
+            .ingest_text(
+                s.id,
+                SourceKind::Paste,
+                "",
+                "# 미분\n도함수는 변화율이다.\n# 적분\n넓이를 구한다.",
+            )
+            .expect("ingest");
+        r.wiki
+            .apply_ingest(&view.preview_id.expect("id"), None)
+            .expect("apply");
         match r.wiki.ask(s.id, "미분 도함수").expect("ask") {
-            AskOutcome::Answer { citations, answer, .. } => {
+            AskOutcome::Answer {
+                citations, answer, ..
+            } => {
                 assert!(citations.contains(&"미분".to_string()), "{citations:?}");
                 assert!(!answer.is_empty());
             }
             other => panic!("unexpected {other:?}"),
         }
-        let sent = r.h.remote.mock_llm().calls().into_iter().filter(|c| c.purpose == Purpose::WikiAsk).count();
+        let sent =
+            r.h.remote
+                .mock_llm()
+                .calls()
+                .into_iter()
+                .filter(|c| c.purpose == Purpose::WikiAsk)
+                .count();
         assert_eq!(sent, 1);
-        assert!(matches!(r.wiki.ask(s.id, "전혀 무관한 양자역학 질문").expect("ask"), AskOutcome::NotInWiki { .. }));
-        assert_eq!(r.h.remote.mock_llm().calls().into_iter().filter(|c| c.purpose == Purpose::WikiAsk).count(), 1, "no match means no model call");
+        assert!(matches!(
+            r.wiki.ask(s.id, "전혀 무관한 양자역학 질문").expect("ask"),
+            AskOutcome::NotInWiki { .. }
+        ));
+        assert_eq!(
+            r.h.remote
+                .mock_llm()
+                .calls()
+                .into_iter()
+                .filter(|c| c.purpose == Purpose::WikiAsk)
+                .count(),
+            1,
+            "no match means no model call"
+        );
         assert!(r.wiki.ask(s.id, "  ").is_err());
     }
 
@@ -935,14 +1377,23 @@ mod tests {
     fn an_ungrounded_or_unavailable_answer_falls_back_to_the_matching_pages() {
         let r = rig();
         let s = r.wiki.create_subject("수학").expect("create");
-        let view = r.wiki.ingest_text(s.id, SourceKind::Paste, "", "# 미분\n도함수는 변화율이다.").expect("ingest");
-        r.wiki.apply_ingest(&view.preview_id.expect("id"), None).expect("apply");
-        r.h.remote.mock_llm().push(MockStep::Text(r#"{"answer":"지어낸 답","citations":["없는 페이지"]}"#.into()));
+        let view = r
+            .wiki
+            .ingest_text(s.id, SourceKind::Paste, "", "# 미분\n도함수는 변화율이다.")
+            .expect("ingest");
+        r.wiki
+            .apply_ingest(&view.preview_id.expect("id"), None)
+            .expect("apply");
+        r.h.remote.mock_llm().push(MockStep::Text(
+            r#"{"answer":"지어낸 답","citations":["없는 페이지"]}"#.into(),
+        ));
         match r.wiki.ask(s.id, "미분 도함수").expect("ask") {
             AskOutcome::Ungrounded { matches } => assert_eq!(matches[0].page_name, "미분"),
             other => panic!("unexpected {other:?}"),
         }
-        r.h.remote.mock_llm().push(MockStep::Fail(crate::llm::LlmError::Overloaded));
+        r.h.remote
+            .mock_llm()
+            .push(MockStep::Fail(crate::llm::LlmError::Overloaded));
         match r.wiki.ask(s.id, "미분 도함수").expect("ask") {
             AskOutcome::Unavailable { code, matches } => {
                 assert_eq!(code, "llm_overloaded");
@@ -956,13 +1407,27 @@ mod tests {
     fn a_saved_answer_is_a_preview_like_any_other_ingest() {
         let r = rig();
         let s = r.wiki.create_subject("수학").expect("create");
-        let view = r.wiki.ingest_text(s.id, SourceKind::Paste, "", "# 미분\n도함수는 변화율이다.").expect("ingest");
-        r.wiki.apply_ingest(&view.preview_id.expect("id"), None).expect("apply");
-        let AskOutcome::Answer { ask_id, .. } = r.wiki.ask(s.id, "미분 도함수").expect("ask") else { panic!("no answer") };
+        let view = r
+            .wiki
+            .ingest_text(s.id, SourceKind::Paste, "", "# 미분\n도함수는 변화율이다.")
+            .expect("ingest");
+        r.wiki
+            .apply_ingest(&view.preview_id.expect("id"), None)
+            .expect("apply");
+        let AskOutcome::Answer { ask_id, .. } = r.wiki.ask(s.id, "미분 도함수").expect("ask")
+        else {
+            panic!("no answer")
+        };
         let preview = r.wiki.save_answer_preview(&ask_id).expect("preview");
         assert_eq!(preview.proposals.len(), 1);
-        assert_eq!(r.wiki.list_pages(s.id).expect("pages").len(), 1, "nothing is written by the preview");
-        r.wiki.apply_ingest(&preview.preview_id.expect("id"), None).expect("apply");
+        assert_eq!(
+            r.wiki.list_pages(s.id).expect("pages").len(),
+            1,
+            "nothing is written by the preview"
+        );
+        r.wiki
+            .apply_ingest(&preview.preview_id.expect("id"), None)
+            .expect("apply");
         assert_eq!(r.wiki.list_pages(s.id).expect("pages").len(), 2);
         assert!(r.wiki.save_answer_preview("unknown").is_err());
     }
@@ -971,7 +1436,10 @@ mod tests {
     fn cancelling_a_preview_discards_it() {
         let r = rig();
         let s = r.wiki.create_subject("수학").expect("create");
-        let view = r.wiki.ingest_text(s.id, SourceKind::Paste, "", "# 미분\n내용").expect("ingest");
+        let view = r
+            .wiki
+            .ingest_text(s.id, SourceKind::Paste, "", "# 미분\n내용")
+            .expect("ingest");
         let id = view.preview_id.expect("id");
         r.wiki.cancel(&id);
         assert!(r.wiki.apply_ingest(&id, None).is_err());
@@ -980,8 +1448,12 @@ mod tests {
 
     #[test]
     fn wire_shapes_match_the_shared_fixture() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../src/api/fixtures/wiki-contract.json");
-        let expected: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../src/api/fixtures/wiki-contract.json"
+        );
+        let expected: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
         let actual = serde_json::json!({
             "subject": SubjectView { id: 1, slug: "math".into(), name: "Math".into(), archived_at_ms: None, created_at_ms: 1_773_000_000_000, page_count: 2, folder_missing: false },
             "page": PageRow { id: 5, subject_id: 1, page_name: "Derivative".into(), rel_path: "math/pages/Derivative.md".into(), content_hash: "00ff".into(), updated_at_ms: 1_773_000_001_000, quiz_total: 0, quiz_correct: 0 },

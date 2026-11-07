@@ -127,7 +127,12 @@ pub struct WirePage {
 
 impl std::fmt::Debug for WirePage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "WirePage({}, {} revisions)", self.page_id, self.revisions.len())
+        write!(
+            f,
+            "WirePage({}, {} revisions)",
+            self.page_id,
+            self.revisions.len()
+        )
     }
 }
 

@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
 
-use super::http::{HttpRequest, HttpResponse, HttpTransport, TransportError};
 use super::Clock;
+use super::http::{HttpRequest, HttpResponse, HttpTransport, TransportError};
 use crate::store::remote::{self as events, NewRemoteEvent};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,12 +69,18 @@ pub struct AuditedTransport {
 }
 
 impl AuditedTransport {
-    pub fn new(inner: Arc<dyn HttpTransport>, sink: Arc<dyn EventSink>, clock: Arc<dyn Clock>) -> Self {
+    pub fn new(
+        inner: Arc<dyn HttpTransport>,
+        sink: Arc<dyn EventSink>,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
         Self { inner, sink, clock }
     }
 }
 
-fn classify(result: &Result<HttpResponse, TransportError>) -> (&'static str, Option<u16>, Option<&'static str>) {
+fn classify(
+    result: &Result<HttpResponse, TransportError>,
+) -> (&'static str, Option<u16>, Option<&'static str>) {
     match result {
         Ok(response) if response.is_success() => ("ok", Some(response.status), None),
         Ok(response) if response.status == 429 => ("rate_limited", Some(response.status), None),
@@ -87,7 +93,10 @@ fn classify(result: &Result<HttpResponse, TransportError>) -> (&'static str, Opt
 impl HttpTransport for AuditedTransport {
     fn send(&self, request: HttpRequest) -> Result<HttpResponse, TransportError> {
         let tag = request.tag;
-        let sent = request.body.as_ref().map_or(0, |b| i64::try_from(b.len()).unwrap_or(i64::MAX));
+        let sent = request
+            .body
+            .as_ref()
+            .map_or(0, |b| i64::try_from(b.len()).unwrap_or(i64::MAX));
         let result = self.inner.send(request);
         let (outcome, http_status, detail_code) = classify(&result);
         match self.clock.now_ms() {
@@ -109,9 +118,9 @@ impl HttpTransport for AuditedTransport {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::remote::ManualClock;
     use crate::remote::http::{HostPolicy, Method, RequestTag, ScriptedTransport};
     use crate::remote::payload::{Body, RefreshRequest};
-    use crate::remote::ManualClock;
 
     #[derive(Default)]
     pub(crate) struct VecSink(pub Mutex<Vec<EgressRecord>>);
@@ -135,19 +144,43 @@ pub(crate) mod tests {
         ));
         let sink = Arc::new(VecSink::default());
         let audited = AuditedTransport::new(scripted, sink.clone(), Arc::new(ManualClock::new(77)));
-        let tag = RequestTag { port: "supabase", kind: "auth_refresh" };
-        let body = Body::from_payload(&RefreshRequest { refresh_token: "REFRESHSECRET".into() }).expect("body");
-        let first = HttpRequest::new(tag, Method::Post, "http://127.0.0.1:1/x".into()).with_body(body);
+        let tag = RequestTag {
+            port: "supabase",
+            kind: "auth_refresh",
+        };
+        let body = Body::from_payload(&RefreshRequest {
+            refresh_token: "REFRESHSECRET".into(),
+        })
+        .expect("body");
+        let first =
+            HttpRequest::new(tag, Method::Post, "http://127.0.0.1:1/x".into()).with_body(body);
         assert!(audited.send(first).is_ok());
         for _ in 0..3 {
-            let _ = audited.send(HttpRequest::new(tag, Method::Get, "http://127.0.0.1:1/x".into()));
+            let _ = audited.send(HttpRequest::new(
+                tag,
+                Method::Get,
+                "http://127.0.0.1:1/x".into(),
+            ));
         }
-        let denied = audited.send(HttpRequest::new(tag, Method::Get, "https://example.com/x".into()));
+        let denied = audited.send(HttpRequest::new(
+            tag,
+            Method::Get,
+            "https://example.com/x".into(),
+        ));
         assert_eq!(denied, Err(TransportError::HostDenied));
 
         let records = sink.0.lock().expect("records").clone();
         let outcomes: Vec<&str> = records.iter().map(|r| r.outcome).collect();
-        assert_eq!(outcomes, ["ok", "rate_limited", "http_error", "transport_error", "host_denied"]);
+        assert_eq!(
+            outcomes,
+            [
+                "ok",
+                "rate_limited",
+                "http_error",
+                "transport_error",
+                "host_denied"
+            ]
+        );
         assert!(records[0].bytes > 0 && records[0].at_ms == 77);
         let dump = format!("{records:?}");
         assert!(!dump.contains("REFRESHSECRET"));
@@ -169,6 +202,9 @@ pub(crate) mod tests {
         });
         let conn = db.lock().expect("lock");
         let rows = events::list_events(&conn, 10).expect("rows");
-        assert_eq!((rows[0].kind.as_str(), rows[0].bytes), ("rpc_heartbeat", 42));
+        assert_eq!(
+            (rows[0].kind.as_str(), rows[0].bytes),
+            ("rpc_heartbeat", 42)
+        );
     }
 }

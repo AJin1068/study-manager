@@ -166,7 +166,10 @@ impl LlmError {
     /// The caller should fall back to its local behavior without surfacing a failure: the LLM is
     /// off, unconfigured, or out of budget on purpose.
     pub fn is_unavailable(self) -> bool {
-        matches!(self, LlmError::NotConfigured | LlmError::Disabled | LlmError::BudgetExceeded)
+        matches!(
+            self,
+            LlmError::NotConfigured | LlmError::Disabled | LlmError::BudgetExceeded
+        )
     }
 }
 
@@ -175,9 +178,10 @@ impl From<TransportError> for LlmError {
         match err {
             TransportError::HostDenied | TransportError::InvalidUrl => LlmError::HostDenied,
             TransportError::Timeout => LlmError::Timeout,
-            TransportError::Connect | TransportError::Io | TransportError::ResponseTooLarge | TransportError::ScriptExhausted => {
-                LlmError::Unreachable
-            }
+            TransportError::Connect
+            | TransportError::Io
+            | TransportError::ResponseTooLarge
+            | TransportError::ScriptExhausted => LlmError::Unreachable,
         }
     }
 }
@@ -236,18 +240,35 @@ mod tests {
 
     #[test]
     fn only_screen_describing_purposes_need_the_judge_consent() {
-        let needing: Vec<_> = Purpose::ALL.iter().filter(|p| p.needs_judge_consent()).collect();
+        let needing: Vec<_> = Purpose::ALL
+            .iter()
+            .filter(|p| p.needs_judge_consent())
+            .collect();
         assert_eq!(needing, [&Purpose::TabJudge, &Purpose::WindowClassify]);
     }
 
     #[test]
     fn errors_have_stable_codes_and_never_echo_content() {
         assert_eq!(LlmError::from(TransportError::Timeout), LlmError::Timeout);
-        assert_eq!(LlmError::from(TransportError::HostDenied).code(), "llm_host_denied");
-        assert!(LlmError::RateLimited { retry_after_ms: Some(1) }.is_retryable());
+        assert_eq!(
+            LlmError::from(TransportError::HostDenied).code(),
+            "llm_host_denied"
+        );
+        assert!(
+            LlmError::RateLimited {
+                retry_after_ms: Some(1)
+            }
+            .is_retryable()
+        );
         assert!(!LlmError::Unauthorized.is_retryable());
         assert!(LlmError::BudgetExceeded.is_unavailable() && !LlmError::Timeout.is_unavailable());
-        assert!(matches!(AppError::from(LlmError::NotConfigured), AppError::NotConfigured { port: "llm" }));
-        assert_eq!(AppError::from(LlmError::Overloaded).to_string(), "remote error: llm_overloaded");
+        assert!(matches!(
+            AppError::from(LlmError::NotConfigured),
+            AppError::NotConfigured { port: "llm" }
+        ));
+        assert_eq!(
+            AppError::from(LlmError::Overloaded).to_string(),
+            "remote error: llm_overloaded"
+        );
     }
 }

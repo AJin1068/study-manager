@@ -74,7 +74,13 @@ pub enum Context {
 
 impl Context {
     #[cfg(test)]
-    pub const ALL: [Context; 5] = [Context::Distraction, Context::Release, Context::SessionEnd, Context::Checkin, Context::Review];
+    pub const ALL: [Context; 5] = [
+        Context::Distraction,
+        Context::Release,
+        Context::SessionEnd,
+        Context::Checkin,
+        Context::Review,
+    ];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -115,6 +121,11 @@ impl QuizItem {
     pub fn view(&self, seed: u64) -> QuizQuestion {
         let mut choices = self.choices.clone();
         choices.sort_by_key(|c| select::mix(seed ^ select::hash_str(c)));
-        QuizQuestion { item_id: self.id, kind: self.kind, prompt: self.prompt.clone(), choices }
+        QuizQuestion {
+            item_id: self.id,
+            kind: self.kind,
+            prompt: self.prompt.clone(),
+            choices,
+        }
     }
 }

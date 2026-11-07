@@ -32,20 +32,26 @@ fn phone_view(app: State<'_, Arc<PhoneApp>>) -> PhoneView {
 #[tauri::command]
 async fn phone_poll_now(app: State<'_, Arc<PhoneApp>>) -> Result<PhoneView, String> {
     let app = app.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || app.tick()).await.map_err(|_| "poll_failed".to_string())
+    tauri::async_runtime::spawn_blocking(move || app.tick())
+        .await
+        .map_err(|_| "poll_failed".to_string())
 }
 
 /// `text` is what the QR scanner read; it is parsed as a pairing offer, nothing else.
 #[tauri::command]
 async fn phone_pair(app: State<'_, Arc<PhoneApp>>, text: String) -> Result<Ack, String> {
     let app = app.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || app.pair(&text)).await.map_err(|_| "pair_failed".to_string())
+    tauri::async_runtime::spawn_blocking(move || app.pair(&text))
+        .await
+        .map_err(|_| "pair_failed".to_string())
 }
 
 #[tauri::command]
 async fn phone_unpair(app: State<'_, Arc<PhoneApp>>) -> Result<Ack, String> {
     let app = app.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || app.unpair()).await.map_err(|_| "unpair_failed".to_string())
+    tauri::async_runtime::spawn_blocking(move || app.unpair())
+        .await
+        .map_err(|_| "unpair_failed".to_string())
 }
 
 /// Forwarded by the webview from the plugin event channel (`addPluginListener('blocker', ...)`).
@@ -91,7 +97,12 @@ pub fn run() {
     let result = builder
         .setup(move |tauri_app| {
             let dir = tauri_app.path().app_local_data_dir()?;
-            let phone = Arc::new(PhoneApp::new(dir, Arc::new(net::UreqTransport::new()), Arc::new(clock::BootClock::new()), Arc::new(slot)));
+            let phone = Arc::new(PhoneApp::new(
+                dir,
+                Arc::new(net::UreqTransport::new()),
+                Arc::new(clock::BootClock::new()),
+                Arc::new(slot),
+            ));
             tauri_app.manage(phone.clone());
             let handle = tauri_app.handle().clone();
             std::thread::spawn(move || {

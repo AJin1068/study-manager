@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::lease::{accept_lease, LeaseReceipt, LeaseReject, LeaseState, LockLease, ReleaseCause};
+use crate::lease::{LeaseReceipt, LeaseReject, LeaseState, LockLease, ReleaseCause, accept_lease};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -48,16 +48,24 @@ pub enum PhoneLock {
 /// is still locked and `elapsed == remaining` is free.
 pub fn lock_decision(receipt: &LeaseReceipt, mono_elapsed_ms: i64) -> PhoneLock {
     if mono_elapsed_ms < 0 {
-        return PhoneLock::Free { reason: FreeReason::ClockInvalid };
+        return PhoneLock::Free {
+            reason: FreeReason::ClockInvalid,
+        };
     }
     let lease = receipt.lease();
     match (lease.state, lease.release_cause) {
-        (LeaseState::Free, Some(cause)) => PhoneLock::Free { reason: cause.into() },
+        (LeaseState::Free, Some(cause)) => PhoneLock::Free {
+            reason: cause.into(),
+        },
         // A validated free lease always has a cause; reaching here means it was built by hand.
-        (LeaseState::Free, None) => PhoneLock::Free { reason: FreeReason::NoLease },
+        (LeaseState::Free, None) => PhoneLock::Free {
+            reason: FreeReason::NoLease,
+        },
         (LeaseState::Locked, _) => {
             if mono_elapsed_ms >= receipt.remaining_at_receipt_ms() {
-                PhoneLock::Free { reason: FreeReason::LeaseExpired }
+                PhoneLock::Free {
+                    reason: FreeReason::LeaseExpired,
+                }
             } else {
                 PhoneLock::Locked
             }
@@ -88,9 +96,15 @@ impl LeaseHolder {
 
     /// Takes a lease fetched from the server. A stale, repeated or invalid lease changes nothing
     /// and is remembered for the diagnostics screen.
-    pub fn offer(&mut self, lease: LockLease, server_now_ms: i64, mono_now_ms: i64) -> Result<(), LeaseReject> {
+    pub fn offer(
+        &mut self,
+        lease: LockLease,
+        server_now_ms: i64,
+        mono_now_ms: i64,
+    ) -> Result<(), LeaseReject> {
         let current = self.held.as_ref().map(|(receipt, _)| receipt.lease());
-        let verdict = accept_lease(current, &lease).and_then(|()| LeaseReceipt::new(lease, server_now_ms).map_err(LeaseReject::Invalid));
+        let verdict = accept_lease(current, &lease)
+            .and_then(|()| LeaseReceipt::new(lease, server_now_ms).map_err(LeaseReject::Invalid));
         match verdict {
             Ok(receipt) => {
                 self.held = Some((receipt, mono_now_ms));
@@ -120,11 +134,17 @@ impl LeaseHolder {
 
     pub fn decide(&self, mono_now_ms: i64) -> PhoneLock {
         if self.pair_revoked {
-            return PhoneLock::Free { reason: FreeReason::PairRevoked };
+            return PhoneLock::Free {
+                reason: FreeReason::PairRevoked,
+            };
         }
         match &self.held {
-            None => PhoneLock::Free { reason: FreeReason::NoLease },
-            Some((receipt, received_at)) => lock_decision(receipt, mono_now_ms.saturating_sub(*received_at)),
+            None => PhoneLock::Free {
+                reason: FreeReason::NoLease,
+            },
+            Some((receipt, received_at)) => {
+                lock_decision(receipt, mono_now_ms.saturating_sub(*received_at))
+            }
         }
     }
 
@@ -136,7 +156,8 @@ impl LeaseHolder {
     pub fn remaining_ms(&self, mono_now_ms: i64) -> Option<i64> {
         let (receipt, received_at) = self.held.as_ref().filter(|_| !self.pair_revoked)?;
         let elapsed = mono_now_ms.saturating_sub(*received_at);
-        (lock_decision(receipt, elapsed) == PhoneLock::Locked).then(|| receipt.remaining_at_receipt_ms() - elapsed)
+        (lock_decision(receipt, elapsed) == PhoneLock::Locked)
+            .then(|| receipt.remaining_at_receipt_ms() - elapsed)
     }
 
     /// The newest rejections (at most [`MAX_REJECTED_KEPT`]), oldest first.

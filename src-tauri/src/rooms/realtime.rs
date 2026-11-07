@@ -17,7 +17,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::feed::PollingFeed;
 
@@ -64,13 +64,24 @@ impl Frame {
         }
         let value: Value = serde_json::from_str(text).map_err(|_| RealtimeError::Malformed)?;
         let object = value.as_object().ok_or(RealtimeError::Malformed)?;
-        let text_field = |key: &str| object.get(key).and_then(Value::as_str).map(str::to_string).ok_or(RealtimeError::Malformed);
+        let text_field = |key: &str| {
+            object
+                .get(key)
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .ok_or(RealtimeError::Malformed)
+        };
         let msg_ref = match object.get("ref") {
             None | Some(Value::Null) => None,
             Some(Value::String(s)) => Some(s.clone()),
             Some(_) => return Err(RealtimeError::Malformed),
         };
-        Ok(Frame { topic: text_field("topic")?, event: text_field("event")?, payload: object.get("payload").cloned().unwrap_or(Value::Null), msg_ref })
+        Ok(Frame {
+            topic: text_field("topic")?,
+            event: text_field("event")?,
+            payload: object.get("payload").cloned().unwrap_or(Value::Null),
+            msg_ref,
+        })
     }
 }
 
@@ -80,12 +91,19 @@ pub fn room_topic(room_id: &str) -> String {
 }
 
 fn valid_room_id(room_id: &str) -> bool {
-    (8..=64).contains(&room_id.len()) && room_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    (8..=64).contains(&room_id.len())
+        && room_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 
 /// Joins a room's channel. Subscribes to row changes of the member list (filtered to the room) and
 /// of member status (the server's row policy limits it to people the user may see).
-pub fn join_frame(room_id: &str, access_token: &str, msg_ref: &str) -> Result<Frame, RealtimeError> {
+pub fn join_frame(
+    room_id: &str,
+    access_token: &str,
+    msg_ref: &str,
+) -> Result<Frame, RealtimeError> {
     if !valid_room_id(room_id) {
         return Err(RealtimeError::Malformed);
     }
@@ -100,15 +118,30 @@ pub fn join_frame(room_id: &str, access_token: &str, msg_ref: &str) -> Result<Fr
         },
         "access_token": access_token,
     });
-    Ok(Frame { topic: room_topic(room_id), event: "phx_join".into(), payload, msg_ref: Some(msg_ref.into()) })
+    Ok(Frame {
+        topic: room_topic(room_id),
+        event: "phx_join".into(),
+        payload,
+        msg_ref: Some(msg_ref.into()),
+    })
 }
 
 pub fn leave_frame(room_id: &str, msg_ref: &str) -> Frame {
-    Frame { topic: room_topic(room_id), event: "phx_leave".into(), payload: json!({}), msg_ref: Some(msg_ref.into()) }
+    Frame {
+        topic: room_topic(room_id),
+        event: "phx_leave".into(),
+        payload: json!({}),
+        msg_ref: Some(msg_ref.into()),
+    }
 }
 
 pub fn heartbeat_frame(msg_ref: &str) -> Frame {
-    Frame { topic: "phoenix".into(), event: "heartbeat".into(), payload: json!({}), msg_ref: Some(msg_ref.into()) }
+    Frame {
+        topic: "phoenix".into(),
+        event: "heartbeat".into(),
+        payload: json!({}),
+        msg_ref: Some(msg_ref.into()),
+    }
 }
 
 /// What a session reports to the app.
@@ -148,7 +181,15 @@ pub struct RealtimeSession<T: RealtimeTransport> {
 
 impl<T: RealtimeTransport> RealtimeSession<T> {
     pub fn new(transport: T) -> Self {
-        Self { transport, state: SessionState::Idle, room_id: None, counter: 0, join_ref: None, last_heard_ms: 0, last_heartbeat_ms: 0 }
+        Self {
+            transport,
+            state: SessionState::Idle,
+            room_id: None,
+            counter: 0,
+            join_ref: None,
+            last_heard_ms: 0,
+            last_heartbeat_ms: 0,
+        }
     }
 
     pub fn state(&self) -> SessionState {
@@ -169,7 +210,12 @@ impl<T: RealtimeTransport> RealtimeSession<T> {
 
     /// Joins `room_id`'s channel (leaving the previous one). `access_token` is the user's session
     /// token; it goes only into the join frame.
-    pub fn open(&mut self, room_id: &str, access_token: &str, now_ms: i64) -> Result<(), RealtimeError> {
+    pub fn open(
+        &mut self,
+        room_id: &str,
+        access_token: &str,
+        now_ms: i64,
+    ) -> Result<(), RealtimeError> {
         self.close();
         let msg_ref = self.next_ref();
         let frame = join_frame(room_id, access_token, &msg_ref)?;
@@ -186,7 +232,9 @@ impl<T: RealtimeTransport> RealtimeSession<T> {
     pub fn close(&mut self) {
         if let Some(room_id) = self.room_id.take() {
             let msg_ref = self.next_ref();
-            let _ = self.transport.send(&leave_frame(&room_id, &msg_ref).encode());
+            let _ = self
+                .transport
+                .send(&leave_frame(&room_id, &msg_ref).encode());
         }
         self.join_ref = None;
         self.state = SessionState::Idle;
@@ -222,7 +270,11 @@ impl<T: RealtimeTransport> RealtimeSession<T> {
         } else if now_ms - self.last_heartbeat_ms >= HEARTBEAT_MS {
             self.last_heartbeat_ms = now_ms;
             let msg_ref = self.next_ref();
-            if self.transport.send(&heartbeat_frame(&msg_ref).encode()).is_err() {
+            if self
+                .transport
+                .send(&heartbeat_frame(&msg_ref).encode())
+                .is_err()
+            {
                 self.lose(&mut events);
             }
         }
@@ -230,7 +282,9 @@ impl<T: RealtimeTransport> RealtimeSession<T> {
     }
 
     fn handle(&mut self, frame: &Frame, events: &mut Vec<RealtimeEvent>) {
-        let Some(room_id) = self.room_id.clone() else { return };
+        let Some(room_id) = self.room_id.clone() else {
+            return;
+        };
         if frame.topic != room_topic(&room_id) {
             return; // heartbeat replies and other channels
         }
@@ -245,7 +299,11 @@ impl<T: RealtimeTransport> RealtimeSession<T> {
             }
             "phx_close" | "phx_error" => self.lose(events),
             // The row contents are ignored on purpose; the feed refetches through the RPCs.
-            "postgres_changes" | "broadcast" | "presence_diff" if self.state == SessionState::Joined => events.push(RealtimeEvent::RoomChanged),
+            "postgres_changes" | "broadcast" | "presence_diff"
+                if self.state == SessionState::Joined =>
+            {
+                events.push(RealtimeEvent::RoomChanged)
+            }
             _ => {}
         }
     }
@@ -310,7 +368,11 @@ impl RealtimeTransport for MemoryTransport {
 impl MemoryServer {
     /// Frames the client sent since the last call.
     pub fn take_received(&self) -> Vec<Frame> {
-        lock(&self.0).to_server.drain(..).filter_map(|t| Frame::decode(&t).ok()).collect()
+        lock(&self.0)
+            .to_server
+            .drain(..)
+            .filter_map(|t| Frame::decode(&t).ok())
+            .collect()
     }
 
     pub fn push(&self, frame: &Frame) {
@@ -327,7 +389,12 @@ impl MemoryServer {
 
     /// Answers a join the way the server does.
     pub fn accept_join(&self, join: &Frame) {
-        self.push(&Frame { topic: join.topic.clone(), event: "phx_reply".into(), payload: json!({"status": "ok", "response": {}}), msg_ref: join.msg_ref.clone() });
+        self.push(&Frame {
+            topic: join.topic.clone(),
+            event: "phx_reply".into(),
+            payload: json!({"status": "ok", "response": {}}),
+            msg_ref: join.msg_ref.clone(),
+        });
     }
 
     pub fn notify_change(&self, room_id: &str) {
@@ -345,7 +412,7 @@ mod tests {
     use super::*;
     use crate::rooms::feed::FeedSource;
     use crate::rooms::port::{RoomApi, RoomService};
-    use crate::rooms::testkit::{World, T0};
+    use crate::rooms::testkit::{T0, World};
 
     const ROOM: &str = "11111111-2222-4333-8444-555555555555";
 
@@ -372,14 +439,30 @@ mod tests {
 
     #[test]
     fn frames_round_trip_and_reject_malformed_input() {
-        let frame = Frame { topic: "t".into(), event: "e".into(), payload: json!({"a": 1}), msg_ref: Some("7".into()) };
+        let frame = Frame {
+            topic: "t".into(),
+            event: "e".into(),
+            payload: json!({"a": 1}),
+            msg_ref: Some("7".into()),
+        };
         assert_eq!(Frame::decode(&frame.encode()), Ok(frame));
-        let no_ref = Frame::decode(r#"{"topic":"t","event":"e","payload":{},"ref":null}"#).expect("null ref");
+        let no_ref = Frame::decode(r#"{"topic":"t","event":"e","payload":{},"ref":null}"#)
+            .expect("null ref");
         assert_eq!(no_ref.msg_ref, None);
-        for bad in ["", "[]", "{}", r#"{"topic":1,"event":"e"}"#, r#"{"topic":"t","event":"e","ref":5}"#, "not json"] {
+        for bad in [
+            "",
+            "[]",
+            "{}",
+            r#"{"topic":1,"event":"e"}"#,
+            r#"{"topic":"t","event":"e","ref":5}"#,
+            "not json",
+        ] {
             assert_eq!(Frame::decode(bad), Err(RealtimeError::Malformed), "{bad}");
         }
-        assert_eq!(Frame::decode(&" ".repeat(MAX_FRAME_BYTES + 1)), Err(RealtimeError::TooLarge));
+        assert_eq!(
+            Frame::decode(&" ".repeat(MAX_FRAME_BYTES + 1)),
+            Err(RealtimeError::TooLarge)
+        );
     }
 
     #[test]
@@ -391,8 +474,14 @@ mod tests {
         assert_eq!(changes[0]["filter"], format!("room_id=eq.{ROOM}"));
         assert_eq!(frame.payload["access_token"], "token-secret");
         assert!(!format!("{frame:?}").contains("token-secret"));
-        assert_eq!(join_frame("../x", "t", "1").map(|_| ()), Err(RealtimeError::Malformed));
-        assert_eq!(join_frame("a b c d e f g h", "t", "1").map(|_| ()), Err(RealtimeError::Malformed));
+        assert_eq!(
+            join_frame("../x", "t", "1").map(|_| ()),
+            Err(RealtimeError::Malformed)
+        );
+        assert_eq!(
+            join_frame("a b c d e f g h", "t", "1").map(|_| ()),
+            Err(RealtimeError::Malformed)
+        );
     }
 
     #[test]
@@ -420,7 +509,10 @@ mod tests {
         assert!(feed.tick(T0, &source).polled);
         assert!(!feed.tick(T0 + 1, &source).polled, "the schedule says wait");
         apply(&events, &feed, T0 + 1);
-        assert!(feed.tick(T0 + 1, &source).polled, "the notice made the poll due");
+        assert!(
+            feed.tick(T0 + 1, &source).polled,
+            "the notice made the poll due"
+        );
         assert!(feed.state().snapshot.is_some());
         // Without a change notice the schedule stays.
         apply(&[RealtimeEvent::Joined, RealtimeEvent::Lost], &feed, T0 + 2);
@@ -432,7 +524,12 @@ mod tests {
         let (mut session, server) = joined();
         server.notify_change("99999999-2222-4333-8444-555555555555");
         server.push_raw("garbage");
-        server.push(&Frame { topic: "phoenix".into(), event: "phx_reply".into(), payload: json!({"status": "ok"}), msg_ref: Some("9".into()) });
+        server.push(&Frame {
+            topic: "phoenix".into(),
+            event: "phx_reply".into(),
+            payload: json!({"status": "ok"}),
+            msg_ref: Some("9".into()),
+        });
         assert!(session.pump(T0 + 10).is_empty());
         assert_eq!(session.state(), SessionState::Joined);
     }
@@ -443,12 +540,22 @@ mod tests {
         let mut session = RealtimeSession::new(client);
         session.open(ROOM, "t", T0).expect("open");
         let join = server.take_received().remove(0);
-        server.push(&Frame { topic: join.topic.clone(), event: "phx_reply".into(), payload: json!({"status": "error"}), msg_ref: join.msg_ref.clone() });
+        server.push(&Frame {
+            topic: join.topic.clone(),
+            event: "phx_reply".into(),
+            payload: json!({"status": "error"}),
+            msg_ref: join.msg_ref.clone(),
+        });
         assert_eq!(session.pump(T0), vec![RealtimeEvent::Lost]);
         assert!(session.pump(T0 + 1).is_empty());
 
         let (mut session, server) = joined();
-        server.push(&Frame { topic: room_topic(ROOM), event: "phx_close".into(), payload: json!({}), msg_ref: None });
+        server.push(&Frame {
+            topic: room_topic(ROOM),
+            event: "phx_close".into(),
+            payload: json!({}),
+            msg_ref: None,
+        });
         assert_eq!(session.pump(T0 + 1), vec![RealtimeEvent::Lost]);
         assert_eq!(session.state(), SessionState::Lost);
     }
@@ -461,8 +568,14 @@ mod tests {
         session.pump(T0 + HEARTBEAT_MS);
         let sent = server.take_received();
         assert_eq!(sent.len(), 1);
-        assert_eq!((sent[0].topic.as_str(), sent[0].event.as_str()), ("phoenix", "heartbeat"));
-        assert_eq!(session.pump(T0 + SILENCE_LIMIT_MS + 1), vec![RealtimeEvent::Lost]);
+        assert_eq!(
+            (sent[0].topic.as_str(), sent[0].event.as_str()),
+            ("phoenix", "heartbeat")
+        );
+        assert_eq!(
+            session.pump(T0 + SILENCE_LIMIT_MS + 1),
+            vec![RealtimeEvent::Lost]
+        );
     }
 
     #[test]

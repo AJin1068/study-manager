@@ -100,9 +100,15 @@ pub fn windows(minutes: &[(i64, MinuteDelta)], attempts: &[i64], now_ms: i64) ->
             break;
         }
         credited += minute.credited_ms;
-        dirty |= minute.away_ms > 0 || minute.idle_ms > 0 || attempts.iter().any(|at| (*start..end).contains(at));
+        dirty |= minute.away_ms > 0
+            || minute.idle_ms > 0
+            || attempts.iter().any(|at| (*start..end).contains(at));
         if credited >= rewards::WINDOW_MS {
-            out.push(Window { index: i64::try_from(out.len()).unwrap_or(i64::MAX), end_ms: end, clean: !dirty });
+            out.push(Window {
+                index: i64::try_from(out.len()).unwrap_or(i64::MAX),
+                end_ms: end,
+                clean: !dirty,
+            });
             credited = 0;
             dirty = false;
         }
@@ -125,7 +131,10 @@ fn payables(conn: &Connection, now_ms: i64) -> AppResult<Vec<Payable>> {
         }
         let minutes = store::list_run_minutes(conn, run.id)?;
         let attempts = store::list_attempt_times(conn, run.id)?;
-        for w in windows(&minutes, &attempts, now_ms).into_iter().filter(|w| w.clean) {
+        for w in windows(&minutes, &attempts, now_ms)
+            .into_iter()
+            .filter(|w| w.clean)
+        {
             out.push(Payable {
                 at_ms: w.end_ms,
                 delta: rewards::WINDOW_POINTS,

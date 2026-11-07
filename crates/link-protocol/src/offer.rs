@@ -71,13 +71,19 @@ pub fn normalize_code(raw: &str) -> Option<String> {
 
 /// https anywhere, plain http only for a loopback address (local development).
 fn endpoint_ok(endpoint: &str) -> bool {
-    let Some((scheme, rest)) = endpoint.split_once("://") else { return false };
+    let Some((scheme, rest)) = endpoint.split_once("://") else {
+        return false;
+    };
     let authority = rest.trim_end_matches('/');
     if authority.is_empty() || authority.contains(['/', '?', '#', '@', ' ']) {
         return false;
     }
     let host = authority.split(':').next().unwrap_or_default();
-    if host.is_empty() || !host.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
+    if host.is_empty()
+        || !host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+    {
         return false;
     }
     match scheme {
@@ -109,7 +115,13 @@ impl PairingOffer {
         if !endpoint_ok(&self.endpoint) {
             return Err(OfferError::BadEndpoint);
         }
-        if self.anon_key.is_empty() || self.anon_key.len() > KEY_MAX || self.anon_key.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        if self.anon_key.is_empty()
+            || self.anon_key.len() > KEY_MAX
+            || self
+                .anon_key
+                .chars()
+                .any(|c| c.is_whitespace() || c.is_control())
+        {
             return Err(OfferError::BadKey);
         }
         Ok(())

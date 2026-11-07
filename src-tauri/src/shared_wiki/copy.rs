@@ -19,7 +19,10 @@ fn io_error(op: &str, err: &std::io::Error) -> AppError {
 }
 
 fn room_dir(root: &Path, room_id: &str) -> AppResult<PathBuf> {
-    let ok = (8..=64).contains(&room_id.len()) && room_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
+    let ok = (8..=64).contains(&room_id.len())
+        && room_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-');
     if !ok {
         return Err(AppError::Invalid("not a valid room id".into()));
     }
@@ -27,7 +30,9 @@ fn room_dir(root: &Path, room_id: &str) -> AppResult<PathBuf> {
 }
 
 fn page_path(root: &Path, room_id: &str, page_name: &str) -> AppResult<PathBuf> {
-    let name = names::page_name(page_name).filter(|n| n == page_name).ok_or_else(|| AppError::Invalid("not a valid page name".into()))?;
+    let name = names::page_name(page_name)
+        .filter(|n| n == page_name)
+        .ok_or_else(|| AppError::Invalid("not a valid page name".into()))?;
     Ok(room_dir(root, room_id)?.join(names::page_file_name(&name)))
 }
 
@@ -79,7 +84,11 @@ pub fn list_copies(root: &Path, room_id: &str) -> AppResult<Vec<String>> {
     for entry in entries {
         let entry = entry.map_err(|e| io_error("list", &e))?;
         if entry.file_type().is_ok_and(|t| t.is_file()) {
-            if let Some(name) = entry.file_name().to_str().and_then(names::page_name_of_file) {
+            if let Some(name) = entry
+                .file_name()
+                .to_str()
+                .and_then(names::page_name_of_file)
+            {
                 found.push(name);
             }
         }
@@ -111,9 +120,19 @@ mod tests {
         let dir = TempDir::new("shared-copy");
         let path = write_copy(dir.path(), ROOM, "미분", "본문").expect("write");
         assert!(path.starts_with(dir.path().join(".shared")));
-        assert_eq!(read_copy(dir.path(), ROOM, "미분").expect("read").as_deref(), Some("본문"));
+        assert_eq!(
+            read_copy(dir.path(), ROOM, "미분")
+                .expect("read")
+                .as_deref(),
+            Some("본문")
+        );
         write_copy(dir.path(), ROOM, "미분", "새 본문").expect("replace");
-        assert_eq!(read_copy(dir.path(), ROOM, "미분").expect("read").as_deref(), Some("새 본문"));
+        assert_eq!(
+            read_copy(dir.path(), ROOM, "미분")
+                .expect("read")
+                .as_deref(),
+            Some("새 본문")
+        );
         assert!(remove_copy(dir.path(), ROOM, "미분").expect("remove"));
         assert!(!remove_copy(dir.path(), ROOM, "미분").expect("again"));
         assert_eq!(read_copy(dir.path(), ROOM, "미분").expect("read"), None);

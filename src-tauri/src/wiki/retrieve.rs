@@ -20,7 +20,8 @@ pub fn terms(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     for word in text.to_lowercase().split(|c: char| !c.is_alphanumeric()) {
         let chars: Vec<char> = word.chars().collect();
-        if chars.is_empty() || (chars.len() == 1 && !is_hangul(chars[0]) && !chars[0].is_numeric()) {
+        if chars.is_empty() || (chars.len() == 1 && !is_hangul(chars[0]) && !chars[0].is_numeric())
+        {
             continue;
         }
         if chars.len() >= 2 && chars.iter().all(|c| is_hangul(*c)) {
@@ -63,7 +64,11 @@ pub fn rank_pages(question: &str, pages: &[(String, String)], limit: usize) -> V
             ranked.push(Ranked { index, score });
         }
     }
-    ranked.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| pages[a.index].0.cmp(&pages[b.index].0)));
+    ranked.sort_by(|a, b| {
+        b.score
+            .cmp(&a.score)
+            .then_with(|| pages[a.index].0.cmp(&pages[b.index].0))
+    });
     ranked.truncate(limit);
     ranked
 }
@@ -79,8 +84,15 @@ mod tests {
     #[test]
     fn particles_do_not_hide_a_hangul_stem() {
         let q = terms("미분이 뭐야?");
-        assert!(q.contains(&"미분".to_string()) && q.contains(&"미분이".to_string()) && q.contains(&"뭐야".to_string()));
-        let pages = [page("적분", "넓이를 구한다"), page("미분", "미분은 함수의 변화율이다")];
+        assert!(
+            q.contains(&"미분".to_string())
+                && q.contains(&"미분이".to_string())
+                && q.contains(&"뭐야".to_string())
+        );
+        let pages = [
+            page("적분", "넓이를 구한다"),
+            page("미분", "미분은 함수의 변화율이다"),
+        ];
         let ranked = rank_pages("미분이 뭐야?", &pages, 3);
         assert_eq!(ranked.iter().map(|r| r.index).collect::<Vec<_>>(), [1]);
     }
@@ -102,8 +114,15 @@ mod tests {
     fn a_page_cannot_win_by_repeating_a_word_endlessly() {
         let spam = page("spam", &"limit ".repeat(500));
         let real = page("real", "limit derivative integral series vector matrix");
-        let ranked = rank_pages("limit derivative integral series vector matrix", &[spam, real], 2);
-        assert_eq!(ranked[0].index, 1, "six distinct matches beat one capped word: {ranked:?}");
+        let ranked = rank_pages(
+            "limit derivative integral series vector matrix",
+            &[spam, real],
+            2,
+        );
+        assert_eq!(
+            ranked[0].index, 1,
+            "six distinct matches beat one capped word: {ranked:?}"
+        );
         assert_eq!((ranked[0].score, ranked[1].score), (6, TF_CAP));
     }
 
@@ -112,7 +131,10 @@ mod tests {
         let pages = [page("a", "alpha beta")];
         assert!(rank_pages("gamma", &pages, 3).is_empty());
         assert!(rank_pages("? ! ,", &pages, 3).is_empty());
-        assert!(rank_pages("x", &pages, 3).is_empty(), "single latin letters are not terms");
+        assert!(
+            rank_pages("x", &pages, 3).is_empty(),
+            "single latin letters are not terms"
+        );
         assert!(rank_pages("alpha", &[], 3).is_empty());
         assert_eq!(rank_pages("alpha", &pages, 0), []);
     }
@@ -120,8 +142,13 @@ mod tests {
     #[test]
     fn the_limit_keeps_the_best_pages() {
         // Scores 1..=5, with the sixth page capped at 5 and tying the fifth (name order decides).
-        let pages: Vec<_> = (0..6).map(|i| page(&format!("p{i}"), &"term ".repeat(i + 1))).collect();
+        let pages: Vec<_> = (0..6)
+            .map(|i| page(&format!("p{i}"), &"term ".repeat(i + 1)))
+            .collect();
         let ranked = rank_pages("term", &pages, 3);
-        assert_eq!(ranked.iter().map(|r| r.index).collect::<Vec<_>>(), [4, 5, 3]);
+        assert_eq!(
+            ranked.iter().map(|r| r.index).collect::<Vec<_>>(),
+            [4, 5, 3]
+        );
     }
 }

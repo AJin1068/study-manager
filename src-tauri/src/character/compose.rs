@@ -15,8 +15,10 @@ use super::{Candidate, Gender, Look, Traits};
 use crate::messages::Tone;
 
 /// Species of the zodiac animal, indexed by `(year - 4) mod 12` (rat first).
-pub const ZODIAC_SPECIES: [&str; 12] =
-    ["squirrel", "bear", "cat", "rabbit", "owl", "frog", "deer", "deer", "squirrel", "owl", "fox", "bear"];
+pub const ZODIAC_SPECIES: [&str; 12] = [
+    "squirrel", "bear", "cat", "rabbit", "owl", "frog", "deer", "deer", "squirrel", "owl", "fox",
+    "bear",
+];
 
 pub fn zodiac_index(year: i32) -> usize {
     usize::try_from((year - 4).rem_euclid(12)).unwrap_or(0)
@@ -35,8 +37,14 @@ pub fn starter_top(gender: Option<Gender>) -> &'static str {
 /// Never harsh. `None` for anything that is not an MBTI.
 pub fn tone_for_mbti(mbti: &str) -> Option<Tone> {
     let letters: Vec<char> = mbti.trim().to_uppercase().chars().collect();
-    let [ie, sn, tf, jp] = letters.as_slice() else { return None };
-    if !matches!(ie, 'I' | 'E') || !matches!(sn, 'S' | 'N') || !matches!(tf, 'T' | 'F') || !matches!(jp, 'J' | 'P') {
+    let [ie, sn, tf, jp] = letters.as_slice() else {
+        return None;
+    };
+    if !matches!(ie, 'I' | 'E')
+        || !matches!(sn, 'S' | 'N')
+        || !matches!(tf, 'T' | 'F')
+        || !matches!(jp, 'J' | 'P')
+    {
         return None;
     }
     Some(match (tf, jp) {
@@ -85,28 +93,62 @@ pub fn compose(cat: &Catalog, traits: &Traits, seed: u64) -> Vec<Candidate> {
     let mut rng = Rng(seed ^ fnv1a(&traits.key()));
     let count = 3 + rng.below(2);
 
-    let mut species: Vec<&str> = cat.species.iter().filter(|s| !s.shop_only).map(|s| s.id.as_str()).collect();
+    let mut species: Vec<&str> = cat
+        .species
+        .iter()
+        .filter(|s| !s.shop_only)
+        .map(|s| s.id.as_str())
+        .collect();
     for i in (1..species.len()).rev() {
         species.swap(i, rng.below(i + 1));
     }
-    if let Some(favored) = traits.zodiac.map(|z| ZODIAC_SPECIES[z % ZODIAC_SPECIES.len()]) {
+    if let Some(favored) = traits
+        .zodiac
+        .map(|z| ZODIAC_SPECIES[z % ZODIAC_SPECIES.len()])
+    {
         if let Some(at) = species.iter().position(|s| *s == favored) {
             let id = species.remove(at);
             species.insert(0, id);
         }
     }
 
-    let temperature = traits.thinking.map(|t| if t { Temperature::Cool } else { Temperature::Warm });
-    let energy = traits.extravert.map(|e| if e { Energy::High } else { Energy::Low });
-    let mind = traits.thinking.map(|t| if t { Mind::Thinking } else { Mind::Feeling });
-    let palettes: Vec<_> = cat.palettes.iter().filter(|p| temperature.is_none_or(|t| p.temperature == t)).collect();
-    let expressions: Vec<_> = cat.expressions.iter().filter(|e| energy.is_none_or(|n| e.energy == n)).collect();
-    let props: Vec<_> = cat.props.iter().filter(|p| mind.is_none_or(|m| p.mind == m)).collect();
+    let temperature = traits.thinking.map(|t| {
+        if t {
+            Temperature::Cool
+        } else {
+            Temperature::Warm
+        }
+    });
+    let energy = traits
+        .extravert
+        .map(|e| if e { Energy::High } else { Energy::Low });
+    let mind = traits
+        .thinking
+        .map(|t| if t { Mind::Thinking } else { Mind::Feeling });
+    let palettes: Vec<_> = cat
+        .palettes
+        .iter()
+        .filter(|p| temperature.is_none_or(|t| p.temperature == t))
+        .collect();
+    let expressions: Vec<_> = cat
+        .expressions
+        .iter()
+        .filter(|e| energy.is_none_or(|n| e.energy == n))
+        .collect();
+    let props: Vec<_> = cat
+        .props
+        .iter()
+        .filter(|p| mind.is_none_or(|m| p.mind == m))
+        .collect();
 
     let mut out: Vec<Candidate> = Vec::new();
     for id in species.into_iter().take(count) {
         // Prefer a fur color the earlier candidates do not use.
-        let fresh: Vec<_> = palettes.iter().copied().filter(|p| !out.iter().any(|c| c.look.palette == p.id)).collect();
+        let fresh: Vec<_> = palettes
+            .iter()
+            .copied()
+            .filter(|p| !out.iter().any(|c| c.look.palette == p.id))
+            .collect();
         let palette = pick(&mut rng, if fresh.is_empty() { &palettes } else { &fresh });
         let expression = pick(&mut rng, &expressions);
         let prop = pick(&mut rng, &props);
@@ -126,8 +168,24 @@ pub fn compose(cat: &Catalog, traits: &Traits, seed: u64) -> Vec<Candidate> {
 }
 
 /// Built-in names; used when the model is off or answers badly. Original, short, Korean.
-pub const BUILTIN_NAMES: [&str; 16] =
-    ["도토리", "보리", "솔이", "하루", "모카", "별이", "콩이", "구름", "바람", "달이", "새봄", "나루", "단비", "소라", "루미", "꼬미"];
+pub const BUILTIN_NAMES: [&str; 16] = [
+    "도토리",
+    "보리",
+    "솔이",
+    "하루",
+    "모카",
+    "별이",
+    "콩이",
+    "구름",
+    "바람",
+    "달이",
+    "새봄",
+    "나루",
+    "단비",
+    "소라",
+    "루미",
+    "꼬미",
+];
 
 pub fn builtin_name(seed: u64, index: usize) -> String {
     let base = usize::try_from(seed % 16).unwrap_or(0);
@@ -136,7 +194,9 @@ pub fn builtin_name(seed: u64, index: usize) -> String {
 
 /// One line for a look, from the expression and the prop in hand. No particles depend on the noun.
 pub fn builtin_blurb(cat: &Catalog, look: &Look) -> String {
-    let prop = cat.prop(&look.prop).map_or("작은 소품", |p| p.label.as_str());
+    let prop = cat
+        .prop(&look.prop)
+        .map_or("작은 소품", |p| p.label.as_str());
     let tail = match look.expression.as_str() {
         "smile" => "얼굴에는 웃음",
         "bright" => "눈에는 반짝임",
@@ -162,13 +222,19 @@ pub const INTRO_MAX_CHARS: usize = 40;
 /// A usable name: trimmed, 1-8 characters, no control characters, not a protected name.
 pub fn clean_name(raw: &str) -> Option<String> {
     let name = raw.trim();
-    let ok = !name.is_empty() && name.chars().count() <= NAME_MAX_CHARS && !name.chars().any(char::is_control) && !super::catalog::is_banned(name);
+    let ok = !name.is_empty()
+        && name.chars().count() <= NAME_MAX_CHARS
+        && !name.chars().any(char::is_control)
+        && !super::catalog::is_banned(name);
     ok.then(|| name.to_string())
 }
 
 pub fn clean_intro(raw: &str) -> Option<String> {
     let intro = raw.trim();
-    let ok = !intro.is_empty() && intro.chars().count() <= INTRO_MAX_CHARS && !intro.chars().any(char::is_control) && !super::catalog::is_banned(intro);
+    let ok = !intro.is_empty()
+        && intro.chars().count() <= INTRO_MAX_CHARS
+        && !intro.chars().any(char::is_control)
+        && !super::catalog::is_banned(intro);
     ok.then(|| intro.to_string())
 }
 

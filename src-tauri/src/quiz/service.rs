@@ -11,7 +11,7 @@ use rusqlite::Connection;
 use serde::Serialize;
 
 use super::gate::{CardResult, QuizCard, QuizGate};
-use super::generate::{parse_items, template_items, NewItem};
+use super::generate::{NewItem, parse_items, template_items};
 use crate::commands::lock_db;
 use crate::error::{AppError, AppResult};
 use crate::llm::egress::Prompt;
@@ -46,8 +46,19 @@ pub struct QuizService {
 }
 
 impl QuizService {
-    pub fn new(db: Arc<Mutex<Connection>>, wiki: Arc<WikiService>, llm: Arc<LlmService>, clock: Arc<dyn Clock>) -> Self {
-        Self { db, wiki, llm, clock, gate: QuizGate::default() }
+    pub fn new(
+        db: Arc<Mutex<Connection>>,
+        wiki: Arc<WikiService>,
+        llm: Arc<LlmService>,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
+        Self {
+            db,
+            wiki,
+            llm,
+            clock,
+            gate: QuizGate::default(),
+        }
     }
 
     // ---- bank ----
@@ -73,7 +84,11 @@ impl QuizService {
             report.pages += 1;
             let mut items: Vec<NewItem> = Vec::new();
             if model_usable {
-                let request = LlmRequest { purpose: Purpose::QuizGen, prompt: Prompt::quiz_gen(&subject.name, &page_name, &body), max_tokens: GEN_MAX_TOKENS };
+                let request = LlmRequest {
+                    purpose: Purpose::QuizGen,
+                    prompt: Prompt::quiz_gen(&subject.name, &page_name, &body),
+                    max_tokens: GEN_MAX_TOKENS,
+                };
                 match self.llm.complete(&request) {
                     Ok(response) => {
                         let (kept, dropped) = parse_items(&response.text, &body);
@@ -99,7 +114,12 @@ impl QuizService {
                 }
             }
         }
-        tracing::info!(event = "quiz_bank_generated", pages = report.pages, added = report.added, dropped = report.dropped);
+        tracing::info!(
+            event = "quiz_bank_generated",
+            pages = report.pages,
+            added = report.added,
+            dropped = report.dropped
+        );
         Ok(report)
     }
 
@@ -120,7 +140,8 @@ impl QuizService {
 
     pub fn on_block_attempt(&self) -> AppResult<Option<QuizCard>> {
         let now = self.clock.now_ms()?;
-        self.gate.offer_distraction(&*lock_db(&self.db)?, &Local, now)
+        self.gate
+            .offer_distraction(&*lock_db(&self.db)?, &Local, now)
     }
 
     /// The card for a check-in the window is showing right now.
@@ -131,16 +152,34 @@ impl QuizService {
 
     pub fn session_end_card(&self) -> AppResult<Option<QuizCard>> {
         let now = self.clock.now_ms()?;
-        self.gate.offer_session_end(&*lock_db(&self.db)?, &Local, now)
+        self.gate
+            .offer_session_end(&*lock_db(&self.db)?, &Local, now)
     }
 
-    pub fn review_card(&self, subject_id: Option<i64>, count: usize) -> AppResult<Option<QuizCard>> {
+    pub fn review_card(
+        &self,
+        subject_id: Option<i64>,
+        count: usize,
+    ) -> AppResult<Option<QuizCard>> {
         let now = self.clock.now_ms()?;
-        self.gate.offer_review(&*lock_db(&self.db)?, now, subject_id, count)
+        self.gate
+            .offer_review(&*lock_db(&self.db)?, now, subject_id, count)
     }
 
-    pub fn answer_card(&self, card_id: u64, answers: &[String], skip: bool) -> AppResult<Option<CardResult>> {
+    pub fn answer_card(
+        &self,
+        card_id: u64,
+        answers: &[String],
+        skip: bool,
+    ) -> AppResult<Option<CardResult>> {
         let now = self.clock.now_ms()?;
-        self.gate.answer(&mut *lock_db(&self.db)?, &Local, card_id, answers, skip, now)
+        self.gate.answer(
+            &mut *lock_db(&self.db)?,
+            &Local,
+            card_id,
+            answers,
+            skip,
+            now,
+        )
     }
 }

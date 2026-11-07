@@ -4,15 +4,16 @@
 use chrono::Local;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use super::{lock_db, AppState, DEFAULT_LIMIT};
+use super::{AppState, DEFAULT_LIMIT, lock_db};
 use crate::clock::now_ms;
 use crate::error::AppResult;
-use crate::timer::engine::WakeReason;
+use crate::plan::{
+    self, CreatePlanInput, DeletePlanInput, Occurrence, PlanChange, PlanHistoryEntry, PlanStats,
+    UpdatePlanInput,
+};
 use crate::plan_import::{self, IcsApplyResult, IcsExport, IcsPreview};
 use crate::plan_shift;
-use crate::plan::{
-    self, CreatePlanInput, DeletePlanInput, Occurrence, PlanChange, PlanHistoryEntry, PlanStats, UpdatePlanInput,
-};
+use crate::timer::engine::WakeReason;
 
 pub const PLANS_CHANGED_EVENT: &str = "plans_changed";
 
@@ -32,7 +33,11 @@ fn notify(app: &AppHandle, change: &PlanChange) {
 }
 
 #[tauri::command]
-pub fn create_plan(app: AppHandle, state: State<'_, AppState>, input: CreatePlanInput) -> AppResult<PlanChange> {
+pub fn create_plan(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: CreatePlanInput,
+) -> AppResult<PlanChange> {
     let change = {
         let mut conn = lock_db(&state.db)?;
         plan::create_plan(&mut conn, &Local, input, now_ms()?)?
@@ -42,7 +47,11 @@ pub fn create_plan(app: AppHandle, state: State<'_, AppState>, input: CreatePlan
 }
 
 #[tauri::command]
-pub fn update_plan(app: AppHandle, state: State<'_, AppState>, input: UpdatePlanInput) -> AppResult<PlanChange> {
+pub fn update_plan(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: UpdatePlanInput,
+) -> AppResult<PlanChange> {
     let change = {
         let mut conn = lock_db(&state.db)?;
         plan::update_plan(&mut conn, &Local, input, now_ms()?)?
@@ -52,7 +61,11 @@ pub fn update_plan(app: AppHandle, state: State<'_, AppState>, input: UpdatePlan
 }
 
 #[tauri::command]
-pub fn delete_plan(app: AppHandle, state: State<'_, AppState>, input: DeletePlanInput) -> AppResult<PlanChange> {
+pub fn delete_plan(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: DeletePlanInput,
+) -> AppResult<PlanChange> {
     let change = {
         let mut conn = lock_db(&state.db)?;
         plan::delete_plan(&mut conn, input, now_ms()?)?
@@ -63,7 +76,11 @@ pub fn delete_plan(app: AppHandle, state: State<'_, AppState>, input: DeletePlan
 
 /// Reverts one mode-shift batch (the toast's undo button): plans and the mode that caused them.
 #[tauri::command]
-pub fn undo_plan_batch(app: AppHandle, state: State<'_, AppState>, batch_id: String) -> AppResult<PlanChange> {
+pub fn undo_plan_batch(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    batch_id: String,
+) -> AppResult<PlanChange> {
     let change = {
         let mut conn = lock_db(&state.db)?;
         plan_shift::undo_plan_batch(&mut conn, &Local, &batch_id, now_ms()?)?
@@ -74,7 +91,11 @@ pub fn undo_plan_batch(app: AppHandle, state: State<'_, AppState>, batch_id: Str
 
 /// Occurrences with `from <= date <= to` (both `YYYY-MM-DD`, at most 400 days apart).
 #[tauri::command]
-pub fn list_occurrences(state: State<'_, AppState>, from: String, to: String) -> AppResult<Vec<Occurrence>> {
+pub fn list_occurrences(
+    state: State<'_, AppState>,
+    from: String,
+    to: String,
+) -> AppResult<Vec<Occurrence>> {
     let conn = lock_db(&state.db)?;
     plan::list_occurrences(&conn, &Local, &from, &to)
 }
@@ -119,7 +140,11 @@ pub fn preview_ics_import(state: State<'_, AppState>, content: String) -> AppRes
 }
 
 #[tauri::command]
-pub fn apply_ics_import(app: AppHandle, state: State<'_, AppState>, content: String) -> AppResult<IcsApplyResult> {
+pub fn apply_ics_import(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    content: String,
+) -> AppResult<IcsApplyResult> {
     let result = {
         let mut conn = lock_db(&state.db)?;
         plan_import::apply_ics_import(&mut conn, &Local, &content, now_ms()?)?
@@ -131,7 +156,11 @@ pub fn apply_ics_import(app: AppHandle, state: State<'_, AppState>, content: Str
 }
 
 #[tauri::command]
-pub fn undo_ics_import(app: AppHandle, state: State<'_, AppState>, batch_id: String) -> AppResult<PlanChange> {
+pub fn undo_ics_import(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    batch_id: String,
+) -> AppResult<PlanChange> {
     let change = {
         let mut conn = lock_db(&state.db)?;
         plan_import::undo_ics_import(&mut conn, &batch_id, now_ms()?)?

@@ -22,13 +22,13 @@ mod quit;
 
 pub use autostart::autostart_backend;
 pub use browser_ipc::{
-    app_data_dir, bind_listener, chrome_manifest_dir, connect as connect_browser_link, ensure_token,
-    is_host_registered, read_token, register_host, unregister_host, LinkStream,
+    LinkStream, app_data_dir, bind_listener, chrome_manifest_dir, connect as connect_browser_link,
+    ensure_token, is_host_registered, read_token, register_host, unregister_host,
 };
 pub use focus::{FocusProbe, TitleAccess};
 pub use notifier::PluginNotifier;
+pub use process::{AppIdentity, ProcessControl, is_protected_id, normalize_app_id};
 pub use quit::QuitReason;
-pub use process::{is_protected_id, normalize_app_id, AppIdentity, ProcessControl};
 
 /// The operating system's name as it is sent to the server with the device registration.
 pub fn name() -> &'static str {
@@ -72,7 +72,8 @@ pub fn set_tray_title<R: tauri::Runtime>(
 ) -> Result<(), PlatformError> {
     #[cfg(target_os = "macos")]
     {
-        tray.set_title(title).map_err(|e| PlatformError::Tray(e.to_string()))
+        tray.set_title(title)
+            .map_err(|e| PlatformError::Tray(e.to_string()))
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -177,7 +178,9 @@ pub struct ActivityGuard {
 pub fn begin_activity(reason: &str) -> Result<ActivityGuard, PlatformError> {
     #[cfg(target_os = "macos")]
     {
-        Ok(ActivityGuard { _activity: macos::begin_activity(reason) })
+        Ok(ActivityGuard {
+            _activity: macos::begin_activity(reason),
+        })
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -191,7 +194,9 @@ pub fn begin_activity(reason: &str) -> Result<ActivityGuard, PlatformError> {
 /// `RunEvent::ExitRequested`). `gate` returns whether this quit may proceed; it is consulted
 /// only for non-system reasons. Windows has no equivalent yet and reports `Unsupported`; the
 /// ExitRequested gate then still covers the tray and `app.exit` paths.
-pub fn install_quit_gate(gate: Box<dyn Fn(QuitReason) -> bool + Send + Sync>) -> Result<(), PlatformError> {
+pub fn install_quit_gate(
+    gate: Box<dyn Fn(QuitReason) -> bool + Send + Sync>,
+) -> Result<(), PlatformError> {
     #[cfg(target_os = "macos")]
     {
         macos_quit::install_quit_gate(gate)

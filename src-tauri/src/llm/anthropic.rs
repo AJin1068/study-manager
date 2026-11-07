@@ -11,7 +11,8 @@ use serde::Deserialize;
 use super::egress::MessagesRequest;
 use super::{LlmClient, LlmError, LlmRequest, LlmResponse};
 use crate::remote::http::{
-    backoff_ms, HttpRequest, HttpResponse, HttpTransport, Method, RequestTag, TransportError, UreqTransport, CONNECT_TIMEOUT,
+    CONNECT_TIMEOUT, HttpRequest, HttpResponse, HttpTransport, Method, RequestTag, TransportError,
+    UreqTransport, backoff_ms,
 };
 use crate::remote::payload::Body;
 use crate::remote::runtime::TransportFactory;
@@ -27,11 +28,20 @@ pub const MAX_ATTEMPTS: u32 = 3;
 /// A server asking for a longer pause than this is not waited for: the caller falls back.
 const MAX_WAIT_MS: u64 = 30_000;
 
-const TAG: RequestTag = RequestTag { port: "llm", kind: "messages" };
+const TAG: RequestTag = RequestTag {
+    port: "llm",
+    kind: "messages",
+};
 
 /// Transport for the product: real network, 30 second limit.
 pub fn ureq_factory() -> TransportFactory {
-    Arc::new(|policy| Arc::new(UreqTransport::with_timeouts(policy, CONNECT_TIMEOUT, LLM_TIMEOUT)))
+    Arc::new(|policy| {
+        Arc::new(UreqTransport::with_timeouts(
+            policy,
+            CONNECT_TIMEOUT,
+            LLM_TIMEOUT,
+        ))
+    })
 }
 
 /// Pause between retries; injectable so backoff is tested without sleeping.
@@ -80,8 +90,20 @@ pub struct AnthropicHttp {
 }
 
 impl AnthropicHttp {
-    pub fn new(base: &str, api_key: SecretValue, model: &str, transport: Arc<dyn HttpTransport>, sleeper: Arc<dyn Sleeper>) -> Self {
-        Self { base: base.trim_end_matches('/').to_string(), api_key, model: model.to_string(), transport, sleeper }
+    pub fn new(
+        base: &str,
+        api_key: SecretValue,
+        model: &str,
+        transport: Arc<dyn HttpTransport>,
+        sleeper: Arc<dyn Sleeper>,
+    ) -> Self {
+        Self {
+            base: base.trim_end_matches('/').to_string(),
+            api_key,
+            model: model.to_string(),
+            transport,
+            sleeper,
+        }
     }
 
     fn attempt(&self, request: &LlmRequest) -> Result<LlmResponse, LlmError> {
@@ -148,23 +170,37 @@ pub fn interpret(result: Result<HttpResponse, TransportError>) -> Result<LlmResp
     match response.status {
         200..=299 => {}
         401 | 403 => return Err(LlmError::Unauthorized),
-        429 => return Err(LlmError::RateLimited { retry_after_ms: response.retry_after_ms() }),
+        429 => {
+            return Err(LlmError::RateLimited {
+                retry_after_ms: response.retry_after_ms(),
+            });
+        }
         500..=599 => return Err(LlmError::Overloaded),
         status => return Err(LlmError::Rejected { status }),
     }
-    let wire: WireResponse = serde_json::from_slice(&response.body).map_err(|_| LlmError::BadResponse)?;
-    let text: String = wire.content.iter().filter(|b| b.kind == "text").filter_map(|b| b.text.as_deref()).collect();
+    let wire: WireResponse =
+        serde_json::from_slice(&response.body).map_err(|_| LlmError::BadResponse)?;
+    let text: String = wire
+        .content
+        .iter()
+        .filter(|b| b.kind == "text")
+        .filter_map(|b| b.text.as_deref())
+        .collect();
     if text.is_empty() {
         return Err(LlmError::BadResponse);
     }
-    Ok(LlmResponse { text, in_tokens: wire.usage.input_tokens, out_tokens: wire.usage.output_tokens })
+    Ok(LlmResponse {
+        text,
+        in_tokens: wire.usage.input_tokens,
+        out_tokens: wire.usage.output_tokens,
+    })
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::llm::egress::Prompt;
     use crate::llm::Purpose;
+    use crate::llm::egress::Prompt;
     use crate::remote::http::{HostPolicy, ScriptedTransport};
 
     pub(crate) fn ok_body(text: &str, in_tokens: u32, out_tokens: u32) -> String {
@@ -178,27 +214,60 @@ pub(crate) mod tests {
     }
 
     fn request() -> LlmRequest {
-        LlmRequest { purpose: Purpose::Probe, prompt: Prompt::probe(), max_tokens: 64 }
+        LlmRequest {
+            purpose: Purpose::Probe,
+            prompt: Prompt::probe(),
+            max_tokens: 64,
+        }
     }
 
-    fn adapter(steps: Vec<Result<HttpResponse, TransportError>>) -> (AnthropicHttp, Arc<ScriptedTransport>, Arc<RecordingSleeper>) {
-        let transport = Arc::new(ScriptedTransport::new(HostPolicy::configured([HOST]), steps));
+    fn adapter(
+        steps: Vec<Result<HttpResponse, TransportError>>,
+    ) -> (AnthropicHttp, Arc<ScriptedTransport>, Arc<RecordingSleeper>) {
+        let transport = Arc::new(ScriptedTransport::new(
+            HostPolicy::configured([HOST]),
+            steps,
+        ));
         let sleeper = Arc::new(RecordingSleeper::default());
-        let client = AnthropicHttp::new(DEFAULT_BASE, SecretValue::new("sk-ant-KEY"), "claude-test", transport.clone(), sleeper.clone());
+        let client = AnthropicHttp::new(
+            DEFAULT_BASE,
+            SecretValue::new("sk-ant-KEY"),
+            "claude-test",
+            transport.clone(),
+            sleeper.clone(),
+        );
         (client, transport, sleeper)
     }
 
     #[test]
     fn request_snapshot_pins_headers_path_and_body_sections() {
-        let (client, transport, _) = adapter(vec![Ok(HttpResponse::ok_json(200, &ok_body("pong", 11, 2)))]);
+        let (client, transport, _) = adapter(vec![Ok(HttpResponse::ok_json(
+            200,
+            &ok_body("pong", 11, 2),
+        ))]);
         let response = client.complete(&request()).expect("reply");
-        assert_eq!(response, LlmResponse { text: "pong".into(), in_tokens: 11, out_tokens: 2 });
+        assert_eq!(
+            response,
+            LlmResponse {
+                text: "pong".into(),
+                in_tokens: 11,
+                out_tokens: 2
+            }
+        );
 
         let seen = transport.requests();
         assert_eq!(seen.len(), 1);
         let sent = &seen[0];
-        assert_eq!((sent.method, sent.url.as_str()), (Method::Post, "https://api.anthropic.com/v1/messages"));
-        let header = |name: &str| sent.headers.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str());
+        assert_eq!(
+            (sent.method, sent.url.as_str()),
+            (Method::Post, "https://api.anthropic.com/v1/messages")
+        );
+        let header = |name: &str| {
+            sent.headers
+                .iter()
+                .find(|(k, _)| k == name)
+                .map(|(_, v)| v.as_str())
+        };
         assert_eq!(header("x-api-key"), Some("sk-ant-KEY"));
         assert_eq!(header("anthropic-version"), Some("2023-06-01"));
         assert_eq!(sent.content_type, Some("application/json"));
@@ -208,9 +277,16 @@ pub(crate) mod tests {
         assert_eq!(body["messages"][0]["role"], "user");
         assert_eq!(body["messages"][0]["content"], "ping");
         assert!(body["system"].as_str().is_some_and(|s| !s.is_empty()));
-        assert_eq!(body.as_object().map(|o| o.len()), Some(4), "exactly model, max_tokens, system, messages");
+        assert_eq!(
+            body.as_object().map(|o| o.len()),
+            Some(4),
+            "exactly model, max_tokens, system, messages"
+        );
         let text = String::from_utf8_lossy(&sent.body);
-        assert!(!text.contains("sk-ant-KEY"), "the key is a header, never a body field");
+        assert!(
+            !text.contains("sk-ant-KEY"),
+            "the key is a header, never a body field"
+        );
     }
 
     #[test]
@@ -224,22 +300,85 @@ pub(crate) mod tests {
         assert_eq!(client.complete(&request()).expect("reply").text, "ab");
     }
 
-    pub(crate) fn contract_cases() -> Vec<(&'static str, Result<HttpResponse, TransportError>, LlmError)> {
-        let retry_after = HttpResponse { status: 429, headers: vec![("retry-after".into(), "7".into())], body: Vec::new() };
+    pub(crate) fn contract_cases()
+    -> Vec<(&'static str, Result<HttpResponse, TransportError>, LlmError)> {
+        let retry_after = HttpResponse {
+            status: 429,
+            headers: vec![("retry-after".into(), "7".into())],
+            body: Vec::new(),
+        };
         vec![
-            ("401", Ok(HttpResponse::ok_json(401, "{}")), LlmError::Unauthorized),
-            ("403", Ok(HttpResponse::ok_json(403, "{}")), LlmError::Unauthorized),
-            ("429", Ok(retry_after), LlmError::RateLimited { retry_after_ms: Some(7_000) }),
-            ("429 plain", Ok(HttpResponse::ok_json(429, "{}")), LlmError::RateLimited { retry_after_ms: None }),
-            ("529", Ok(HttpResponse::ok_json(529, "{}")), LlmError::Overloaded),
-            ("500", Ok(HttpResponse::ok_json(500, "")), LlmError::Overloaded),
-            ("400", Ok(HttpResponse::ok_json(400, "{}")), LlmError::Rejected { status: 400 }),
+            (
+                "401",
+                Ok(HttpResponse::ok_json(401, "{}")),
+                LlmError::Unauthorized,
+            ),
+            (
+                "403",
+                Ok(HttpResponse::ok_json(403, "{}")),
+                LlmError::Unauthorized,
+            ),
+            (
+                "429",
+                Ok(retry_after),
+                LlmError::RateLimited {
+                    retry_after_ms: Some(7_000),
+                },
+            ),
+            (
+                "429 plain",
+                Ok(HttpResponse::ok_json(429, "{}")),
+                LlmError::RateLimited {
+                    retry_after_ms: None,
+                },
+            ),
+            (
+                "529",
+                Ok(HttpResponse::ok_json(529, "{}")),
+                LlmError::Overloaded,
+            ),
+            (
+                "500",
+                Ok(HttpResponse::ok_json(500, "")),
+                LlmError::Overloaded,
+            ),
+            (
+                "400",
+                Ok(HttpResponse::ok_json(400, "{}")),
+                LlmError::Rejected { status: 400 },
+            ),
             ("timeout", Err(TransportError::Timeout), LlmError::Timeout),
-            ("connect", Err(TransportError::Connect), LlmError::Unreachable),
-            ("host denied", Err(TransportError::HostDenied), LlmError::HostDenied),
-            ("broken json", Ok(HttpResponse::ok_json(200, "{not json")), LlmError::BadResponse),
-            ("no text", Ok(HttpResponse::ok_json(200, r#"{"content":[],"usage":{"input_tokens":1,"output_tokens":1}}"#)), LlmError::BadResponse),
-            ("no usage", Ok(HttpResponse::ok_json(200, r#"{"content":[{"type":"text","text":"x"}]}"#)), LlmError::BadResponse),
+            (
+                "connect",
+                Err(TransportError::Connect),
+                LlmError::Unreachable,
+            ),
+            (
+                "host denied",
+                Err(TransportError::HostDenied),
+                LlmError::HostDenied,
+            ),
+            (
+                "broken json",
+                Ok(HttpResponse::ok_json(200, "{not json")),
+                LlmError::BadResponse,
+            ),
+            (
+                "no text",
+                Ok(HttpResponse::ok_json(
+                    200,
+                    r#"{"content":[],"usage":{"input_tokens":1,"output_tokens":1}}"#,
+                )),
+                LlmError::BadResponse,
+            ),
+            (
+                "no usage",
+                Ok(HttpResponse::ok_json(
+                    200,
+                    r#"{"content":[{"type":"text","text":"x"}]}"#,
+                )),
+                LlmError::BadResponse,
+            ),
         ]
     }
 
@@ -252,9 +391,17 @@ pub(crate) mod tests {
             let attempts = transport.requests().len();
             if expected.is_retryable() {
                 let waits = sleeper.slept().len();
-                assert_eq!((attempts, waits), (MAX_ATTEMPTS as usize, MAX_ATTEMPTS as usize - 1), "{name}");
+                assert_eq!(
+                    (attempts, waits),
+                    (MAX_ATTEMPTS as usize, MAX_ATTEMPTS as usize - 1),
+                    "{name}"
+                );
             } else {
-                assert_eq!((attempts, sleeper.slept().len()), (1, 0), "{name}: no retry");
+                assert_eq!(
+                    (attempts, sleeper.slept().len()),
+                    (1, 0),
+                    "{name}: no retry"
+                );
             }
         }
     }
@@ -262,28 +409,64 @@ pub(crate) mod tests {
     #[test]
     fn backoff_doubles_and_honors_retry_after_then_a_later_success_wins() {
         let busy = || Ok(HttpResponse::ok_json(529, "{}"));
-        let (client, _, sleeper) = adapter(vec![busy(), busy(), Ok(HttpResponse::ok_json(200, &ok_body("fine", 1, 1)))]);
-        assert_eq!(client.complete(&request()).expect("third attempt").text, "fine");
+        let (client, _, sleeper) = adapter(vec![
+            busy(),
+            busy(),
+            Ok(HttpResponse::ok_json(200, &ok_body("fine", 1, 1))),
+        ]);
+        assert_eq!(
+            client.complete(&request()).expect("third attempt").text,
+            "fine"
+        );
         assert_eq!(sleeper.slept(), [1_000, 2_000]);
 
-        let limited = Ok(HttpResponse { status: 429, headers: vec![("retry-after".into(), "9".into())], body: Vec::new() });
-        let (client, _, sleeper) = adapter(vec![limited, Ok(HttpResponse::ok_json(200, &ok_body("ok", 1, 1)))]);
+        let limited = Ok(HttpResponse {
+            status: 429,
+            headers: vec![("retry-after".into(), "9".into())],
+            body: Vec::new(),
+        });
+        let (client, _, sleeper) = adapter(vec![
+            limited,
+            Ok(HttpResponse::ok_json(200, &ok_body("ok", 1, 1))),
+        ]);
         client.complete(&request()).expect("retry");
-        assert_eq!(sleeper.slept(), [9_000], "the server's Retry-After is the floor");
+        assert_eq!(
+            sleeper.slept(),
+            [9_000],
+            "the server's Retry-After is the floor"
+        );
     }
 
     #[test]
     fn a_retry_after_beyond_the_wait_limit_is_not_waited_for() {
-        let long = Ok(HttpResponse { status: 429, headers: vec![("retry-after".into(), "120".into())], body: Vec::new() });
+        let long = Ok(HttpResponse {
+            status: 429,
+            headers: vec![("retry-after".into(), "120".into())],
+            body: Vec::new(),
+        });
         let (client, transport, sleeper) = adapter(vec![long]);
-        assert_eq!(client.complete(&request()), Err(LlmError::RateLimited { retry_after_ms: Some(120_000) }));
+        assert_eq!(
+            client.complete(&request()),
+            Err(LlmError::RateLimited {
+                retry_after_ms: Some(120_000)
+            })
+        );
         assert_eq!((transport.requests().len(), sleeper.slept().len()), (1, 0));
     }
 
     #[test]
     fn a_host_other_than_the_policy_is_refused_before_anything_is_sent() {
-        let transport = Arc::new(ScriptedTransport::new(HostPolicy::configured([HOST]), vec![Ok(HttpResponse::ok_json(200, &ok_body("x", 1, 1)))]));
-        let client = AnthropicHttp::new("https://example.com", SecretValue::new("k"), "m", transport.clone(), Arc::new(RecordingSleeper::default()));
+        let transport = Arc::new(ScriptedTransport::new(
+            HostPolicy::configured([HOST]),
+            vec![Ok(HttpResponse::ok_json(200, &ok_body("x", 1, 1)))],
+        ));
+        let client = AnthropicHttp::new(
+            "https://example.com",
+            SecretValue::new("k"),
+            "m",
+            transport.clone(),
+            Arc::new(RecordingSleeper::default()),
+        );
         assert_eq!(client.complete(&request()), Err(LlmError::HostDenied));
         assert!(transport.requests().is_empty());
     }

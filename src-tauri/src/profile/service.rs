@@ -16,9 +16,9 @@ use super::publish::{self, MAX_WIKI_TITLES};
 use super::rest::RestProfile;
 use crate::commands::lock_db;
 use crate::error::{AppError, AppResult};
+use crate::remote::Clock;
 use crate::remote::runtime::RemoteRuntime;
 use crate::remote::supabase::RemoteError;
-use crate::remote::Clock;
 use crate::settings::{Outcome, Reason};
 use crate::store::{self, profile as repo};
 
@@ -124,21 +124,36 @@ fn rejected_or_err<T>(result: Result<T, ProfileError>) -> AppResult<Result<T, Pr
 }
 
 fn ack(result: Result<(), ProfileError>) -> AppResult<Ack> {
-    Ok(Ack { code: rejected_or_err(result)?.err().unwrap_or(ProfileCode::Ok) })
+    Ok(Ack {
+        code: rejected_or_err(result)?.err().unwrap_or(ProfileCode::Ok),
+    })
 }
 
 impl ProfileService {
-    pub fn new(db: Arc<Mutex<Connection>>, runtime: Arc<RemoteRuntime>, clock: Arc<dyn Clock>) -> Self {
-        let apis = Arc::new(AppApis { db: Arc::clone(&db), runtime });
+    pub fn new(
+        db: Arc<Mutex<Connection>>,
+        runtime: Arc<RemoteRuntime>,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
+        let apis = Arc::new(AppApis {
+            db: Arc::clone(&db),
+            runtime,
+        });
         Self::with_parts(db, clock, apis)
     }
 
-    pub(crate) fn with_parts(db: Arc<Mutex<Connection>>, clock: Arc<dyn Clock>, apis: Arc<dyn ApiSource>) -> Self {
+    pub(crate) fn with_parts(
+        db: Arc<Mutex<Connection>>,
+        clock: Arc<dyn Clock>,
+        apis: Arc<dyn ApiSource>,
+    ) -> Self {
         Self { db, clock, apis }
     }
 
     fn api(&self) -> Result<Arc<dyn ProfileApi>, ProfileError> {
-        self.apis.api().ok_or(ProfileError::Remote(RemoteError::NotSignedIn))
+        self.apis
+            .api()
+            .ok_or(ProfileError::Remote(RemoteError::NotSignedIn))
     }
 
     // ---- local settings ----
@@ -152,7 +167,13 @@ impl ProfileService {
             name: local.display_name,
             slug: local.slug,
             web_base_url: local.web_base_url,
-            scopes: Section::ALL.into_iter().map(|section| ScopeRow { section, scope: visibility.get(&section).copied().unwrap_or(Scope::Private) }).collect(),
+            scopes: Section::ALL
+                .into_iter()
+                .map(|section| ScopeRow {
+                    section,
+                    scope: visibility.get(&section).copied().unwrap_or(Scope::Private),
+                })
+                .collect(),
             wiki_titles: repo::wiki_titles(&conn)?,
             gift_daily_limit: gift::DAILY_LIMIT,
             gift_message_max: gift::MESSAGE_MAX_CHARS,
@@ -163,10 +184,14 @@ impl ProfileService {
     pub fn set_name(&self, name: &str) -> AppResult<Ack> {
         let name = name.trim();
         if name.chars().count() > NAME_MAX_CHARS || name.chars().any(char::is_control) {
-            return Ok(Ack { code: ProfileCode::InvalidInput });
+            return Ok(Ack {
+                code: ProfileCode::InvalidInput,
+            });
         }
         repo::save_name(&*lock_db(&self.db)?, name, self.clock.now_ms()?)?;
-        Ok(Ack { code: ProfileCode::Ok })
+        Ok(Ack {
+            code: ProfileCode::Ok,
+        })
     }
 
     /// Saves one section's scope, then publishes so a narrowed scope takes effect on the server
@@ -181,18 +206,45 @@ impl ProfileService {
         {
             let mut conn = lock_db(&self.db)?;
             let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            let before = repo::visibility(&tx)?.get(&section).copied().unwrap_or(Scope::Private);
+            let before = repo::visibility(&tx)?
+                .get(&section)
+                .copied()
+                .unwrap_or(Scope::Private);
             let key = format!("profile.scope.{}", section.as_str());
             let locked = crate::study::lock_held(&tx)?;
             if locked && scope.openness() > before.openness() {
-                store::append_history(&tx, at_ms, &key, Some(before.as_str()), scope.as_str(), Reason::User, Outcome::RejectedLocked)?;
+                store::append_history(
+                    &tx,
+                    at_ms,
+                    &key,
+                    Some(before.as_str()),
+                    scope.as_str(),
+                    Reason::User,
+                    Outcome::RejectedLocked,
+                )?;
                 tx.commit()?;
-                return Ok(PublishView { code: ProfileCode::RunLocked, slug: None, link: None });
+                return Ok(PublishView {
+                    code: ProfileCode::RunLocked,
+                    slug: None,
+                    link: None,
+                });
             }
             if scope != before {
-                let outcome = if locked { Outcome::AppliedPrivacyTighten } else { Outcome::Applied };
+                let outcome = if locked {
+                    Outcome::AppliedPrivacyTighten
+                } else {
+                    Outcome::Applied
+                };
                 repo::set_visibility(&tx, section, scope, at_ms)?;
-                store::append_history(&tx, at_ms, &key, Some(before.as_str()), scope.as_str(), Reason::User, outcome)?;
+                store::append_history(
+                    &tx,
+                    at_ms,
+                    &key,
+                    Some(before.as_str()),
+                    scope.as_str(),
+                    Reason::User,
+                    outcome,
+                )?;
             }
             tx.commit()?;
         }
@@ -208,17 +260,23 @@ impl ProfileService {
                 continue;
             }
             if title.chars().count() > TITLE_MAX_CHARS || title.chars().any(char::is_control) {
-                return Ok(Ack { code: ProfileCode::InvalidInput });
+                return Ok(Ack {
+                    code: ProfileCode::InvalidInput,
+                });
             }
             if !clean.iter().any(|t| t == title) {
                 clean.push(title.to_string());
             }
         }
         if clean.len() > MAX_WIKI_TITLES {
-            return Ok(Ack { code: ProfileCode::TooMany });
+            return Ok(Ack {
+                code: ProfileCode::TooMany,
+            });
         }
         repo::replace_wiki_titles(&mut *lock_db(&self.db)?, &clean)?;
-        Ok(Ack { code: ProfileCode::Ok })
+        Ok(Ack {
+            code: ProfileCode::Ok,
+        })
     }
 
     /// Saves where the static web bundle is hosted; an empty text clears it.
@@ -228,11 +286,17 @@ impl ProfileService {
         } else {
             match link::normalize_base(raw) {
                 Some(base) => Some(base),
-                None => return Ok(Ack { code: ProfileCode::InvalidInput }),
+                None => {
+                    return Ok(Ack {
+                        code: ProfileCode::InvalidInput,
+                    });
+                }
             }
         };
         repo::save_web_base(&*lock_db(&self.db)?, base.as_deref(), self.clock.now_ms()?)?;
-        Ok(Ack { code: ProfileCode::Ok })
+        Ok(Ack {
+            code: ProfileCode::Ok,
+        })
     }
 
     // ---- server ----
@@ -250,9 +314,17 @@ impl ProfileService {
             Ok(slug) => {
                 repo::save_slug(&*lock_db(&self.db)?, &slug, now)?;
                 let base = repo::local(&*lock_db(&self.db)?)?.web_base_url;
-                Ok(PublishView { code: ProfileCode::Ok, link: link::profile_link(base.as_deref(), Some(&slug)), slug: Some(slug) })
+                Ok(PublishView {
+                    code: ProfileCode::Ok,
+                    link: link::profile_link(base.as_deref(), Some(&slug)),
+                    slug: Some(slug),
+                })
             }
-            Err(ProfileError::Rejected(code)) => Ok(PublishView { code, slug: None, link: None }),
+            Err(ProfileError::Rejected(code)) => Ok(PublishView {
+                code,
+                slug: None,
+                link: None,
+            }),
             Err(other) => Err(other.into()),
         }
     }
@@ -266,7 +338,10 @@ impl ProfileService {
         self.view_of(move |api| api.member_profile(&user))
     }
 
-    fn view_of(&self, read: impl FnOnce(&dyn ProfileApi) -> Result<super::model::WireProfile, ProfileError>) -> AppResult<ProfileView> {
+    fn view_of(
+        &self,
+        read: impl FnOnce(&dyn ProfileApi) -> Result<super::model::WireProfile, ProfileError>,
+    ) -> AppResult<ProfileView> {
         let api = self.api()?;
         match read(api.as_ref()).and_then(ProfileView::from_wire) {
             Ok(view) => Ok(view),
@@ -278,7 +353,9 @@ impl ProfileService {
     pub fn sign_guestbook(&self, owner: &str, body: &str) -> AppResult<Ack> {
         let body = body.trim();
         if body.is_empty() || body.chars().count() > GUESTBOOK_MAX_CHARS {
-            return Ok(Ack { code: ProfileCode::InvalidInput });
+            return Ok(Ack {
+                code: ProfileCode::InvalidInput,
+            });
         }
         ack(self.api()?.sign_guestbook(owner, body))
     }
@@ -293,10 +370,25 @@ impl ProfileService {
 
     // ---- gifts ----
 
-    pub fn send_gift(&self, recipient_user: &str, recipient_name: &str, item_id: &str, message: &str) -> AppResult<SendOutcome> {
+    pub fn send_gift(
+        &self,
+        recipient_user: &str,
+        recipient_name: &str,
+        item_id: &str,
+        message: &str,
+    ) -> AppResult<SendOutcome> {
         let api = self.api().map_err(AppError::from)?;
         let gift_id = uuid::Uuid::new_v4().to_string();
-        gift::send(&self.db, api.as_ref(), &gift_id, recipient_user, recipient_name, item_id, message, self.clock.now_ms()?)
+        gift::send(
+            &self.db,
+            api.as_ref(),
+            &gift_id,
+            recipient_user,
+            recipient_name,
+            item_id,
+            message,
+            self.clock.now_ms()?,
+        )
     }
 
     /// Refreshes the gift box. Offline, the local outbox is still returned.
@@ -329,18 +421,29 @@ impl ProfileService {
                 created_at_ms: r.created_at_ms,
             })
             .collect();
-        Ok(GiftOverview { outbox, inbox, online })
+        Ok(GiftOverview {
+            outbox,
+            inbox,
+            online,
+        })
     }
 
     pub fn accept_gift(&self, gift_id: &str) -> AppResult<ReceiveOutcome> {
         let api = self.api()?;
         let now = self.clock.now_ms()?;
-        let message = api.gift_inbox()?.into_iter().find(|g| g.gift_id == gift_id).map(|g| g.message).unwrap_or_default();
+        let message = api
+            .gift_inbox()?
+            .into_iter()
+            .find(|g| g.gift_id == gift_id)
+            .map(|g| g.message)
+            .unwrap_or_default();
         gift::accept(&self.db, api.as_ref(), gift_id, &message, now)
     }
 
     pub fn decline_gift(&self, gift_id: &str) -> AppResult<Ack> {
         let api = self.api()?;
-        Ok(Ack { code: gift::decline(&self.db, api.as_ref(), gift_id, self.clock.now_ms()?)? })
+        Ok(Ack {
+            code: gift::decline(&self.db, api.as_ref(), gift_id, self.clock.now_ms()?)?,
+        })
     }
 }

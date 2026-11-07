@@ -11,17 +11,17 @@
 //! logout/restart/shutdown are not refused (see `QuitReason`).
 
 use std::ffi::c_char;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::OnceLock;
 
 use objc2::ffi::class_addMethod;
-use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
-use objc2::{msg_send, sel, MainThreadMarker};
 use objc2::rc::Retained;
+use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
+use objc2::{MainThreadMarker, msg_send, sel};
 use objc2_foundation::{NSAppleEventDescriptor, NSAppleEventManager};
 
-use super::quit::{quit_allowed, QuitReason};
 use super::PlatformError;
+use super::quit::{QuitReason, quit_allowed};
 
 type Gate = Box<dyn Fn(QuitReason) -> bool + Send + Sync>;
 
@@ -33,7 +33,11 @@ const NS_TERMINATE_NOW: usize = 1;
 const KEY_REASON_ATTR: u32 = u32::from_be_bytes(*b"why?");
 
 fn terminate_reply(allowed: bool) -> usize {
-    if allowed { NS_TERMINATE_NOW } else { NS_TERMINATE_CANCEL }
+    if allowed {
+        NS_TERMINATE_NOW
+    } else {
+        NS_TERMINATE_CANCEL
+    }
 }
 
 fn current_quit_reason() -> QuitReason {
@@ -55,7 +59,11 @@ fn current_quit_reason() -> QuitReason {
     QuitReason::from_apple_event_code(code)
 }
 
-extern "C-unwind" fn application_should_terminate(_this: *mut AnyObject, _sel: Sel, _sender: *mut AnyObject) -> usize {
+extern "C-unwind" fn application_should_terminate(
+    _this: *mut AnyObject,
+    _sel: Sel,
+    _sender: *mut AnyObject,
+) -> usize {
     // A panic must not unwind into AppKit; an unknown outcome is refused (fail closed), the
     // same as the ExitRequested gate.
     let allowed = catch_unwind(AssertUnwindSafe(|| {
@@ -72,32 +80,38 @@ extern "C-unwind" fn application_should_terminate(_this: *mut AnyObject, _sel: S
 /// Must run on the main thread after tao has set the app delegate (inside Tauri `setup`).
 pub fn install_quit_gate(gate: Gate) -> Result<(), PlatformError> {
     if MainThreadMarker::new().is_none() {
-        return Err(PlatformError::Process("quit gate must be installed on the main thread".into()));
+        return Err(PlatformError::Process(
+            "quit gate must be installed on the main thread".into(),
+        ));
     }
     let app_class = AnyClass::get(c"NSApplication")
         .ok_or_else(|| PlatformError::Process("NSApplication class not found".into()))?;
     // SAFETY: `sharedApplication` and `delegate` are plain getters, called on the main thread.
     let app: *mut AnyObject = unsafe { msg_send![app_class, sharedApplication] };
     if app.is_null() {
-        return Err(PlatformError::Process("NSApplication is not available".into()));
+        return Err(PlatformError::Process(
+            "NSApplication is not available".into(),
+        ));
     }
     // SAFETY: `app` is the live shared application, checked non-null above.
     let delegate: *mut AnyObject = unsafe { msg_send![app, delegate] };
     if delegate.is_null() {
-        return Err(PlatformError::Process("application delegate is not set yet".into()));
+        return Err(PlatformError::Process(
+            "application delegate is not set yet".into(),
+        ));
     }
     // SAFETY: `delegate` is a live object, checked non-null above.
     let class = unsafe { (*delegate).class() };
 
-    GATE.set(gate).map_err(|_| PlatformError::Process("quit gate already installed".into()))?;
+    GATE.set(gate)
+        .map_err(|_| PlatformError::Process("quit gate already installed".into()))?;
 
     // Type encoding: returns NSUInteger ('Q'), takes self ('@'), _cmd (':'), sender ('@').
     // SAFETY: the IMP's signature matches the encoding and `applicationShouldTerminate:`.
     let imp: Imp = unsafe {
-        std::mem::transmute::<
-            extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject) -> usize,
-            Imp,
-        >(application_should_terminate)
+        std::mem::transmute::<extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject) -> usize, Imp>(
+            application_should_terminate,
+        )
     };
     let types: *const c_char = c"Q@:@".as_ptr();
     // SAFETY: `class` is the delegate's class; `types` is NUL-terminated.
@@ -112,7 +126,9 @@ pub fn install_quit_gate(gate: Gate) -> Result<(), PlatformError> {
     if added.as_bool() {
         Ok(())
     } else {
-        Err(PlatformError::Process("delegate already implements applicationShouldTerminate:".into()))
+        Err(PlatformError::Process(
+            "delegate already implements applicationShouldTerminate:".into(),
+        ))
     }
 }
 

@@ -73,8 +73,12 @@ pub enum IntegrationPort {
 }
 
 impl IntegrationPort {
-    pub const ALL: [IntegrationPort; 4] =
-        [IntegrationPort::Supabase, IntegrationPort::Notify, IntegrationPort::Llm, IntegrationPort::Push];
+    pub const ALL: [IntegrationPort; 4] = [
+        IntegrationPort::Supabase,
+        IntegrationPort::Notify,
+        IntegrationPort::Llm,
+        IntegrationPort::Push,
+    ];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -106,7 +110,9 @@ impl ModeSetting {
         match raw {
             "auto" => Ok(ModeSetting::Auto),
             "mock" => Ok(ModeSetting::Mock),
-            other => Err(AppError::Invalid(format!("unknown integration mode {other:?}"))),
+            other => Err(AppError::Invalid(format!(
+                "unknown integration mode {other:?}"
+            ))),
         }
     }
 }
@@ -166,7 +172,11 @@ mod tests {
             (MockSetting, false, Mock),
         ];
         for (setting, configured, expected) in table {
-            assert_eq!(resolve_mode(setting, configured), expected, "{setting:?} configured={configured}");
+            assert_eq!(
+                resolve_mode(setting, configured),
+                expected,
+                "{setting:?} configured={configured}"
+            );
         }
     }
 
@@ -175,7 +185,10 @@ mod tests {
         for mode in [ModeSetting::Auto, ModeSetting::Mock] {
             assert_eq!(ModeSetting::parse(mode.as_str()).expect("parse"), mode);
         }
-        assert!(ModeSetting::parse("live").is_err(), "live is derived from configuration, never chosen");
+        assert!(
+            ModeSetting::parse("live").is_err(),
+            "live is derived from configuration, never chosen"
+        );
     }
 
     #[test]
@@ -185,7 +198,9 @@ mod tests {
             setting: ModeSetting::Auto,
             mode: IntegrationMode::NotConfigured,
             configured: false,
-            health: Health::Degraded { code: "auth_expired".into() },
+            health: Health::Degraded {
+                code: "auth_expired".into(),
+            },
             last_ok_ms: None,
         };
         let json = serde_json::to_value(&state).expect("json");

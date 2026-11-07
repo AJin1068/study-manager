@@ -38,8 +38,11 @@ struct AppBackend {
 impl PairingBackend for AppBackend {
     fn api(&self) -> Result<Arc<dyn PairingApi>, PhoneError> {
         let handle = {
-            let conn = lock_db(&self.db).map_err(|_| PhoneError::Remote(RemoteError::NotSignedIn))?;
-            self.runtime.supabase(&conn).map_err(|_| PhoneError::Remote(RemoteError::NotSignedIn))?
+            let conn =
+                lock_db(&self.db).map_err(|_| PhoneError::Remote(RemoteError::NotSignedIn))?;
+            self.runtime
+                .supabase(&conn)
+                .map_err(|_| PhoneError::Remote(RemoteError::NotSignedIn))?
         };
         if !handle.auth.status().signed_in {
             return Err(PhoneError::Remote(RemoteError::NotSignedIn));
@@ -62,7 +65,10 @@ impl PairingBackend for AppBackend {
 }
 
 /// The app's backend: the Supabase session of the signed-in user (the fake server in mock mode).
-pub fn app_backend(db: Arc<Mutex<Connection>>, runtime: Arc<RemoteRuntime>) -> Arc<dyn PairingBackend> {
+pub fn app_backend(
+    db: Arc<Mutex<Connection>>,
+    runtime: Arc<RemoteRuntime>,
+) -> Arc<dyn PairingBackend> {
     Arc::new(AppBackend { db, runtime })
 }
 
@@ -89,27 +95,49 @@ fn display_code(code: &str) -> String {
 }
 
 impl PairingService {
-    pub fn new(db: Arc<Mutex<Connection>>, runtime: Arc<RemoteRuntime>, clock: Arc<dyn Clock>) -> Self {
-        let backend = Arc::new(AppBackend { db: Arc::clone(&db), runtime });
+    pub fn new(
+        db: Arc<Mutex<Connection>>,
+        runtime: Arc<RemoteRuntime>,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
+        let backend = Arc::new(AppBackend {
+            db: Arc::clone(&db),
+            runtime,
+        });
         Self::with_parts(db, clock, backend)
     }
 
-    pub(crate) fn with_parts(db: Arc<Mutex<Connection>>, clock: Arc<dyn Clock>, backend: Arc<dyn PairingBackend>) -> Self {
+    pub(crate) fn with_parts(
+        db: Arc<Mutex<Connection>>,
+        clock: Arc<dyn Clock>,
+        backend: Arc<dyn PairingBackend>,
+    ) -> Self {
         Self { db, clock, backend }
     }
 
     /// Makes a new one-time code and the QR code that carries it with the server address and the
     /// public anon key. The code is shown, never logged.
     pub fn start(&self) -> AppResult<PairStart> {
-        let none = |code| PairStart { code, display_code: None, expires_at_ms: None, qr_svg: None };
+        let none = |code| PairStart {
+            code,
+            display_code: None,
+            expires_at_ms: None,
+            qr_svg: None,
+        };
         let api = self.backend.api().map_err(AppError::from)?;
-        let (endpoint, anon_key) = self.backend.server().ok_or(AppError::NotConfigured { port: "supabase" })?;
+        let (endpoint, anon_key) = self
+            .backend
+            .server()
+            .ok_or(AppError::NotConfigured { port: "supabase" })?;
         let made = match rejected_or_err(api.create_pair_code())? {
             Ok(made) => made,
             Err(code) => return Ok(none(code)),
         };
-        let offer = PairingOffer::new(&made.pair_code, &endpoint, &anon_key).and_then(|offer| offer.to_qr_text());
-        let qr_svg = offer.ok().and_then(|text| crate::remote::qr::render_svg(&text));
+        let offer = PairingOffer::new(&made.pair_code, &endpoint, &anon_key)
+            .and_then(|offer| offer.to_qr_text());
+        let qr_svg = offer
+            .ok()
+            .and_then(|text| crate::remote::qr::render_svg(&text));
         if qr_svg.is_none() {
             return Ok(none(PhoneCode::BadOffer));
         }
@@ -125,8 +153,16 @@ impl PairingService {
     /// last known state.
     pub fn status(&self) -> AppResult<PairStatusView> {
         let known = repo::pair(&*lock_db(&self.db)?)?;
-        let offline = PairStatusView { paired: known.paired, paired_at_ms: known.paired_at_ms, last_beat_ms: None, service_enabled: None, online: false };
-        let Ok(api) = self.backend.api() else { return Ok(offline) };
+        let offline = PairStatusView {
+            paired: known.paired,
+            paired_at_ms: known.paired_at_ms,
+            last_beat_ms: None,
+            service_enabled: None,
+            online: false,
+        };
+        let Ok(api) = self.backend.api() else {
+            return Ok(offline);
+        };
         match api.status() {
             Ok(wire) => {
                 let now = self.clock.now_ms()?;
@@ -146,7 +182,9 @@ impl PairingService {
     /// Ends the pairing. Refused while a study run holds the lock.
     pub fn revoke(&self) -> AppResult<PhoneAck> {
         if crate::study::lock_held(&*lock_db(&self.db)?)? {
-            return Ok(PhoneAck { code: PhoneCode::RunLocked });
+            return Ok(PhoneAck {
+                code: PhoneCode::RunLocked,
+            });
         }
         let api = self.backend.api().map_err(AppError::from)?;
         let code = match rejected_or_err(api.revoke_pair())? {

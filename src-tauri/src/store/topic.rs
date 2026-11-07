@@ -1,7 +1,7 @@
 //! `topic_assignment`: which wiki page a plan occurrence should cover. Rows are insert-only; the
 //! newest row of a `(plan_id, date)` is the current assignment, older rows are its history.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::error::AppResult;
 
@@ -68,10 +68,15 @@ pub fn history(conn: &Connection, plan_id: i64, date: &str) -> AppResult<Vec<Ass
 }
 
 /// `(minute_start_ms, credited_ms, away_ms, idle_ms)` of study minutes since `from_ms`.
-pub fn focus_minutes_since(conn: &Connection, from_ms: i64) -> AppResult<Vec<(i64, i64, i64, i64)>> {
+pub fn focus_minutes_since(
+    conn: &Connection,
+    from_ms: i64,
+) -> AppResult<Vec<(i64, i64, i64, i64)>> {
     let mut stmt = conn.prepare(
         "SELECT minute_start_ms, credited_ms, away_ms, idle_ms FROM focus_minutes WHERE minute_start_ms >= ?1 ORDER BY minute_start_ms",
     )?;
-    let rows = stmt.query_map(params![from_ms], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
+    let rows = stmt.query_map(params![from_ms], |r| {
+        Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+    })?;
     Ok(rows.collect::<Result<_, _>>()?)
 }

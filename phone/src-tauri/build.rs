@@ -5,7 +5,9 @@ fn main() {
     let blocker = tauri_build::InlinedPlugin::new()
         .commands(&["registerListener", "removeListener"])
         .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands);
-    if let Err(err) = tauri_build::try_build(tauri_build::Attributes::new().plugin("blocker", blocker)) {
+    if let Err(err) =
+        tauri_build::try_build(tauri_build::Attributes::new().plugin("blocker", blocker))
+    {
         panic!("tauri build failed: {err:#}");
     }
 }

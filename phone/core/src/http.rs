@@ -26,7 +26,12 @@ impl fmt::Debug for HttpRequest {
 
 impl HttpRequest {
     pub fn new(method: Method, url: String) -> Self {
-        Self { method, url, headers: Vec::new(), body: None }
+        Self {
+            method,
+            url,
+            headers: Vec::new(),
+            body: None,
+        }
     }
 
     pub fn header(mut self, name: &str, value: &str) -> Self {
@@ -35,13 +40,17 @@ impl HttpRequest {
     }
 
     pub fn json_body(mut self, body: Vec<u8>) -> Self {
-        self.headers.push(("content-type".to_string(), "application/json".to_string()));
+        self.headers
+            .push(("content-type".to_string(), "application/json".to_string()));
         self.body = Some(body);
         self
     }
 
     pub fn header_value(&self, name: &str) -> Option<&str> {
-        self.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str())
+        self.headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
     }
 }
 
@@ -59,7 +68,10 @@ impl HttpResponse {
 
     /// `Retry-After` in seconds form, as milliseconds.
     pub fn retry_after_ms(&self) -> Option<u64> {
-        let (_, value) = self.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("retry-after"))?;
+        let (_, value) = self
+            .headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("retry-after"))?;
         value.trim().parse::<u64>().ok()?.checked_mul(1000)
     }
 }

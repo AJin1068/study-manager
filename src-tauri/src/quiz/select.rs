@@ -22,7 +22,9 @@ pub fn mix(mut x: u64) -> u64 {
 }
 
 pub fn hash_str(text: &str) -> u64 {
-    text.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3))
+    text.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+    })
 }
 
 /// Accuracy of the page in per-mille; a page never answered counts as middling so new material
@@ -36,30 +38,55 @@ fn accuracy_permille(c: &Candidate) -> i64 {
 }
 
 fn is_fresh(c: &Candidate, now_ms: i64) -> bool {
-    c.last_asked_ms.is_none_or(|at| now_ms.saturating_sub(at) >= REASK_MS)
+    c.last_asked_ms
+        .is_none_or(|at| now_ms.saturating_sub(at) >= REASK_MS)
 }
 
 fn rank(c: &Candidate, now_ms: i64, seed: u64) -> (u8, i64, i64, u64) {
     let stale = u8::from(!is_fresh(c, now_ms));
     let age_key = c.last_asked_ms.unwrap_or(i64::MIN);
-    (stale, accuracy_permille(c), age_key, mix(seed ^ mix(u64::try_from(c.item.id).unwrap_or(0))))
+    (
+        stale,
+        accuracy_permille(c),
+        age_key,
+        mix(seed ^ mix(u64::try_from(c.item.id).unwrap_or(0))),
+    )
 }
 
 /// Picks up to `n` candidates (indexes into `candidates`). With `fresh_only`, a question asked in
 /// the last 24 hours is never picked; otherwise such questions fill in only after fresh ones run
 /// out. With `want_cloze`, at least one fill-in-the-blank is included whenever one exists.
-pub fn pick(candidates: &[Candidate], n: usize, now_ms: i64, seed: u64, fresh_only: bool, want_cloze: bool) -> Vec<usize> {
-    let mut order: Vec<usize> = (0..candidates.len()).filter(|&i| !fresh_only || is_fresh(&candidates[i], now_ms)).collect();
+pub fn pick(
+    candidates: &[Candidate],
+    n: usize,
+    now_ms: i64,
+    seed: u64,
+    fresh_only: bool,
+    want_cloze: bool,
+) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..candidates.len())
+        .filter(|&i| !fresh_only || is_fresh(&candidates[i], now_ms))
+        .collect();
     order.sort_by_key(|&i| rank(&candidates[i], now_ms, seed));
     let mut chosen: Vec<usize> = order.iter().copied().take(n).collect();
-    if want_cloze && !chosen.is_empty() && chosen.iter().all(|&i| candidates[i].item.kind != ItemKind::Cloze) {
-        if let Some(&cloze) = order.iter().find(|&&i| candidates[i].item.kind == ItemKind::Cloze) {
+    if want_cloze
+        && !chosen.is_empty()
+        && chosen
+            .iter()
+            .all(|&i| candidates[i].item.kind != ItemKind::Cloze)
+    {
+        if let Some(&cloze) = order
+            .iter()
+            .find(|&&i| candidates[i].item.kind == ItemKind::Cloze)
+        {
             if let Some(last) = chosen.last_mut() {
                 *last = cloze;
             }
         }
     }
-    chosen.sort_by_key(|&i| mix(seed ^ mix(u64::try_from(candidates[i].item.id).unwrap_or(0)) ^ 0x51));
+    chosen.sort_by_key(|&i| {
+        mix(seed ^ mix(u64::try_from(candidates[i].item.id).unwrap_or(0)) ^ 0x51)
+    });
     chosen
 }
 
@@ -69,7 +96,14 @@ mod tests {
 
     fn cand(id: i64, kind: ItemKind, total: i64, correct: i64, last: Option<i64>) -> Candidate {
         Candidate {
-            item: QuizItem { id, page_id: id, kind, prompt: format!("q{id}"), choices: vec![], answer_key: "a".into() },
+            item: QuizItem {
+                id,
+                page_id: id,
+                kind,
+                prompt: format!("q{id}"),
+                choices: vec![],
+                answer_key: "a".into(),
+            },
             page_total: total,
             page_correct: correct,
             last_asked_ms: last,
@@ -86,13 +120,20 @@ mod tests {
 
     #[test]
     fn the_draw_is_deterministic_for_a_seed_and_golden() {
-        let cands: Vec<Candidate> = (1..=6).map(|i| cand(i, ItemKind::Cloze, 0, 0, None)).collect();
+        let cands: Vec<Candidate> = (1..=6)
+            .map(|i| cand(i, ItemKind::Cloze, 0, 0, None))
+            .collect();
         let a = pick(&cands, 3, NOW, 7, true, false);
         let b = pick(&cands, 3, NOW, 7, true, false);
         assert_eq!(a, b);
         assert_eq!(a.len(), 3);
         let c = pick(&cands, 3, NOW, 8, true, false);
-        assert!((0..30).any(|seed| ids(&cands, &pick(&cands, 3, NOW, seed, true, false)) != ids(&cands, &c)), "the seed changes the draw");
+        assert!(
+            (0..30).any(
+                |seed| ids(&cands, &pick(&cands, 3, NOW, seed, true, false)) != ids(&cands, &c)
+            ),
+            "the seed changes the draw"
+        );
     }
 
     #[test]
@@ -104,7 +145,10 @@ mod tests {
             cand(4, ItemKind::Cloze, 10, 5, Some(NOW - 2 * REASK_MS)),
             cand(5, ItemKind::Cloze, 10, 5, Some(NOW - 3 * REASK_MS)),
         ];
-        assert_eq!(ids(&cands, &pick(&cands, 3, NOW, 1, true, false)), vec![2, 3, 5]);
+        assert_eq!(
+            ids(&cands, &pick(&cands, 3, NOW, 1, true, false)),
+            vec![2, 3, 5]
+        );
     }
 
     #[test]
@@ -114,22 +158,34 @@ mod tests {
             cand(2, ItemKind::Cloze, 0, 0, None),
             cand(3, ItemKind::Cloze, 0, 0, None),
         ];
-        assert_eq!(ids(&cands, &pick(&cands, 3, NOW, 1, true, false)), vec![2, 3], "fresh_only never repeats");
+        assert_eq!(
+            ids(&cands, &pick(&cands, 3, NOW, 1, true, false)),
+            vec![2, 3],
+            "fresh_only never repeats"
+        );
         let filled = pick(&cands, 3, NOW, 1, false, false);
-        assert_eq!(ids(&cands, &filled), vec![1, 2, 3], "without fresh_only the recent one only fills the gap");
+        assert_eq!(
+            ids(&cands, &filled),
+            vec![1, 2, 3],
+            "without fresh_only the recent one only fills the gap"
+        );
         let two = pick(&cands, 2, NOW, 1, false, false);
         assert_eq!(ids(&cands, &two), vec![2, 3]);
     }
 
     #[test]
     fn a_blank_is_included_when_one_exists() {
-        let mut cands: Vec<Candidate> = (1..=5).map(|i| cand(i, ItemKind::Mcq, 0, 0, None)).collect();
+        let mut cands: Vec<Candidate> = (1..=5)
+            .map(|i| cand(i, ItemKind::Mcq, 0, 0, None))
+            .collect();
         cands.push(cand(9, ItemKind::Cloze, 10, 10, None));
         for seed in 0..20 {
             let picked = pick(&cands, 3, NOW, seed, true, true);
             assert!(picked.iter().any(|&i| cands[i].item.id == 9), "seed {seed}");
         }
-        let no_cloze: Vec<Candidate> = (1..=4).map(|i| cand(i, ItemKind::Mcq, 0, 0, None)).collect();
+        let no_cloze: Vec<Candidate> = (1..=4)
+            .map(|i| cand(i, ItemKind::Mcq, 0, 0, None))
+            .collect();
         assert_eq!(pick(&no_cloze, 3, NOW, 1, true, true).len(), 3);
     }
 

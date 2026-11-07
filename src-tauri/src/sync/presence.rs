@@ -6,9 +6,9 @@
 //! exponential backoff: the server decides a plan was missed after a 3-minute grace, so at least
 //! five attempts must fit in it. Nothing is sent when signed out or not configured.
 
-use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::Duration;
 
@@ -29,7 +29,9 @@ const ASLEEP_WAIT_MS: u64 = 60_000;
 /// Delay before retry number `failures` (1-based), at most 30 seconds. `jitter_permille` shortens
 /// it by up to 20% so retries do not align; it never lengthens it.
 pub fn retry_delay_ms(failures: u32, jitter_permille: u32) -> u64 {
-    let step = usize::try_from(failures.saturating_sub(1)).unwrap_or(usize::MAX).min(RETRY_BASE_MS.len() - 1);
+    let step = usize::try_from(failures.saturating_sub(1))
+        .unwrap_or(usize::MAX)
+        .min(RETRY_BASE_MS.len() - 1);
     let base = RETRY_BASE_MS.get(step).copied().unwrap_or(30_000);
     base - base * u64::from(jitter_permille.min(1000)) / 1000 / 5
 }
@@ -97,7 +99,13 @@ impl Default for PresenceEngine {
 
 impl PresenceEngine {
     pub fn new() -> Self {
-        Self { asleep: false, active: false, next_due_ms: 0, failures: 0, degraded: false }
+        Self {
+            asleep: false,
+            active: false,
+            next_due_ms: 0,
+            failures: 0,
+            degraded: false,
+        }
     }
 
     pub fn is_degraded(&self) -> bool {
@@ -130,12 +138,19 @@ impl PresenceEngine {
         } else if !self.active {
             GATE_RECHECK_MS
         } else {
-            self.next_due_ms.saturating_sub(now_ms).clamp(1, ASLEEP_WAIT_MS)
+            self.next_due_ms
+                .saturating_sub(now_ms)
+                .clamp(1, ASLEEP_WAIT_MS)
         }
     }
 
     /// Sends a beat if one is due. `source` decides whether anything may be sent at all.
-    pub fn poll(&mut self, now_ms: u64, source: &dyn SyncSource, jitter: &dyn Jitter) -> PollOutcome {
+    pub fn poll(
+        &mut self,
+        now_ms: u64,
+        source: &dyn SyncSource,
+        jitter: &dyn Jitter,
+    ) -> PollOutcome {
         if self.asleep || (self.active && now_ms < self.next_due_ms) {
             return PollOutcome::Idle;
         }
@@ -159,7 +174,9 @@ impl PresenceEngine {
             studying: source.studying(),
         };
         let mut result = target.presence.beat(&beat);
-        if matches!(result, Err(err) if err.is_device_missing()) && target.mirror.register_device(&target.device).is_ok() {
+        if matches!(result, Err(err) if err.is_device_missing())
+            && target.mirror.register_device(&target.device).is_ok()
+        {
             result = target.presence.beat(&beat);
         }
         match result {
@@ -183,7 +200,12 @@ impl PresenceEngine {
 
 /// One guarded poll: a panic in the adapter or the source is logged and swallowed, never carried
 /// into the app.
-pub fn guarded_poll(engine: &mut PresenceEngine, now_ms: u64, source: &dyn SyncSource, jitter: &dyn Jitter) -> PollOutcome {
+pub fn guarded_poll(
+    engine: &mut PresenceEngine,
+    now_ms: u64,
+    source: &dyn SyncSource,
+    jitter: &dyn Jitter,
+) -> PollOutcome {
     match catch_unwind(AssertUnwindSafe(|| engine.poll(now_ms, source, jitter))) {
         Ok(outcome) => outcome,
         Err(_) => {
@@ -193,7 +215,12 @@ pub fn guarded_poll(engine: &mut PresenceEngine, now_ms: u64, source: &dyn SyncS
     }
 }
 
-fn publish(sink: &dyn PresenceReport, engine: &PresenceEngine, outcome: &PollOutcome, was_degraded: bool) {
+fn publish(
+    sink: &dyn PresenceReport,
+    engine: &PresenceEngine,
+    outcome: &PollOutcome,
+    was_degraded: bool,
+) {
     match outcome {
         PollOutcome::Sent(result) => sink.beat(*result),
         PollOutcome::Inactive => sink.inactive(),
@@ -206,7 +233,13 @@ fn publish(sink: &dyn PresenceReport, engine: &PresenceEngine, outcome: &PollOut
 
 /// Runs the presence loop until `Stop` (or the sender is dropped). Blocks; the caller owns the
 /// thread.
-pub fn run(rx: &Receiver<PresenceMsg>, source: &dyn SyncSource, mono: &dyn Mono, jitter: &dyn Jitter, sink: &dyn PresenceReport) {
+pub fn run(
+    rx: &Receiver<PresenceMsg>,
+    source: &dyn SyncSource,
+    mono: &dyn Mono,
+    jitter: &dyn Jitter,
+    sink: &dyn PresenceReport,
+) {
     let mut engine = PresenceEngine::new();
     loop {
         let now = mono.now_ms();
@@ -229,9 +262,17 @@ pub fn spawn(
     sink: Arc<dyn PresenceReport>,
 ) -> PresenceHandle {
     let (tx, rx) = mpsc::channel();
-    let spawned = thread::Builder::new().name("presence".into()).spawn(move || {
-        run(&rx, source.as_ref(), mono.as_ref(), jitter.as_ref(), sink.as_ref());
-    });
+    let spawned = thread::Builder::new()
+        .name("presence".into())
+        .spawn(move || {
+            run(
+                &rx,
+                source.as_ref(),
+                mono.as_ref(),
+                jitter.as_ref(),
+                sink.as_ref(),
+            );
+        });
     if let Err(err) = spawned {
         tracing::error!(error = %err, "presence thread did not start; no signal will be sent");
     }
@@ -244,9 +285,9 @@ pub(crate) mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
+    use crate::remote::ManualClock;
     use crate::remote::fake::FakeBackend;
     use crate::remote::supabase::{RemoteError, SupabaseRest};
-    use crate::remote::ManualClock;
     use crate::sync::ports::{DeviceIdentity, PlanMirror, RestSync};
     use crate::sync::testing::{FixedJitter, ManualMono};
     use crate::sync::worker::SyncTarget;
@@ -270,7 +311,11 @@ pub(crate) mod tests {
             if !self.signed_in.load(Ordering::SeqCst) {
                 return None;
             }
-            Some(SyncTarget { mirror: self.port.clone(), presence: self.port.clone(), device: self.device.clone() })
+            Some(SyncTarget {
+                mirror: self.port.clone(),
+                presence: self.port.clone(),
+                device: self.device.clone(),
+            })
         }
         fn studying(&self) -> bool {
             self.studying.load(Ordering::SeqCst)
@@ -297,12 +342,28 @@ pub(crate) mod tests {
         use crate::remote::secrets::MemorySecretStore;
         let wall = Arc::new(ManualClock::new(WALL_START));
         let backend = Arc::new(FakeBackend::new(wall.clone()));
-        let service = Arc::new(AuthService::new(backend.auth(), Arc::new(MemorySecretStore::in_memory()), backend.clone(), wall.clone()));
+        let service = Arc::new(AuthService::new(
+            backend.auth(),
+            Arc::new(MemorySecretStore::in_memory()),
+            backend.clone(),
+            wall.clone(),
+        ));
         service.request_otp("a@example.test").expect("otp");
-        service.verify_otp("a@example.test", "000000").expect("verify");
-        let rest = Arc::new(SupabaseRest::new(FAKE_ENDPOINT, FAKE_ANON_KEY, backend.clone(), service));
+        service
+            .verify_otp("a@example.test", "000000")
+            .expect("verify");
+        let rest = Arc::new(SupabaseRest::new(
+            FAKE_ENDPOINT,
+            FAKE_ANON_KEY,
+            backend.clone(),
+            service,
+        ));
         let port = Arc::new(RestSync::new(rest));
-        let device = DeviceIdentity { id: DEVICE.into(), app_version: "0.1.0".into(), platform: "macos" };
+        let device = DeviceIdentity {
+            id: DEVICE.into(),
+            app_version: "0.1.0".into(),
+            platform: "macos",
+        };
         port.register_device(&device).expect("register");
         let source = Arc::new(TestSource {
             port,
@@ -312,7 +373,11 @@ pub(crate) mod tests {
             panic_once: AtomicBool::new(false),
             device,
         });
-        Rig { backend, wall, source }
+        Rig {
+            backend,
+            wall,
+            source,
+        }
     }
 
     fn beats(rig: &Rig) -> usize {
@@ -322,11 +387,19 @@ pub(crate) mod tests {
     #[test]
     fn retry_schedule_is_5_10_20_30_and_never_longer() {
         let delays: Vec<u64> = (1..=8).map(|n| retry_delay_ms(n, 0)).collect();
-        assert_eq!(delays, [5_000, 10_000, 20_000, 30_000, 30_000, 30_000, 30_000, 30_000]);
+        assert_eq!(
+            delays,
+            [
+                5_000, 10_000, 20_000, 30_000, 30_000, 30_000, 30_000, 30_000
+            ]
+        );
         for n in 1..=10 {
             for jitter in [0, 300, 1000, 5000] {
                 let d = retry_delay_ms(n, jitter);
-                assert!(d <= 30_000 && d * 5 >= RETRY_BASE_MS[(n as usize - 1).min(3)] * 4, "n={n} jitter={jitter} d={d}");
+                assert!(
+                    d <= 30_000 && d * 5 >= RETRY_BASE_MS[(n as usize - 1).min(3)] * 4,
+                    "n={n} jitter={jitter} d={d}"
+                );
             }
         }
     }
@@ -357,14 +430,24 @@ pub(crate) mod tests {
         let jitter = FixedJitter(0);
         let mut sent_at = Vec::new();
         for _ in 0..(5 * 60 * 1000 / 500) {
-            if let PollOutcome::Sent(Ok(())) = engine.poll(mono.now_ms(), rig.source.as_ref(), &jitter) {
+            if let PollOutcome::Sent(Ok(())) =
+                engine.poll(mono.now_ms(), rig.source.as_ref(), &jitter)
+            {
                 sent_at.push(mono.now_ms());
             }
             mono.advance(500);
         }
         assert_eq!(sent_at, [0, 60_000, 120_000, 180_000, 240_000]);
-        assert!(sent_at.windows(2).all(|w| (55_000..=65_000).contains(&(w[1] - w[0]))));
-        assert_eq!(beats(&rig), 1, "one presence row per device, refreshed by each beat");
+        assert!(
+            sent_at
+                .windows(2)
+                .all(|w| (55_000..=65_000).contains(&(w[1] - w[0])))
+        );
+        assert_eq!(
+            beats(&rig),
+            1,
+            "one presence row per device, refreshed by each beat"
+        );
     }
 
     #[test]
@@ -373,18 +456,31 @@ pub(crate) mod tests {
         let mono = ManualMono::new(0);
         let mut engine = PresenceEngine::new();
         let jitter = FixedJitter(0);
-        assert_eq!(engine.poll(0, rig.source.as_ref(), &jitter), PollOutcome::Sent(Ok(())));
+        assert_eq!(
+            engine.poll(0, rig.source.as_ref(), &jitter),
+            PollOutcome::Sent(Ok(()))
+        );
         engine.on_sleep();
         let calls_before = rig.source.target_calls.load(Ordering::SeqCst);
         for _ in 0..20 {
             mono.advance(60_000);
-            assert_eq!(engine.poll(mono.now_ms(), rig.source.as_ref(), &jitter), PollOutcome::Idle);
+            assert_eq!(
+                engine.poll(mono.now_ms(), rig.source.as_ref(), &jitter),
+                PollOutcome::Idle
+            );
         }
-        assert_eq!(rig.source.target_calls.load(Ordering::SeqCst), calls_before, "asleep: not even the gate is read");
+        assert_eq!(
+            rig.source.target_calls.load(Ordering::SeqCst),
+            calls_before,
+            "asleep: not even the gate is read"
+        );
         // Wake: the very next poll (the thread polls as soon as the message arrives) sends.
         let woke_at = mono.now_ms();
         engine.on_wake(woke_at);
-        assert_eq!(engine.poll(woke_at, rig.source.as_ref(), &jitter), PollOutcome::Sent(Ok(())));
+        assert_eq!(
+            engine.poll(woke_at, rig.source.as_ref(), &jitter),
+            PollOutcome::Sent(Ok(()))
+        );
         assert_eq!(engine.wait_ms(woke_at), 60_000);
     }
 
@@ -396,12 +492,18 @@ pub(crate) mod tests {
         rig.backend.set_outage(true);
         let mut now = 0;
         for expected_degraded in [false, false, true, true] {
-            assert!(matches!(engine.poll(now, rig.source.as_ref(), &jitter), PollOutcome::Sent(Err(_))));
+            assert!(matches!(
+                engine.poll(now, rig.source.as_ref(), &jitter),
+                PollOutcome::Sent(Err(_))
+            ));
             assert_eq!(engine.is_degraded(), expected_degraded);
             now += 30_000;
         }
         rig.backend.set_outage(false);
-        assert_eq!(engine.poll(now, rig.source.as_ref(), &jitter), PollOutcome::Sent(Ok(())));
+        assert_eq!(
+            engine.poll(now, rig.source.as_ref(), &jitter),
+            PollOutcome::Sent(Ok(()))
+        );
         assert!(!engine.is_degraded());
     }
 
@@ -414,14 +516,20 @@ pub(crate) mod tests {
         let mut now = 0;
         let mut last_attempt = 0;
         for _ in 0..6 {
-            assert!(matches!(engine.poll(now, rig.source.as_ref(), &jitter), PollOutcome::Sent(Err(_))));
+            assert!(matches!(
+                engine.poll(now, rig.source.as_ref(), &jitter),
+                PollOutcome::Sent(Err(_))
+            ));
             last_attempt = now;
             now += engine.wait_ms(now);
         }
         rig.backend.set_outage(false);
         // The network is back right after the last attempt; the next attempt is within 30 s.
         assert!(now - last_attempt <= 30_000, "gap {}", now - last_attempt);
-        assert_eq!(engine.poll(now, rig.source.as_ref(), &jitter), PollOutcome::Sent(Ok(())));
+        assert_eq!(
+            engine.poll(now, rig.source.as_ref(), &jitter),
+            PollOutcome::Sent(Ok(()))
+        );
     }
 
     #[test]
@@ -431,15 +539,24 @@ pub(crate) mod tests {
         let jitter = FixedJitter(0);
         rig.source.signed_in.store(false, Ordering::SeqCst);
         for now in [0, 1_000, 61_000, 500_000] {
-            assert_eq!(engine.poll(now, rig.source.as_ref(), &jitter), PollOutcome::Inactive);
+            assert_eq!(
+                engine.poll(now, rig.source.as_ref(), &jitter),
+                PollOutcome::Inactive
+            );
         }
         assert_eq!(beats(&rig), 0);
         rig.source.signed_in.store(true, Ordering::SeqCst);
-        assert_eq!(engine.poll(501_000, rig.source.as_ref(), &jitter), PollOutcome::Sent(Ok(())));
+        assert_eq!(
+            engine.poll(501_000, rig.source.as_ref(), &jitter),
+            PollOutcome::Sent(Ok(()))
+        );
         assert_eq!(beats(&rig), 1);
         // Sign out in the middle of the wait: the due beat is dropped at the gate.
         rig.source.signed_in.store(false, Ordering::SeqCst);
-        assert_eq!(engine.poll(561_000, rig.source.as_ref(), &jitter), PollOutcome::Inactive);
+        assert_eq!(
+            engine.poll(561_000, rig.source.as_ref(), &jitter),
+            PollOutcome::Inactive
+        );
     }
 
     #[test]
@@ -471,18 +588,37 @@ pub(crate) mod tests {
         engine.poll(0, rig.source.as_ref(), &jitter);
         let rows = rig.backend.table_rows("presence");
         assert_eq!(rows[0]["studying"], serde_json::json!(true));
-        let mut keys: Vec<&str> = rows[0].as_object().expect("row").keys().map(String::as_str).collect();
+        let mut keys: Vec<&str> = rows[0]
+            .as_object()
+            .expect("row")
+            .keys()
+            .map(String::as_str)
+            .collect();
         keys.sort_unstable();
-        assert_eq!(keys, ["app_version", "device_id", "last_seen_at_ms", "studying", "user_id"]);
+        assert_eq!(
+            keys,
+            [
+                "app_version",
+                "device_id",
+                "last_seen_at_ms",
+                "studying",
+                "user_id"
+            ]
+        );
     }
 
     #[test]
     fn an_unregistered_device_is_registered_and_the_beat_retried() {
         let rig = rig();
         // The server forgot the device (sign-out removed it, a new session began).
-        rig.backend.delete(&crate::remote::fake::Caller::Service, "devices", &[]).expect("delete devices");
+        rig.backend
+            .delete(&crate::remote::fake::Caller::Service, "devices", &[])
+            .expect("delete devices");
         let mut engine = PresenceEngine::new();
-        assert_eq!(engine.poll(0, rig.source.as_ref(), &FixedJitter(0)), PollOutcome::Sent(Ok(())));
+        assert_eq!(
+            engine.poll(0, rig.source.as_ref(), &FixedJitter(0)),
+            PollOutcome::Sent(Ok(()))
+        );
         assert_eq!(rig.backend.device_count(), 1);
     }
 
@@ -492,8 +628,14 @@ pub(crate) mod tests {
         let mut engine = PresenceEngine::new();
         let jitter = FixedJitter(0);
         rig.source.panic_once.store(true, Ordering::SeqCst);
-        assert_eq!(guarded_poll(&mut engine, 0, rig.source.as_ref(), &jitter), PollOutcome::Panicked);
-        assert_eq!(guarded_poll(&mut engine, 1_000, rig.source.as_ref(), &jitter), PollOutcome::Sent(Ok(())));
+        assert_eq!(
+            guarded_poll(&mut engine, 0, rig.source.as_ref(), &jitter),
+            PollOutcome::Panicked
+        );
+        assert_eq!(
+            guarded_poll(&mut engine, 1_000, rig.source.as_ref(), &jitter),
+            PollOutcome::Sent(Ok(()))
+        );
     }
 
     #[derive(Default)]
@@ -504,7 +646,10 @@ pub(crate) mod tests {
             self.0.lock().expect("log").push(format!("beat:{result:?}"));
         }
         fn degraded(&self, degraded: bool) {
-            self.0.lock().expect("log").push(format!("degraded:{degraded}"));
+            self.0
+                .lock()
+                .expect("log")
+                .push(format!("degraded:{degraded}"));
         }
         fn inactive(&self) {
             self.0.lock().expect("log").push("inactive".into());
@@ -524,12 +669,22 @@ pub(crate) mod tests {
         // Messages are queued before the loop starts: it sends the first beat, then reads
         // Sleep, Wake (which makes a beat due again), sends that, and reads Stop.
         run(&rx, rig.source.as_ref(), &mono, &FixedJitter(0), &log);
-        assert_eq!(log.0.lock().expect("log").clone(), ["beat:Ok(())", "beat:Ok(())"], "the wake made a second beat due at once");
+        assert_eq!(
+            log.0.lock().expect("log").clone(),
+            ["beat:Ok(())", "beat:Ok(())"],
+            "the wake made a second beat due at once"
+        );
     }
 
     #[test]
     fn the_status_shows_stable_codes() {
-        assert_eq!(SyncError::Remote(RemoteError::Http { status: 503 }).code(), "http_error");
-        assert_eq!(SyncError::Rejected("device_not_owned").code(), "device_not_owned");
+        assert_eq!(
+            SyncError::Remote(RemoteError::Http { status: 503 }).code(),
+            "http_error"
+        );
+        assert_eq!(
+            SyncError::Rejected("device_not_owned").code(),
+            "device_not_owned"
+        );
     }
 }

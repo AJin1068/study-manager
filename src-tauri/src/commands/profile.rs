@@ -33,7 +33,11 @@ pub async fn profile_set_name(service: Service<'_>, name: String) -> AppResult<A
 }
 
 #[tauri::command]
-pub async fn profile_set_scope(service: Service<'_>, section: Section, scope: Scope) -> AppResult<PublishView> {
+pub async fn profile_set_scope(
+    service: Service<'_>,
+    section: Section,
+    scope: Scope,
+) -> AppResult<PublishView> {
     blocking(&service, move |s| s.set_scope(section, scope)).await
 }
 
@@ -63,7 +67,11 @@ pub async fn profile_member_view(service: Service<'_>, user_id: String) -> AppRe
 }
 
 #[tauri::command]
-pub async fn profile_sign_guestbook(service: Service<'_>, owner_id: String, body: String) -> AppResult<Ack> {
+pub async fn profile_sign_guestbook(
+    service: Service<'_>,
+    owner_id: String,
+    body: String,
+) -> AppResult<Ack> {
     blocking(&service, move |s| s.sign_guestbook(&owner_id, &body)).await
 }
 
@@ -78,8 +86,17 @@ pub async fn profile_report_entry(service: Service<'_>, id: i64) -> AppResult<Ac
 }
 
 #[tauri::command]
-pub async fn gift_send(service: Service<'_>, recipient_id: String, recipient_name: String, item_id: String, message: String) -> AppResult<SendOutcome> {
-    blocking(&service, move |s| s.send_gift(&recipient_id, &recipient_name, &item_id, &message)).await
+pub async fn gift_send(
+    service: Service<'_>,
+    recipient_id: String,
+    recipient_name: String,
+    item_id: String,
+    message: String,
+) -> AppResult<SendOutcome> {
+    blocking(&service, move |s| {
+        s.send_gift(&recipient_id, &recipient_name, &item_id, &message)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -106,7 +123,10 @@ mod tests {
     use crate::profile::service::*;
 
     fn fixture() -> Value {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../src/api/fixtures/profile-contract.json");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../src/api/fixtures/profile-contract.json"
+        );
         serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json")
     }
 
@@ -142,14 +162,34 @@ mod tests {
             gift_message_max: 60,
         };
         assert_eq!(json(&home), f["home"]);
-        assert_eq!(json(&Ack { code: ProfileCode::Ok }), f["ack"]);
-        assert_eq!(json(&PublishView { code: ProfileCode::Ok, slug: Some("0123456789abcdef".into()), link: None }), f["publish"]);
+        assert_eq!(
+            json(&Ack {
+                code: ProfileCode::Ok
+            }),
+            f["ack"]
+        );
+        assert_eq!(
+            json(&PublishView {
+                code: ProfileCode::Ok,
+                slug: Some("0123456789abcdef".into()),
+                link: None
+            }),
+            f["publish"]
+        );
 
         let view = ProfileView {
             code: ProfileCode::Ok,
             name: Some("민수".into()),
             slug: None,
-            visible: vec![Section::Room, Section::Grass, Section::Level, Section::Badges, Section::Guestbook, Section::Visitors, Section::Gifts],
+            visible: vec![
+                Section::Room,
+                Section::Grass,
+                Section::Level,
+                Section::Badges,
+                Section::Guestbook,
+                Section::Visitors,
+                Section::Gifts,
+            ],
             room: Some(RoomLook {
                 species: Some("fox".into()),
                 hat: Some("hat_beanie".into()),
@@ -158,22 +198,63 @@ mod tests {
                 hand: None,
                 furniture: vec!["furn_lamp".into()],
             }),
-            grass: Some(vec![GrassDay { day: "2026-11-05".into(), study_min: 90 }]),
+            grass: Some(vec![GrassDay {
+                day: "2026-11-05".into(),
+                study_min: 90,
+            }]),
             level: Some(7),
             badges: Some(vec!["streak_7".into()]),
-            guestbook: Some(vec![GuestEntry { id: 3, author_name: "친구1".into(), body: "응원해요".into(), at_ms: 1000, mine: false, reported: false }]),
+            guestbook: Some(vec![GuestEntry {
+                id: 3,
+                author_name: "친구1".into(),
+                body: "응원해요".into(),
+                at_ms: 1000,
+                mine: false,
+                reported: false,
+            }]),
             visitors: Some(Visitors { total: 4, today: 1 }),
             wiki: None,
             subject: None,
-            gifts: Some(vec![GiftedItem { item_id: "acc_bowtie".into(), sender_name: "친구1".into(), message: "고마워".into(), at_ms: Some(2000) }]),
+            gifts: Some(vec![GiftedItem {
+                item_id: "acc_bowtie".into(),
+                sender_name: "친구1".into(),
+                message: "고마워".into(),
+                at_ms: Some(2000),
+            }]),
         };
         assert_eq!(json(&view), f["view"]);
-        assert_eq!(json(&ProfileView::empty(ProfileCode::NotMember)), f["hiddenView"]);
+        assert_eq!(
+            json(&ProfileView::empty(ProfileCode::NotMember)),
+            f["hiddenView"]
+        );
 
         let id = "00000000-0000-4000-8000-00000000000a";
-        assert_eq!(json(&SendOutcome { code: ProfileCode::Ok, gift_id: Some(id.into()), state: Some("pending".into()), balance: 60 }), f["sendOutcome"]);
-        assert_eq!(json(&SendOutcome { code: ProfileCode::NotGiftable, gift_id: None, state: None, balance: 100 }), f["refusedSend"]);
-        assert_eq!(json(&ReceiveOutcome { code: ProfileCode::Ok, item_id: Some("hat_beanie".into()), already_owned: false }), f["receiveOutcome"]);
+        assert_eq!(
+            json(&SendOutcome {
+                code: ProfileCode::Ok,
+                gift_id: Some(id.into()),
+                state: Some("pending".into()),
+                balance: 60
+            }),
+            f["sendOutcome"]
+        );
+        assert_eq!(
+            json(&SendOutcome {
+                code: ProfileCode::NotGiftable,
+                gift_id: None,
+                state: None,
+                balance: 100
+            }),
+            f["refusedSend"]
+        );
+        assert_eq!(
+            json(&ReceiveOutcome {
+                code: ProfileCode::Ok,
+                item_id: Some("hat_beanie".into()),
+                already_owned: false
+            }),
+            f["receiveOutcome"]
+        );
         let overview = GiftOverview {
             outbox: vec![OutboxView {
                 gift_id: id.into(),

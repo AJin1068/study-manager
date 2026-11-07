@@ -91,17 +91,29 @@ impl Tracker {
         }
         if let (Some(prev), false) = (self.prev, gapped) {
             if let Some(class) = prev.class {
-                add_span(&mut out.minutes, prev.at_ms.max(segment_start_ms), obs.at_ms, class);
+                add_span(
+                    &mut out.minutes,
+                    prev.at_ms.max(segment_start_ms),
+                    obs.at_ms,
+                    class,
+                );
             }
         }
 
-        let idle_ms = self.idle_origin_ms.map_or(obs.idle_ms, |origin| obs.idle_ms.min(obs.at_ms - origin)).max(0);
+        let idle_ms = self
+            .idle_origin_ms
+            .map_or(obs.idle_ms, |origin| obs.idle_ms.min(obs.at_ms - origin))
+            .max(0);
         let idle_now = idle_ms >= IDLE_SUSPECT_MS;
 
         match &obs.foreground {
             Foreground::Study => {
                 if self.deviated {
-                    out.events.push(PendingEvent { at_ms: obs.at_ms, kind: FocusEventKind::Return, app_id: None });
+                    out.events.push(PendingEvent {
+                        at_ms: obs.at_ms,
+                        kind: FocusEventKind::Return,
+                        app_id: None,
+                    });
                     self.deviated = false;
                 }
                 self.last_in_study = Some(true);
@@ -120,8 +132,16 @@ impl Tracker {
             Foreground::Unknown => {}
         }
         if idle_now != self.idle {
-            let kind = if idle_now { FocusEventKind::IdleStart } else { FocusEventKind::IdleEnd };
-            out.events.push(PendingEvent { at_ms: obs.at_ms, kind, app_id: None });
+            let kind = if idle_now {
+                FocusEventKind::IdleStart
+            } else {
+                FocusEventKind::IdleEnd
+            };
+            out.events.push(PendingEvent {
+                at_ms: obs.at_ms,
+                kind,
+                app_id: None,
+            });
             self.idle = idle_now;
         }
 
@@ -131,7 +151,10 @@ impl Tracker {
             (Foreground::Study, true) => Some(Class::Idle),
             (Foreground::Study, false) => Some(Class::Credited),
         };
-        self.prev = Some(Prev { at_ms: obs.at_ms, class });
+        self.prev = Some(Prev {
+            at_ms: obs.at_ms,
+            class,
+        });
         out
     }
 }
@@ -143,10 +166,16 @@ fn add_span(minutes: &mut Vec<MinuteDelta>, start: i64, end: i64, class: Class) 
         let minute_start_ms = cursor.div_euclid(MINUTE_MS) * MINUTE_MS;
         let next = (minute_start_ms + MINUTE_MS).min(end);
         let ms = next - cursor;
-        let index = match minutes.iter().position(|m| m.minute_start_ms == minute_start_ms) {
+        let index = match minutes
+            .iter()
+            .position(|m| m.minute_start_ms == minute_start_ms)
+        {
             Some(i) => i,
             None => {
-                minutes.push(MinuteDelta { minute_start_ms, ..MinuteDelta::default() });
+                minutes.push(MinuteDelta {
+                    minute_start_ms,
+                    ..MinuteDelta::default()
+                });
                 minutes.len() - 1
             }
         };

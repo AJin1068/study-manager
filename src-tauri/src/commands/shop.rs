@@ -2,7 +2,7 @@
 
 use tauri::{AppHandle, State};
 
-use super::{lock_db, AppState};
+use super::{AppState, lock_db};
 use crate::character::{self, CharacterView};
 use crate::clock::now_ms;
 use crate::error::AppResult;
@@ -22,7 +22,11 @@ pub fn purchase_item(state: State<'_, AppState>, item_id: String) -> AppResult<P
 }
 
 #[tauri::command]
-pub fn equip_item(app: AppHandle, state: State<'_, AppState>, item_id: String) -> AppResult<CharacterView> {
+pub fn equip_item(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    item_id: String,
+) -> AppResult<CharacterView> {
     let view = shop::equip(&mut *lock_db(&state.db)?, &item_id)?;
     character::refresh_tray(&app, &state.db);
     Ok(view)
@@ -42,8 +46,12 @@ mod tests {
 
     #[test]
     fn shop_wire_shapes_match_the_shared_fixture() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../src/api/fixtures/shop-contract.json");
-        let fixture: Value = serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../src/api/fixtures/shop-contract.json"
+        );
+        let fixture: Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
         let shop = ShopView {
             balance: 60,
             items: vec![
@@ -79,7 +87,10 @@ mod tests {
         let outcomes = serde_json::json!([
             PurchaseOutcome::Purchased { balance: 60 },
             PurchaseOutcome::AlreadyOwned,
-            PurchaseOutcome::InsufficientPoints { balance: 3, price: 40 },
+            PurchaseOutcome::InsufficientPoints {
+                balance: 3,
+                price: 40
+            },
             PurchaseOutcome::NotForSale,
         ]);
         assert_eq!(outcomes, fixture["outcomes"]);

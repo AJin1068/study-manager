@@ -11,24 +11,46 @@ use crate::settings::{self, SettingSpec, SettingValue, UpdateOutcome, ValueKind}
 
 const CATEGORY: &str = "messages";
 
-pub const ENABLED: SettingSpec =
-    SettingSpec { name: "messages.enabled", category: CATEGORY, kind: ValueKind::Bool, default: "true", tighten_to: Some("false") };
+pub const ENABLED: SettingSpec = SettingSpec {
+    name: "messages.enabled",
+    category: CATEGORY,
+    kind: ValueKind::Bool,
+    default: "true",
+    tighten_to: Some("false"),
+};
 pub const TONE: SettingSpec = SettingSpec {
     name: "messages.tone",
     category: CATEGORY,
-    kind: ValueKind::Text { allowed: &["gentle", "warm", "normal", "firm", "harsh"] },
+    kind: ValueKind::Text {
+        allowed: &["gentle", "warm", "normal", "firm", "harsh"],
+    },
     default: "normal",
     tighten_to: None,
 };
 /// Messages per rolling hour, all kinds together.
-pub const MAX_PER_HOUR: SettingSpec =
-    SettingSpec { name: "messages.max_per_hour", category: CATEGORY, kind: ValueKind::Int { min: 1, max: 12 }, default: "3", tighten_to: None };
+pub const MAX_PER_HOUR: SettingSpec = SettingSpec {
+    name: "messages.max_per_hour",
+    category: CATEGORY,
+    kind: ValueKind::Int { min: 1, max: 12 },
+    default: "3",
+    tighten_to: None,
+};
 /// A message on a blocked-app attempt, a finished set, or a streak.
-pub const EVENTS_ENABLED: SettingSpec =
-    SettingSpec { name: "messages.events_enabled", category: CATEGORY, kind: ValueKind::Bool, default: "true", tighten_to: Some("false") };
+pub const EVENTS_ENABLED: SettingSpec = SettingSpec {
+    name: "messages.events_enabled",
+    category: CATEGORY,
+    kind: ValueKind::Bool,
+    default: "true",
+    tighten_to: Some("false"),
+};
 /// A message now and then while studying, without an event.
-pub const RANDOM_ENABLED: SettingSpec =
-    SettingSpec { name: "messages.random_enabled", category: CATEGORY, kind: ValueKind::Bool, default: "false", tighten_to: Some("false") };
+pub const RANDOM_ENABLED: SettingSpec = SettingSpec {
+    name: "messages.random_enabled",
+    category: CATEGORY,
+    kind: ValueKind::Bool,
+    default: "false",
+    tighten_to: Some("false"),
+};
 /// Minutes without any message before a random one may come.
 pub const RANDOM_INTERVAL_MIN: SettingSpec = SettingSpec {
     name: "messages.random_interval_min",
@@ -38,8 +60,13 @@ pub const RANDOM_INTERVAL_MIN: SettingSpec = SettingSpec {
     tighten_to: None,
 };
 /// Also send the general phrase as a system notification (never with a subject or page name).
-pub const NOTIFY_ENABLED: SettingSpec =
-    SettingSpec { name: "messages.notify_enabled", category: CATEGORY, kind: ValueKind::Bool, default: "true", tighten_to: Some("false") };
+pub const NOTIFY_ENABLED: SettingSpec = SettingSpec {
+    name: "messages.notify_enabled",
+    category: CATEGORY,
+    kind: ValueKind::Bool,
+    default: "true",
+    tighten_to: Some("false"),
+};
 
 /// The settings the messages card edits. API name = camelCase of the variant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,7 +95,12 @@ impl MessageSettingKey {
     }
 }
 
-pub fn update_setting(conn: &mut Connection, key: MessageSettingKey, value: SettingValue, at_ms: i64) -> AppResult<UpdateOutcome> {
+pub fn update_setting(
+    conn: &mut Connection,
+    key: MessageSettingKey,
+    value: SettingValue,
+    at_ms: i64,
+) -> AppResult<UpdateOutcome> {
     settings::apply_setting(conn, &key.spec(), &value, at_ms, || Ok(()))
 }
 
@@ -105,7 +137,8 @@ pub struct MessageConfig {
 impl MessageConfig {
     pub fn load(conn: &Connection) -> AppResult<Self> {
         let tone = match settings::read_value(conn, &TONE)? {
-            SettingValue::Text(raw) => Tone::parse(&raw).ok_or_else(|| AppError::Internal(format!("unknown tone {raw}")))?,
+            SettingValue::Text(raw) => Tone::parse(&raw)
+                .ok_or_else(|| AppError::Internal(format!("unknown tone {raw}")))?,
             other => return Err(wrong_type(&TONE, &other)),
         };
         Ok(Self {
@@ -146,20 +179,67 @@ mod tests {
     #[test]
     fn the_tone_is_stored_and_unknown_tones_and_ranges_are_rejected() {
         let mut conn = open_in_memory().expect("db");
-        update_setting(&mut conn, MessageSettingKey::Tone, SettingValue::Text("harsh".into()), 1).expect("tone");
+        update_setting(
+            &mut conn,
+            MessageSettingKey::Tone,
+            SettingValue::Text("harsh".into()),
+            1,
+        )
+        .expect("tone");
         assert_eq!(MessageConfig::load(&conn).expect("load").tone, Tone::Harsh);
-        assert!(update_setting(&mut conn, MessageSettingKey::Tone, SettingValue::Text("rude".into()), 2).is_err());
-        assert!(update_setting(&mut conn, MessageSettingKey::MaxPerHour, SettingValue::Int(0), 3).is_err());
-        assert!(update_setting(&mut conn, MessageSettingKey::RandomIntervalMin, SettingValue::Int(5), 4).is_err());
+        assert!(
+            update_setting(
+                &mut conn,
+                MessageSettingKey::Tone,
+                SettingValue::Text("rude".into()),
+                2
+            )
+            .is_err()
+        );
+        assert!(
+            update_setting(
+                &mut conn,
+                MessageSettingKey::MaxPerHour,
+                SettingValue::Int(0),
+                3
+            )
+            .is_err()
+        );
+        assert!(
+            update_setting(
+                &mut conn,
+                MessageSettingKey::RandomIntervalMin,
+                SettingValue::Int(5),
+                4
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn the_rate_cannot_be_raised_during_a_run_but_messages_can_be_switched_off() {
         let mut conn = open_in_memory().expect("db");
         set_lock_for_test(&conn, true);
-        let raised = update_setting(&mut conn, MessageSettingKey::MaxPerHour, SettingValue::Int(12), 5).expect("apply");
-        assert_eq!(raised, UpdateOutcome::RejectedLocked { key: "messages.max_per_hour".into() });
-        update_setting(&mut conn, MessageSettingKey::Enabled, SettingValue::Bool(false), 6).expect("off stays allowed");
+        let raised = update_setting(
+            &mut conn,
+            MessageSettingKey::MaxPerHour,
+            SettingValue::Int(12),
+            5,
+        )
+        .expect("apply");
+        assert_eq!(
+            raised,
+            UpdateOutcome::RejectedLocked {
+                key: "messages.max_per_hour".into()
+            }
+        );
+        update_setting(
+            &mut conn,
+            MessageSettingKey::Enabled,
+            SettingValue::Bool(false),
+            6,
+        )
+        .expect("off stays allowed");
         assert!(!MessageConfig::load(&conn).expect("load").enabled);
     }
 }

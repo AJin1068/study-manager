@@ -1,7 +1,7 @@
 //! `session_retro`: the user's retrospective of a run and where its merge into the wiki stands.
 //! `retro_note` is local only; reads return it to the service that builds the merge prompt.
 
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::error::{AppError, AppResult};
 
@@ -16,8 +16,13 @@ pub enum RetroStatus {
 }
 
 impl RetroStatus {
-    pub const ALL: [RetroStatus; 5] =
-        [RetroStatus::Pending, RetroStatus::Merged, RetroStatus::Skipped, RetroStatus::Failed, RetroStatus::Undone];
+    pub const ALL: [RetroStatus; 5] = [
+        RetroStatus::Pending,
+        RetroStatus::Merged,
+        RetroStatus::Skipped,
+        RetroStatus::Failed,
+        RetroStatus::Undone,
+    ];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -78,10 +83,14 @@ fn finish((mut row, status): (RetroRow, String)) -> AppResult<RetroRow> {
 }
 
 pub fn get(conn: &Connection, run_id: i64) -> AppResult<Option<RetroRow>> {
-    conn.query_row(&format!("SELECT {COLUMNS} FROM session_retro WHERE run_id = ?1"), params![run_id], from_row)
-        .optional()?
-        .map(finish)
-        .transpose()
+    conn.query_row(
+        &format!("SELECT {COLUMNS} FROM session_retro WHERE run_id = ?1"),
+        params![run_id],
+        from_row,
+    )
+    .optional()?
+    .map(finish)
+    .transpose()
 }
 
 /// Rows that still wait for a merge (or failed and can be retried), newest first.
@@ -90,11 +99,21 @@ pub fn list_open(conn: &Connection) -> AppResult<Vec<RetroRow>> {
         "SELECT {COLUMNS} FROM session_retro WHERE status IN ('pending', 'failed') ORDER BY created_at_ms DESC, run_id DESC"
     ))?;
     let rows = stmt.query_map([], from_row)?;
-    rows.collect::<Result<Vec<_>, _>>()?.into_iter().map(finish).collect()
+    rows.collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .map(finish)
+        .collect()
 }
 
 /// Stores the note for a run, replacing an earlier one that is not merged yet.
-pub fn upsert_pending(conn: &Connection, run_id: i64, note: &str, subject_id: Option<i64>, page_name: Option<&str>, at_ms: i64) -> AppResult<()> {
+pub fn upsert_pending(
+    conn: &Connection,
+    run_id: i64,
+    note: &str,
+    subject_id: Option<i64>,
+    page_name: Option<&str>,
+    at_ms: i64,
+) -> AppResult<()> {
     conn.execute(
         "INSERT INTO session_retro (run_id, retro_note, status, subject_id, page_name, created_at_ms)
          VALUES (?1, ?2, 'pending', ?3, ?4, ?5)
@@ -106,7 +125,12 @@ pub fn upsert_pending(conn: &Connection, run_id: i64, note: &str, subject_id: Op
     Ok(())
 }
 
-pub fn record_attempt(conn: &Connection, run_id: i64, status: RetroStatus, last_code: Option<&str>) -> AppResult<()> {
+pub fn record_attempt(
+    conn: &Connection,
+    run_id: i64,
+    status: RetroStatus,
+    last_code: Option<&str>,
+) -> AppResult<()> {
     conn.execute(
         "UPDATE session_retro SET status = ?2, attempts = attempts + 1, last_code = ?3 WHERE run_id = ?1",
         params![run_id, status.as_str(), last_code],
@@ -114,7 +138,13 @@ pub fn record_attempt(conn: &Connection, run_id: i64, status: RetroStatus, last_
     Ok(())
 }
 
-pub fn mark_merged(conn: &Connection, run_id: i64, page_name: &str, backup_name: Option<&str>, at_ms: i64) -> AppResult<()> {
+pub fn mark_merged(
+    conn: &Connection,
+    run_id: i64,
+    page_name: &str,
+    backup_name: Option<&str>,
+    at_ms: i64,
+) -> AppResult<()> {
     conn.execute(
         "UPDATE session_retro SET status = 'merged', page_name = ?2, backup_name = ?3, merged_at_ms = ?4, last_code = NULL,
            page_id = (SELECT p.id FROM wiki_pages p WHERE p.subject_id = session_retro.subject_id AND p.page_name = ?2)
@@ -146,7 +176,8 @@ mod tests {
     fn statuses_match_the_table_check() {
         let conn = open_in_memory().expect("db");
         for status in RetroStatus::ALL {
-            conn.execute("DELETE FROM session_retro", []).expect("clear");
+            conn.execute("DELETE FROM session_retro", [])
+                .expect("clear");
             conn.execute(
                 "INSERT INTO session_retro (run_id, retro_note, status, created_at_ms) VALUES (1, 'n', ?1, 1)",
                 params![status.as_str()],
@@ -164,6 +195,9 @@ mod tests {
         mark_merged(&conn, 1, "page", Some("page.1.md"), 2).expect("merge");
         upsert_pending(&conn, 1, "second", None, None, 3).expect("noop");
         let row = get(&conn, 1).expect("get").expect("row");
-        assert_eq!((row.note.as_str(), row.status), ("first", RetroStatus::Merged));
+        assert_eq!(
+            (row.note.as_str(), row.status),
+            ("first", RetroStatus::Merged)
+        );
     }
 }

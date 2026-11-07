@@ -78,14 +78,18 @@ impl PhoneSchedule {
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum TimerDisplay {
     /// Locked: this long until the study segment ends.
-    Studying { remaining_ms: i64 },
+    Studying {
+        remaining_ms: i64,
+    },
     Free,
 }
 
 /// The lease runs [`GRACE_MS`] past the end of the segment; the countdown shows the segment.
 pub fn timer_display(lock_remaining_ms: Option<i64>) -> TimerDisplay {
     match lock_remaining_ms {
-        Some(remaining) => TimerDisplay::Studying { remaining_ms: (remaining - GRACE_MS).max(0) },
+        Some(remaining) => TimerDisplay::Studying {
+            remaining_ms: (remaining - GRACE_MS).max(0),
+        },
         None => TimerDisplay::Free,
     }
 }
@@ -103,14 +107,19 @@ pub struct LeaseDiagnostics {
     pub rejected_leases: usize,
 }
 
-pub fn diagnose(holder: &LeaseHolder, mono_now_ms: i64, last_contact_mono_ms: Option<i64>) -> LeaseDiagnostics {
+pub fn diagnose(
+    holder: &LeaseHolder,
+    mono_now_ms: i64,
+    last_contact_mono_ms: Option<i64>,
+) -> LeaseDiagnostics {
     let lock_remaining_ms = holder.remaining_ms(mono_now_ms);
     LeaseDiagnostics {
         lock: holder.decide(mono_now_ms),
         seq: holder.current_seq(),
         lock_remaining_ms,
         timer: timer_display(lock_remaining_ms),
-        last_server_contact_ago_ms: last_contact_mono_ms.map(|at| mono_now_ms.saturating_sub(at).max(0)),
+        last_server_contact_ago_ms: last_contact_mono_ms
+            .map(|at| mono_now_ms.saturating_sub(at).max(0)),
         rejected_leases: usize::try_from(holder.rejected_total()).unwrap_or(usize::MAX),
     }
 }
@@ -126,7 +135,14 @@ mod tests {
     const TODAY: i64 = 1_793_923_200_000;
 
     fn row(key: &str, start: i64, status: &str) -> OccurrenceRow {
-        OccurrenceRow { occurrence_key: key.into(), start_at_utc_ms: start, plan_name: format!("plan {key}"), subject: "math".into(), sets: 3, status: status.into() }
+        OccurrenceRow {
+            occurrence_key: key.into(),
+            start_at_utc_ms: start,
+            plan_name: format!("plan {key}"),
+            subject: "math".into(),
+            sets: 3,
+            status: status.into(),
+        }
     }
 
     #[test]
@@ -142,16 +158,32 @@ mod tests {
             row("start", TODAY, "planned"),
         ];
         let schedule = PhoneSchedule::from_rows(&rows, TODAY, TODAY + DAY);
-        let keys: Vec<&str> = schedule.items.iter().map(|i| i.occurrence_key.as_str()).collect();
+        let keys: Vec<&str> = schedule
+            .items
+            .iter()
+            .map(|i| i.occurrence_key.as_str())
+            .collect();
         assert_eq!(keys, ["start", "early", "done-for-today", "late"]);
         assert_eq!(schedule.items[2].status, ItemStatus::Skipped);
-        assert!(PhoneSchedule::from_rows(&[], TODAY, TODAY + DAY).items.is_empty());
+        assert!(
+            PhoneSchedule::from_rows(&[], TODAY, TODAY + DAY)
+                .items
+                .is_empty()
+        );
     }
 
     #[test]
     fn the_timer_counts_down_to_the_end_of_the_segment_not_the_grace() {
-        assert_eq!(timer_display(Some(25 * 60_000 + GRACE_MS)), TimerDisplay::Studying { remaining_ms: 25 * 60_000 });
-        assert_eq!(timer_display(Some(GRACE_MS - 1)), TimerDisplay::Studying { remaining_ms: 0 });
+        assert_eq!(
+            timer_display(Some(25 * 60_000 + GRACE_MS)),
+            TimerDisplay::Studying {
+                remaining_ms: 25 * 60_000
+            }
+        );
+        assert_eq!(
+            timer_display(Some(GRACE_MS - 1)),
+            TimerDisplay::Studying { remaining_ms: 0 }
+        );
         assert_eq!(timer_display(None), TimerDisplay::Free);
     }
 
@@ -159,21 +191,57 @@ mod tests {
     fn diagnostics_say_when_the_lock_frees_itself_and_when_the_server_last_answered() {
         let mut holder = LeaseHolder::new();
         let now = 10 * H;
-        holder.offer(LockLease::locked("12:34", 5, now, now + 30 * 60_000).expect("lease"), now, 1_000).expect("offer");
+        holder
+            .offer(
+                LockLease::locked("12:34", 5, now, now + 30 * 60_000).expect("lease"),
+                now,
+                1_000,
+            )
+            .expect("offer");
         let d = diagnose(&holder, 61_000, Some(41_000));
         assert_eq!(d.lock, PhoneLock::Locked);
         assert_eq!((d.seq, d.rejected_leases), (Some(5), 0));
         assert_eq!(d.lock_remaining_ms, Some(30 * 60_000 + GRACE_MS - 60_000));
-        assert_eq!(d.timer, TimerDisplay::Studying { remaining_ms: 30 * 60_000 - 60_000 });
+        assert_eq!(
+            d.timer,
+            TimerDisplay::Studying {
+                remaining_ms: 30 * 60_000 - 60_000
+            }
+        );
         assert_eq!(d.last_server_contact_ago_ms, Some(20_000));
 
-        assert!(holder.offer(LockLease::locked("12:34", 5, now, now + 60_000).expect("lease"), now, 2_000).is_err());
+        assert!(
+            holder
+                .offer(
+                    LockLease::locked("12:34", 5, now, now + 60_000).expect("lease"),
+                    now,
+                    2_000
+                )
+                .is_err()
+        );
         assert_eq!(diagnose(&holder, 61_000, None).rejected_leases, 1);
-        assert_eq!(diagnose(&holder, 61_000, None).last_server_contact_ago_ms, None);
+        assert_eq!(
+            diagnose(&holder, 61_000, None).last_server_contact_ago_ms,
+            None
+        );
 
-        holder.offer(LockLease::free("12:34", 6, now, ReleaseCause::EmergencyPass).expect("lease"), now, 3_000).expect("offer");
+        holder
+            .offer(
+                LockLease::free("12:34", 6, now, ReleaseCause::EmergencyPass).expect("lease"),
+                now,
+                3_000,
+            )
+            .expect("offer");
         let free = diagnose(&holder, 4_000, Some(3_000));
-        assert_eq!(free.lock, PhoneLock::Free { reason: FreeReason::EmergencyPass });
-        assert_eq!((free.lock_remaining_ms, free.timer), (None, TimerDisplay::Free));
+        assert_eq!(
+            free.lock,
+            PhoneLock::Free {
+                reason: FreeReason::EmergencyPass
+            }
+        );
+        assert_eq!(
+            (free.lock_remaining_ms, free.timer),
+            (None, TimerDisplay::Free)
+        );
     }
 }

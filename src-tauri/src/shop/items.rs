@@ -19,7 +19,9 @@ pub enum ItemKind {
 }
 
 /// The four wardrobe slots. Matches the `wardrobe.slot` CHECK (drift-tested).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize, serde::Serialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize, serde::Serialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Slot {
     Hat,
@@ -130,7 +132,11 @@ static CATALOG: OnceLock<Result<ItemCatalog, String>> = OnceLock::new();
 
 pub fn catalog() -> AppResult<&'static ItemCatalog> {
     CATALOG
-        .get_or_init(|| serde_json::from_str::<Raw>(RAW).map(|r| ItemCatalog { items: r.items }).map_err(|e| e.to_string()))
+        .get_or_init(|| {
+            serde_json::from_str::<Raw>(RAW)
+                .map(|r| ItemCatalog { items: r.items })
+                .map_err(|e| e.to_string())
+        })
         .as_ref()
         .map_err(|e| AppError::Internal(format!("item catalog is unreadable: {e}")))
 }

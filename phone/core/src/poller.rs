@@ -58,7 +58,12 @@ fn explicit(reason: FreeReason) -> bool {
 }
 
 impl PhonePoller {
-    pub fn new(link: Arc<dyn PhoneLink>, blocker: Arc<dyn PhoneBlocker>, clock: Arc<dyn Clock>, allow: AllowList) -> Self {
+    pub fn new(
+        link: Arc<dyn PhoneLink>,
+        blocker: Arc<dyn PhoneBlocker>,
+        clock: Arc<dyn Clock>,
+        allow: AllowList,
+    ) -> Self {
         Self {
             link,
             blocker: blocker.clone(),
@@ -106,7 +111,9 @@ impl PhonePoller {
         self.last_status = status;
         match status {
             BlockerStatus::Active | BlockerStatus::Inactive => self.service_enabled = true,
-            BlockerStatus::ServiceDisabled | BlockerStatus::Unsupported { .. } => self.service_enabled = false,
+            BlockerStatus::ServiceDisabled | BlockerStatus::Unsupported { .. } => {
+                self.service_enabled = false
+            }
             BlockerStatus::Unreachable => {}
         }
         status
@@ -126,7 +133,12 @@ impl PhonePoller {
                     Err(err) => self.last_error = Some(err.code()),
                 }
             }
-            PhoneLock::Locked if matches!(before, BlockerStatus::Inactive | BlockerStatus::ServiceDisabled) => {
+            PhoneLock::Locked
+                if matches!(
+                    before,
+                    BlockerStatus::Inactive | BlockerStatus::ServiceDisabled
+                ) =>
+            {
                 // The plugin lost the lock behind our back: engage again.
                 self.driver.forget_engagement();
             }
@@ -146,8 +158,17 @@ impl PhonePoller {
     /// a lease nobody can enforce (service off, iPhone) is not reported as a lock.
     fn beat(&self, now: i64) -> PhoneBeat {
         let locked = self.driver.holder().decide(now) == PhoneLock::Locked
-            && !matches!(self.last_status, BlockerStatus::ServiceDisabled | BlockerStatus::Unsupported { .. } | BlockerStatus::Inactive);
-        PhoneBeat { lease_seq: self.driver.holder().current_seq().unwrap_or(0), locked, service_enabled: self.service_enabled }
+            && !matches!(
+                self.last_status,
+                BlockerStatus::ServiceDisabled
+                    | BlockerStatus::Unsupported { .. }
+                    | BlockerStatus::Inactive
+            );
+        PhoneBeat {
+            lease_seq: self.driver.holder().current_seq().unwrap_or(0),
+            locked,
+            service_enabled: self.service_enabled,
+        }
     }
 
     fn send_beat(&mut self, beat: &PhoneBeat) {
@@ -238,7 +259,11 @@ mod tests {
             if self.down.load(std::sync::atomic::Ordering::SeqCst) {
                 return Err(PhoneError::Transport(TransportError::Timeout));
             }
-            self.fetches.lock().expect("fetches").pop_front().unwrap_or(Err(PhoneError::Transport(TransportError::Network)))
+            self.fetches
+                .lock()
+                .expect("fetches")
+                .pop_front()
+                .unwrap_or(Err(PhoneError::Transport(TransportError::Network)))
         }
 
         fn beat(&self, beat: &PhoneBeat) -> Result<(), PhoneError> {
@@ -266,7 +291,10 @@ mod tests {
     }
 
     fn has(lease: LockLease) -> Fetch {
-        Ok(LeaseFetch { lease: Some(lease), server_now_ms: SERVER_NOW })
+        Ok(LeaseFetch {
+            lease: Some(lease),
+            server_now_ms: SERVER_NOW,
+        })
     }
 
     fn offline() -> Fetch {
@@ -284,8 +312,18 @@ mod tests {
         let link = Arc::new(FakeLink::default());
         let blocker = Arc::new(MockBlocker::default());
         let clock = Arc::new(TestClock::new(100, 5_000_000));
-        let poller = PhonePoller::new(link.clone(), blocker.clone(), clock.clone(), AllowList::default());
-        Rig { poller, link, blocker, clock }
+        let poller = PhonePoller::new(
+            link.clone(),
+            blocker.clone(),
+            clock.clone(),
+            AllowList::default(),
+        );
+        Rig {
+            poller,
+            link,
+            blocker,
+            clock,
+        }
     }
 
     impl Rig {
@@ -302,13 +340,29 @@ mod tests {
         rig.link.push(has(locked(1, 30)));
         let report = rig.poller.tick();
         let engaged = rig.blocker.engaged().expect("engaged");
-        assert_eq!((engaged.run_id.as_str(), engaged.seq, engaged.remaining_ms), ("run-1", 1, 30 * MIN + MIN));
+        assert_eq!(
+            (engaged.run_id.as_str(), engaged.seq, engaged.remaining_ms),
+            ("run-1", 1, 30 * MIN + MIN)
+        );
         match &rig.blocker.calls()[0] {
-            BlockerCall::Engage { allow, .. } => assert_eq!(allow["roles"], serde_json::json!(["emergency_call", "dialer", "messages"])),
+            BlockerCall::Engage { allow, .. } => assert_eq!(
+                allow["roles"],
+                serde_json::json!(["emergency_call", "dialer", "messages"])
+            ),
             other => panic!("{other:?}"),
         }
-        assert_eq!(rig.link.beats(), [PhoneBeat { lease_seq: 1, locked: true, service_enabled: true }]);
-        assert_eq!((report.diagnostics.lock, report.blocker, report.online), (PhoneLock::Locked, BlockerStatus::Active, true));
+        assert_eq!(
+            rig.link.beats(),
+            [PhoneBeat {
+                lease_seq: 1,
+                locked: true,
+                service_enabled: true
+            }]
+        );
+        assert_eq!(
+            (report.diagnostics.lock, report.blocker, report.online),
+            (PhoneLock::Locked, BlockerStatus::Active, true)
+        );
     }
 
     #[test]
@@ -325,13 +379,16 @@ mod tests {
     }
 
     #[test]
-    fn offline_the_lock_holds_until_the_lease_ends_on_the_monotonic_clock_and_the_wall_clock_is_no_input() {
+    fn offline_the_lock_holds_until_the_lease_ends_on_the_monotonic_clock_and_the_wall_clock_is_no_input()
+     {
         let mut rig = rig();
         rig.link.push(has(locked(1, 10)));
         rig.poller.tick();
         // 10 min + 60 s of lease. The network goes away and the user moves the wall clock a day
         // forward: nothing changes.
-        rig.link.down.store(true, std::sync::atomic::Ordering::SeqCst);
+        rig.link
+            .down
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         rig.clock.shift_wall(86_400_000);
         rig.pass(5 * MIN);
         let mid = rig.poller.tick();
@@ -345,9 +402,18 @@ mod tests {
         assert_eq!(rig.poller.snapshot().diagnostics.lock, PhoneLock::Locked);
         rig.pass(1);
         let end = rig.poller.tick();
-        assert_eq!(end.diagnostics.lock, PhoneLock::Free { reason: FreeReason::LeaseExpired });
+        assert_eq!(
+            end.diagnostics.lock,
+            PhoneLock::Free {
+                reason: FreeReason::LeaseExpired
+            }
+        );
         assert_eq!(rig.blocker.calls().last(), Some(&BlockerCall::Release));
-        assert_eq!(rig.link.beats().last().map(|b| b.locked), Some(false), "the beat is attempted even offline; the server sees it when the network returns");
+        assert_eq!(
+            rig.link.beats().last().map(|b| b.locked),
+            Some(false),
+            "the beat is attempted even offline; the server sees it when the network returns"
+        );
     }
 
     #[test]
@@ -355,15 +421,32 @@ mod tests {
         let mut rig = rig();
         rig.link.push(has(locked(1, 30)));
         rig.poller.tick();
-        rig.link.push(has(LockLease::free("run-1", 2, SERVER_NOW, ReleaseCause::EmergencyPass).expect("lease")));
+        rig.link.push(has(LockLease::free(
+            "run-1",
+            2,
+            SERVER_NOW,
+            ReleaseCause::EmergencyPass,
+        )
+        .expect("lease")));
         let report = rig.poller.tick();
-        assert_eq!(report.diagnostics.lock, PhoneLock::Free { reason: FreeReason::EmergencyPass });
+        assert_eq!(
+            report.diagnostics.lock,
+            PhoneLock::Free {
+                reason: FreeReason::EmergencyPass
+            }
+        );
         assert!(rig.blocker.engaged().is_none());
 
         let mut rig = rig_locked();
-        rig.link.push(Err(PhoneError::Rejected(PhoneCode::NotPaired)));
+        rig.link
+            .push(Err(PhoneError::Rejected(PhoneCode::NotPaired)));
         let report = rig.poller.tick();
-        assert_eq!(report.diagnostics.lock, PhoneLock::Free { reason: FreeReason::PairRevoked });
+        assert_eq!(
+            report.diagnostics.lock,
+            PhoneLock::Free {
+                reason: FreeReason::PairRevoked
+            }
+        );
         assert!(rig.blocker.engaged().is_none());
         assert!(report.online, "a not_paired answer is an answer");
     }
@@ -383,7 +466,14 @@ mod tests {
         let report = rig.poller.tick();
         assert!(!report.service_enabled);
         assert_eq!(report.blocker, BlockerStatus::ServiceDisabled);
-        assert_eq!(rig.link.beats(), [PhoneBeat { lease_seq: 1, locked: false, service_enabled: false }]);
+        assert_eq!(
+            rig.link.beats(),
+            [PhoneBeat {
+                lease_seq: 1,
+                locked: false,
+                service_enabled: false
+            }]
+        );
         // The user switches it on: the next poll engages without a new lease.
         rig.blocker.set_service_disabled(false);
         rig.pass(15_000);
@@ -391,7 +481,14 @@ mod tests {
         let report = rig.poller.tick();
         assert!(report.service_enabled);
         assert_eq!(rig.blocker.engaged().map(|e| e.seq), Some(1));
-        assert_eq!(rig.link.beats().last(), Some(&PhoneBeat { lease_seq: 1, locked: true, service_enabled: true }));
+        assert_eq!(
+            rig.link.beats().last(),
+            Some(&PhoneBeat {
+                lease_seq: 1,
+                locked: true,
+                service_enabled: true
+            })
+        );
     }
 
     #[test]
@@ -399,7 +496,15 @@ mod tests {
         let mut rig = rig_locked();
         rig.blocker.set_service_disabled(true);
         rig.poller.on_event(BridgeEvent::ServiceDisabled);
-        assert_eq!(rig.link.beats().last(), Some(&PhoneBeat { lease_seq: 1, locked: true, service_enabled: false }), "fixture: service_disabled keeps locked, drops service_enabled");
+        assert_eq!(
+            rig.link.beats().last(),
+            Some(&PhoneBeat {
+                lease_seq: 1,
+                locked: true,
+                service_enabled: false
+            }),
+            "fixture: service_disabled keeps locked, drops service_enabled"
+        );
         assert!(!rig.poller.snapshot().service_enabled);
 
         rig.blocker.set_service_disabled(false);
@@ -407,8 +512,19 @@ mod tests {
         rig.pass(15_000);
         rig.link.push(has(locked(1, 30)));
         let report = rig.poller.tick();
-        assert_eq!(report.blocker, BlockerStatus::Active, "the lock the plugin lost is engaged again");
-        assert_eq!(rig.blocker.calls().iter().filter(|c| matches!(c, BlockerCall::Engage { .. })).count(), 2);
+        assert_eq!(
+            report.blocker,
+            BlockerStatus::Active,
+            "the lock the plugin lost is engaged again"
+        );
+        assert_eq!(
+            rig.blocker
+                .calls()
+                .iter()
+                .filter(|c| matches!(c, BlockerCall::Engage { .. }))
+                .count(),
+            2
+        );
         assert!(report.service_enabled);
     }
 
@@ -416,26 +532,54 @@ mod tests {
     fn the_device_ending_the_lock_is_beaten_as_not_locked() {
         let mut rig = rig_locked();
         rig.poller.on_event(BridgeEvent::LockEnded);
-        assert_eq!(rig.link.beats().last(), Some(&PhoneBeat { lease_seq: 1, locked: false, service_enabled: true }));
+        assert_eq!(
+            rig.link.beats().last(),
+            Some(&PhoneBeat {
+                lease_seq: 1,
+                locked: false,
+                service_enabled: true
+            })
+        );
     }
 
     #[test]
     fn a_new_process_does_not_release_a_lock_the_plugin_restored_until_the_server_says_so() {
         let mut rig = rig();
         // The plugin restored a lock after a reboot; this process has fetched nothing.
-        let engagement = crate::blocker_port::Engagement { run_id: "run-1".into(), seq: 1, remaining_ms: 20 * MIN };
-        rig.blocker.engage(&engagement, &AllowList::default()).expect("restore");
+        let engagement = crate::blocker_port::Engagement {
+            run_id: "run-1".into(),
+            seq: 1,
+            remaining_ms: 20 * MIN,
+        };
+        rig.blocker
+            .engage(&engagement, &AllowList::default())
+            .expect("restore");
 
         rig.link.push(offline());
         rig.poller.tick();
-        rig.link.push(Ok(LeaseFetch { lease: None, server_now_ms: SERVER_NOW }));
+        rig.link.push(Ok(LeaseFetch {
+            lease: None,
+            server_now_ms: SERVER_NOW,
+        }));
         rig.poller.tick();
-        assert!(rig.blocker.engaged().is_some(), "no lease yet is not a reason to release");
+        assert!(
+            rig.blocker.engaged().is_some(),
+            "no lease yet is not a reason to release"
+        );
         assert!(!rig.blocker.calls().contains(&BlockerCall::Release));
 
-        rig.link.push(has(LockLease::free("run-1", 2, SERVER_NOW, ReleaseCause::EarlyRelease).expect("lease")));
+        rig.link.push(has(LockLease::free(
+            "run-1",
+            2,
+            SERVER_NOW,
+            ReleaseCause::EarlyRelease,
+        )
+        .expect("lease")));
         rig.poller.tick();
-        assert!(rig.blocker.engaged().is_none(), "an explicit free lease releases a restored lock");
+        assert!(
+            rig.blocker.engaged().is_none(),
+            "an explicit free lease releases a restored lock"
+        );
     }
 
     #[test]
@@ -445,7 +589,10 @@ mod tests {
         rig.poller.tick();
         rig.link.push(has(locked(4, 30)));
         rig.poller.tick();
-        let too_long = LockLease { valid_until_ms: SERVER_NOW + 5 * 60 * MIN, ..locked(6, 30) };
+        let too_long = LockLease {
+            valid_until_ms: SERVER_NOW + 5 * 60 * MIN,
+            ..locked(6, 30)
+        };
         rig.link.push(has(too_long));
         let report = rig.poller.tick();
         assert_eq!(report.diagnostics.seq, Some(5));
@@ -456,24 +603,43 @@ mod tests {
     #[test]
     fn the_heartbeat_failing_with_not_paired_frees_the_phone_at_the_next_round() {
         let mut rig = rig_locked();
-        *rig.link.beat_error.lock().expect("beat error") = Some(PhoneError::Rejected(PhoneCode::NotPaired));
+        *rig.link.beat_error.lock().expect("beat error") =
+            Some(PhoneError::Rejected(PhoneCode::NotPaired));
         rig.link.push(has(locked(1, 30)));
         rig.poller.tick();
         rig.link.push(has(locked(1, 30)));
         let report = rig.poller.tick();
-        assert_eq!(report.diagnostics.lock, PhoneLock::Free { reason: FreeReason::PairRevoked });
+        assert_eq!(
+            report.diagnostics.lock,
+            PhoneLock::Free {
+                reason: FreeReason::PairRevoked
+            }
+        );
     }
 
     #[test]
     fn an_iphone_build_never_claims_a_lock() {
         let link = Arc::new(FakeLink::default());
         let clock = Arc::new(TestClock::new(0, 0));
-        let mut poller = PhonePoller::new(link.clone(), Arc::new(ScreenTimeBlocker), clock, AllowList::default());
+        let mut poller = PhonePoller::new(
+            link.clone(),
+            Arc::new(ScreenTimeBlocker),
+            clock,
+            AllowList::default(),
+        );
         link.push(has(locked(1, 30)));
         let report = poller.tick();
         assert!(matches!(report.blocker, BlockerStatus::Unsupported { .. }));
         assert!(!report.service_enabled);
         assert_eq!(report.last_error, Some("unsupported"));
-        assert_eq!(link.beats(), [PhoneBeat { lease_seq: 1, locked: false, service_enabled: false }], "a lease nobody enforces is not reported as a lock");
+        assert_eq!(
+            link.beats(),
+            [PhoneBeat {
+                lease_seq: 1,
+                locked: false,
+                service_enabled: false
+            }],
+            "a lease nobody enforces is not reported as a lock"
+        );
     }
 }

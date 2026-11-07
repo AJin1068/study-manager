@@ -136,11 +136,20 @@ mod tests {
     use super::*;
 
     fn app(id: &str, pid: u32, protected: bool) -> AppIdentity {
-        AppIdentity { id: id.into(), display_name: format!("name-{pid}"), pid, is_protected: protected }
+        AppIdentity {
+            id: id.into(),
+            display_name: format!("name-{pid}"),
+            pid,
+            is_protected: protected,
+        }
     }
 
     fn cfg(mode: EnforceMode, force: bool) -> Config {
-        Config { mode, grace_ms: 10_000, force_quit_allowed: force }
+        Config {
+            mode,
+            grace_ms: 10_000,
+            force_quit_allowed: force,
+        }
     }
 
     fn list() -> Vec<String> {
@@ -154,8 +163,16 @@ mod tests {
     #[test]
     fn only_blocked_apps_are_considered() {
         let running = [app("com.game", 1, false), app("com.editor", 2, false)];
-        let actions = run(&running, &cfg(EnforceMode::Enforce, false), &Tracker::default(), 0);
-        assert_eq!(actions, vec![Action::RequestQuit(app("com.game", 1, false))]);
+        let actions = run(
+            &running,
+            &cfg(EnforceMode::Enforce, false),
+            &Tracker::default(),
+            0,
+        );
+        assert_eq!(
+            actions,
+            vec![Action::RequestQuit(app("com.game", 1, false))]
+        );
     }
 
     #[test]
@@ -163,7 +180,10 @@ mod tests {
         let running = [app("com.game", 1, false)];
         let mut tracker = Tracker::default();
         let c = cfg(EnforceMode::DryRun, true);
-        assert_eq!(run(&running, &c, &tracker, 0), vec![Action::WouldTerminate(running[0].clone())]);
+        assert_eq!(
+            run(&running, &c, &tracker, 0),
+            vec![Action::WouldTerminate(running[0].clone())]
+        );
         assert!(tracker.first_report(1, KIND_WOULD_TERMINATE));
         assert!(run(&running, &c, &tracker, 1).is_empty());
     }
@@ -174,7 +194,10 @@ mod tests {
         let c = cfg(EnforceMode::Enforce, true);
         let t = Tracker::default();
         for phase in [Phase::Idle, Phase::Break, Phase::LongBreak] {
-            assert!(decide(&running, &list(), phase, true, &c, &t, 0).is_empty(), "{phase:?}");
+            assert!(
+                decide(&running, &list(), phase, true, &c, &t, 0).is_empty(),
+                "{phase:?}"
+            );
         }
         assert!(decide(&running, &list(), Phase::Study, false, &c, &t, 0).is_empty());
         assert!(applies(Phase::Study, true));
@@ -183,7 +206,12 @@ mod tests {
     #[test]
     fn protected_apps_are_skipped_even_when_listed() {
         let running = [app("com.game", 1, true)];
-        let actions = run(&running, &cfg(EnforceMode::Enforce, true), &Tracker::default(), 0);
+        let actions = run(
+            &running,
+            &cfg(EnforceMode::Enforce, true),
+            &Tracker::default(),
+            0,
+        );
         assert_eq!(actions, vec![Action::SkipProtected(running[0].clone())]);
     }
 
@@ -191,25 +219,52 @@ mod tests {
     fn force_kill_waits_for_the_grace_time_and_needs_permission() {
         let running = [app("com.game", 1, false)];
         let mut tracker = Tracker::default();
-        tracker.requested.insert(1, Requested { app: running[0].clone(), at_ms: 1_000, forced: false });
+        tracker.requested.insert(
+            1,
+            Requested {
+                app: running[0].clone(),
+                at_ms: 1_000,
+                forced: false,
+            },
+        );
         assert!(run(&running, &cfg(EnforceMode::Enforce, true), &tracker, 10_999).is_empty());
         assert_eq!(
             run(&running, &cfg(EnforceMode::Enforce, true), &tracker, 11_000),
             vec![Action::ForceKill(running[0].clone())]
         );
         assert_eq!(
-            run(&running, &cfg(EnforceMode::Enforce, false), &tracker, 11_000),
+            run(
+                &running,
+                &cfg(EnforceMode::Enforce, false),
+                &tracker,
+                11_000
+            ),
             vec![Action::ForceNotAllowed(running[0].clone())]
         );
         assert!(tracker.first_report(1, KIND_FORCE_NOT_ALLOWED));
-        assert!(run(&running, &cfg(EnforceMode::Enforce, false), &tracker, 99_000).is_empty());
+        assert!(
+            run(
+                &running,
+                &cfg(EnforceMode::Enforce, false),
+                &tracker,
+                99_000
+            )
+            .is_empty()
+        );
     }
 
     #[test]
     fn a_forced_pid_is_left_alone() {
         let running = [app("com.game", 1, false)];
         let mut tracker = Tracker::default();
-        tracker.requested.insert(1, Requested { app: running[0].clone(), at_ms: 0, forced: true });
+        tracker.requested.insert(
+            1,
+            Requested {
+                app: running[0].clone(),
+                at_ms: 0,
+                forced: true,
+            },
+        );
         assert!(run(&running, &cfg(EnforceMode::Enforce, true), &tracker, 99_000).is_empty());
     }
 
@@ -217,7 +272,14 @@ mod tests {
     fn a_new_segment_forgets_everything() {
         let mut tracker = Tracker::default();
         tracker.enter((Some(1), Some(1)));
-        tracker.requested.insert(1, Requested { app: app("com.game", 1, false), at_ms: 0, forced: false });
+        tracker.requested.insert(
+            1,
+            Requested {
+                app: app("com.game", 1, false),
+                at_ms: 0,
+                forced: false,
+            },
+        );
         assert!(tracker.first_report(1, KIND_WOULD_TERMINATE));
         tracker.enter((Some(1), Some(1)));
         assert_eq!(tracker.requested.len(), 1);

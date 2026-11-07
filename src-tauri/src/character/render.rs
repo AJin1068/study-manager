@@ -2,7 +2,7 @@
 //! every clothing slot has an anchor box derived from them, so one item template fits all
 //! species ("body-proportion alignment"). Pure: the same inputs give the same string.
 
-use super::catalog::{catalog, Body};
+use super::catalog::{Body, catalog};
 use super::{Equipped, Look};
 use crate::error::{AppError, AppResult};
 use crate::points::rewards::Stage;
@@ -23,7 +23,12 @@ fn f(v: f64) -> String {
 }
 
 pub fn torso(body: &Body) -> Rect {
-    Rect { x: CX - body.torso_w / 2.0, y: body.head_cy + body.head_r - 3.0, w: body.torso_w, h: body.torso_h }
+    Rect {
+        x: CX - body.torso_w / 2.0,
+        y: body.head_cy + body.head_r - 3.0,
+        w: body.torso_w,
+        h: body.torso_h,
+    }
 }
 
 /// Where an item of `slot` sits for a body.
@@ -31,10 +36,25 @@ pub fn anchor(body: &Body, slot: Slot) -> Rect {
     let t = torso(body);
     let r = body.head_r;
     match slot {
-        Slot::Hat => Rect { x: CX - r * 1.1, y: body.head_cy - r * 1.35, w: r * 2.2, h: r * 1.05 },
+        Slot::Hat => Rect {
+            x: CX - r * 1.1,
+            y: body.head_cy - r * 1.35,
+            w: r * 2.2,
+            h: r * 1.05,
+        },
         Slot::Top => t,
-        Slot::Accessory => Rect { x: t.x - 1.0, y: t.y - 2.0, w: t.w + 2.0, h: 7.0 },
-        Slot::Hand => Rect { x: t.x + t.w + 1.0, y: t.y + t.h * 0.35, w: 11.0, h: 11.0 },
+        Slot::Accessory => Rect {
+            x: t.x - 1.0,
+            y: t.y - 2.0,
+            w: t.w + 2.0,
+            h: 7.0,
+        },
+        Slot::Hand => Rect {
+            x: t.x + t.w + 1.0,
+            y: t.y + t.h * 0.35,
+            w: 11.0,
+            h: 11.0,
+        },
     }
 }
 
@@ -117,7 +137,9 @@ pub fn render(look: &Look, stage: Stage, equipped: &Equipped) -> AppResult<Strin
     let bad = |what: &str| AppError::Internal(format!("character look names an unknown {what}"));
     let species = cat.species(&look.species).ok_or_else(|| bad("species"))?;
     let palette = cat.palette(&look.palette).ok_or_else(|| bad("palette"))?;
-    let expression = cat.expression(&look.expression).ok_or_else(|| bad("expression"))?;
+    let expression = cat
+        .expression(&look.expression)
+        .ok_or_else(|| bad("expression"))?;
     let prop = cat.prop(&look.prop).ok_or_else(|| bad("prop"))?;
     let body = &species.body;
     let vars = head_vars(body, &palette.hex);
@@ -137,7 +159,12 @@ pub fn render(look: &Look, stage: Stage, equipped: &Equipped) -> AppResult<Strin
         f(t.h),
         palette.hex
     ));
-    g.push_str(&format!("<circle cx='50' cy='{}' r='{}' fill='{}'/>", f(body.head_cy), f(body.head_r), palette.hex));
+    g.push_str(&format!(
+        "<circle cx='50' cy='{}' r='{}' fill='{}'/>",
+        f(body.head_cy),
+        f(body.head_r),
+        palette.hex
+    ));
     g.push_str(&fill(&expression.svg, &vars));
     let leaves = match stage {
         Stage::Seed => 0,
@@ -147,13 +174,21 @@ pub fn render(look: &Look, stage: Stage, equipped: &Equipped) -> AppResult<Strin
     let top = body.head_cy - body.head_r;
     for i in 0..leaves {
         let dx = if i == 0 { -3.0 } else { 4.0 };
-        g.push_str(&format!("<ellipse cx='{}' cy='{}' rx='3' ry='5' fill='#5fa35a'/>", f(CX + dx), f(top - 5.0 - f64::from(i))));
+        g.push_str(&format!(
+            "<ellipse cx='{}' cy='{}' rx='3' ry='5' fill='#5fa35a'/>",
+            f(CX + dx),
+            f(top - 5.0 - f64::from(i))
+        ));
     }
     // The prop is the base of the hand slot; a hand item is drawn over it.
     g.push_str(&fill(&prop.svg, &anchor_vars(hand)));
     for slot in [Slot::Top, Slot::Accessory, Slot::Hand, Slot::Hat] {
-        let Some(id) = equipped.get(slot) else { continue };
-        let Some(item) = items::item(id)? else { continue };
+        let Some(id) = equipped.get(slot) else {
+            continue;
+        };
+        let Some(item) = items::item(id)? else {
+            continue;
+        };
         if item.kind != ItemKind::Clothing || item.slot != Some(slot) {
             continue;
         }

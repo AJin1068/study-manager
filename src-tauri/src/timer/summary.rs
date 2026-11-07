@@ -6,8 +6,8 @@ use rusqlite::Connection;
 use serde::Serialize;
 
 use crate::downtime::Interval;
-use crate::focus;
 use crate::error::AppResult;
+use crate::focus;
 use crate::plan::BlockKind;
 use crate::store;
 
@@ -83,11 +83,15 @@ pub fn studied_ms(seg: &SegmentRow, downtime: &[Interval]) -> i64 {
 }
 
 fn closed_study(segments: &[SegmentRow]) -> impl Iterator<Item = &SegmentRow> {
-    segments.iter().filter(|s| s.kind == BlockKind::Study && s.ended_at_ms.is_some())
+    segments
+        .iter()
+        .filter(|s| s.kind == BlockKind::Study && s.ended_at_ms.is_some())
 }
 
 fn total_studied(segments: &[SegmentRow], downtime: &[Interval]) -> i64 {
-    closed_study(segments).map(|s| studied_ms(s, downtime)).sum()
+    closed_study(segments)
+        .map(|s| studied_ms(s, downtime))
+        .sum()
 }
 
 fn day_studied(conn: &Connection, date: &str) -> AppResult<i64> {
@@ -109,7 +113,9 @@ pub fn settle(conn: &Connection, prev: &TimerState, cur: &TimerState) -> AppResu
         return Ok(Settled::default());
     };
     let run_over = cur.run_id != Some(run_id);
-    let Some(run) = store::get_run(conn, run_id)? else { return Ok(Settled::default()) };
+    let Some(run) = store::get_run(conn, run_id)? else {
+        return Ok(Settled::default());
+    };
     let segments = store::list_segments(conn, run_id)?;
     let current_segment = cur.segment_id.unwrap_or(i64::MAX);
     let ended: Vec<&SegmentRow> = closed_study(&segments)
@@ -122,7 +128,11 @@ pub fn settle(conn: &Connection, prev: &TimerState, cur: &TimerState) -> AppResu
     let mut out = Settled::default();
     for seg in ended {
         let set_index = study_index(&segments, seg);
-        let downtime = store::list_downtime_intervals(conn, seg.started_at_ms, seg.ended_at_ms.unwrap_or(seg.started_at_ms))?;
+        let downtime = store::list_downtime_intervals(
+            conn,
+            seg.started_at_ms,
+            seg.ended_at_ms.unwrap_or(seg.started_at_ms),
+        )?;
         let set_studied_ms = studied_ms(seg, &downtime);
         let focus = focus::segment_focus(conn, seg, set_studied_ms)?;
         out.sets.push(SetSummary {
@@ -140,7 +150,11 @@ pub fn settle(conn: &Connection, prev: &TimerState, cur: &TimerState) -> AppResu
     }
     if run_over {
         let from = segments.iter().map(|s| s.started_at_ms).min().unwrap_or(0);
-        let to = segments.iter().filter_map(|s| s.ended_at_ms).max().unwrap_or(0);
+        let to = segments
+            .iter()
+            .filter_map(|s| s.ended_at_ms)
+            .max()
+            .unwrap_or(0);
         let downtime = store::list_downtime_intervals(conn, from, to)?;
         let run_studied_ms = total_studied(&segments, &downtime);
         let (focus_credited_ms, focus_score) = focus::run_focus(conn, run_id, run_studied_ms)?;
@@ -159,7 +173,10 @@ pub fn settle(conn: &Connection, prev: &TimerState, cur: &TimerState) -> AppResu
 }
 
 fn study_index(segments: &[SegmentRow], seg: &SegmentRow) -> i64 {
-    let before = segments.iter().filter(|s| s.kind == BlockKind::Study && s.seq <= seg.seq).count();
+    let before = segments
+        .iter()
+        .filter(|s| s.kind == BlockKind::Study && s.seq <= seg.seq)
+        .count();
     i64::try_from(before).unwrap_or(i64::MAX)
 }
 

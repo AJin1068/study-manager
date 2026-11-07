@@ -4,7 +4,7 @@
 //! an error here changes nothing about blocking). A pass that finds a new attempt asks the gate,
 //! which applies the cooldown, the daily limit, and the locked-study-block rule.
 
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -22,7 +22,11 @@ const POLL: Duration = Duration::from_secs(3);
 
 /// Looks for attempts newer than `last_seen`; returns the new high mark and, when there was one
 /// and the gate allows it, a card.
-pub fn poll(db: &std::sync::Mutex<rusqlite::Connection>, quiz: &QuizService, last_seen: i64) -> AppResult<(i64, Option<QuizCard>)> {
+pub fn poll(
+    db: &std::sync::Mutex<rusqlite::Connection>,
+    quiz: &QuizService,
+    last_seen: i64,
+) -> AppResult<(i64, Option<QuizCard>)> {
     let latest = repo::latest_attempt_event_id(&*lock_db(db)?)?;
     if latest <= last_seen {
         return Ok((last_seen, None));
@@ -30,9 +34,15 @@ pub fn poll(db: &std::sync::Mutex<rusqlite::Connection>, quiz: &QuizService, las
     Ok((latest, quiz.on_block_attempt()?))
 }
 
-pub fn spawn(app: AppHandle, db: Arc<std::sync::Mutex<rusqlite::Connection>>, quiz: Arc<QuizService>) {
+pub fn spawn(
+    app: AppHandle,
+    db: Arc<std::sync::Mutex<rusqlite::Connection>>,
+    quiz: Arc<QuizService>,
+) {
     thread::spawn(move || {
-        let mut last_seen = lock_db(&db).and_then(|conn| repo::latest_attempt_event_id(&conn)).unwrap_or(0);
+        let mut last_seen = lock_db(&db)
+            .and_then(|conn| repo::latest_attempt_event_id(&conn))
+            .unwrap_or(0);
         loop {
             thread::sleep(POLL);
             match catch_unwind(AssertUnwindSafe(|| poll(&db, &quiz, last_seen))) {
@@ -43,7 +53,10 @@ pub fn spawn(app: AppHandle, db: Arc<std::sync::Mutex<rusqlite::Connection>>, qu
                     }
                 }
                 Ok(Err(err)) => tracing::warn!(event = "quiz_watch_failed", error = %err),
-                Err(_) => tracing::error!(event = "quiz_watch_panicked", "quiz watch pass panicked; retrying"),
+                Err(_) => tracing::error!(
+                    event = "quiz_watch_panicked",
+                    "quiz watch pass panicked; retrying"
+                ),
             }
         }
     });

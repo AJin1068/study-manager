@@ -10,18 +10,20 @@ use serde::Serialize;
 use super::concepts::{self, NewConcept};
 use super::copy;
 use super::merge::{self, MergeError};
-use super::model::{Published, RevisionKind, SharedCode, SharedError, WirePage, WireRevision, MAX_BODY_CHARS};
+use super::model::{
+    MAX_BODY_CHARS, Published, RevisionKind, SharedCode, SharedError, WirePage, WireRevision,
+};
 use super::port::SharedWikiPort;
 use super::quiz::SharedQuiz;
 use super::rest::RestSharedWiki;
 use super::summary;
 use crate::commands::lock_db;
 use crate::error::{AppError, AppResult};
-use crate::llm::service::{day_bounds_ms, LlmService};
+use crate::llm::service::{LlmService, day_bounds_ms};
 use crate::llm::{LlmClient, LlmError, LlmRequest, LlmResponse};
 use crate::quiz::ItemKind;
-use crate::remote::runtime::RemoteRuntime;
 use crate::remote::Clock;
+use crate::remote::runtime::RemoteRuntime;
 use crate::store;
 use crate::store::shared_wiki as marks;
 use crate::wiki::fs::WikiFs;
@@ -171,13 +173,29 @@ fn coded<T>(result: Result<T, SharedError>) -> AppResult<Result<T, &'static str>
 }
 
 fn live_edits(page: &WirePage) -> impl Iterator<Item = &WireRevision> {
-    page.revisions.iter().filter(|r| r.kind == RevisionKind::Edit && !r.body.trim().is_empty())
+    page.revisions
+        .iter()
+        .filter(|r| r.kind == RevisionKind::Edit && !r.body.trim().is_empty())
 }
 
 impl SharedWikiService {
-    pub fn new(db: Arc<Mutex<Connection>>, runtime: Arc<RemoteRuntime>, clock: Arc<dyn Clock>, llm: Arc<LlmService>) -> Self {
-        let ports = Arc::new(AppPorts { db: Arc::clone(&db), runtime });
-        Self::with_parts(db, clock, ports, Arc::new(GatedLlm(llm)), Arc::new(WikiService::wiki_fs))
+    pub fn new(
+        db: Arc<Mutex<Connection>>,
+        runtime: Arc<RemoteRuntime>,
+        clock: Arc<dyn Clock>,
+        llm: Arc<LlmService>,
+    ) -> Self {
+        let ports = Arc::new(AppPorts {
+            db: Arc::clone(&db),
+            runtime,
+        });
+        Self::with_parts(
+            db,
+            clock,
+            ports,
+            Arc::new(GatedLlm(llm)),
+            Arc::new(WikiService::wiki_fs),
+        )
     }
 
     pub(crate) fn with_parts(
@@ -187,7 +205,14 @@ impl SharedWikiService {
         llm: Arc<dyn LlmClient>,
         wiki: Arc<WikiLocator>,
     ) -> Self {
-        Self { db, clock, ports, llm, wiki, round: Mutex::new(None) }
+        Self {
+            db,
+            clock,
+            ports,
+            llm,
+            wiki,
+            round: Mutex::new(None),
+        }
     }
 
     fn now(&self) -> AppResult<i64> {
@@ -195,14 +220,19 @@ impl SharedWikiService {
     }
 
     fn port(&self) -> AppResult<Arc<dyn SharedWikiPort>> {
-        self.ports.port().ok_or_else(|| AppError::Remote(SharedCode::NotSignedIn.as_str().to_string()))
+        self.ports
+            .port()
+            .ok_or_else(|| AppError::Remote(SharedCode::NotSignedIn.as_str().to_string()))
     }
 
     /// The text of a local wiki page and its name, read while the lock is held.
     fn read_local(&self, conn: &Connection, page_id: i64) -> AppResult<(String, String)> {
-        let (subject_id, name) = marks::page_by_id(conn, page_id)?.ok_or_else(|| AppError::Invalid("unknown wiki page".into()))?;
+        let (subject_id, name) = marks::page_by_id(conn, page_id)?
+            .ok_or_else(|| AppError::Invalid("unknown wiki page".into()))?;
         let subject = store::wiki::get_subject(conn, subject_id)?;
-        let text = (self.wiki)(conn)?.read_page(&subject.slug, &name)?.ok_or_else(|| AppError::Invalid("the page does not exist".into()))?;
+        let text = (self.wiki)(conn)?
+            .read_page(&subject.slug, &name)?
+            .ok_or_else(|| AppError::Invalid("the page does not exist".into()))?;
         Ok((name, text))
     }
 
@@ -213,16 +243,34 @@ impl SharedWikiService {
         let conn = lock_db(&self.db)?;
         let (page_name, text) = self.read_local(&conn, page_id)?;
         let (rooms, _) = store::rooms::read_membership_cache(&conn)?;
-        let member_count = rooms.iter().find(|r| r.room_id == room_id).map(|r| r.member_count);
+        let member_count = rooms
+            .iter()
+            .find(|r| r.room_id == room_id)
+            .map(|r| r.member_count);
         let preview = text.chars().take(PREVIEW_CHARS).collect();
-        Ok(SharePreview { page_name, preview, member_count, share_notice: SHARE_NOTICE, merge_notice: MERGE_NOTICE })
+        Ok(SharePreview {
+            page_name,
+            preview,
+            member_count,
+            share_notice: SHARE_NOTICE,
+            merge_notice: MERGE_NOTICE,
+        })
     }
 
     /// Shares a page with a room. Nothing happens unless `confirmed` is true (the user saw the
     /// confirmation screen). `allow_llm_merge` is the separate consent for model merging.
-    pub fn share(&self, page_id: i64, room_id: &str, allow_llm_merge: bool, confirmed: bool) -> AppResult<ActionView> {
+    pub fn share(
+        &self,
+        page_id: i64,
+        room_id: &str,
+        allow_llm_merge: bool,
+        confirmed: bool,
+    ) -> AppResult<ActionView> {
         if !confirmed {
-            return Ok(ActionView { code: "not_confirmed", branched: false });
+            return Ok(ActionView {
+                code: "not_confirmed",
+                branched: false,
+            });
         }
         let port = self.port()?;
         let now = self.now()?;
@@ -230,24 +278,39 @@ impl SharedWikiService {
             let conn = lock_db(&self.db)?;
             let (name, text) = self.read_local(&conn, page_id)?;
             if text.chars().count() > MAX_BODY_CHARS {
-                return Ok(ActionView { code: SharedCode::TooLarge.as_str(), branched: false });
+                return Ok(ActionView {
+                    code: SharedCode::TooLarge.as_str(),
+                    branched: false,
+                });
             }
             let previous = marks::get_mark(&conn, page_id, room_id)?;
             marks::set_mark(&conn, page_id, room_id, allow_llm_merge, now)?;
-            let base = previous.as_ref().map(|m| m.last_revision_id.clone()).filter(|id| !id.is_empty());
+            let base = previous
+                .as_ref()
+                .map(|m| m.last_revision_id.clone())
+                .filter(|id| !id.is_empty());
             (name, text, base, previous.is_some())
         };
         match coded(port.publish(room_id, &name, &text, base.as_deref(), allow_llm_merge))? {
-            Ok(Published { revision_id, branched }) => {
+            Ok(Published {
+                revision_id,
+                branched,
+            }) => {
                 let conn = lock_db(&self.db)?;
                 marks::record_push(&conn, page_id, room_id, &content_hash(&text), &revision_id)?;
-                Ok(ActionView { code: SharedCode::Ok.as_str(), branched })
+                Ok(ActionView {
+                    code: SharedCode::Ok.as_str(),
+                    branched,
+                })
             }
             Err(code) => {
                 if !was_marked {
                     marks::remove_mark(&*lock_db(&self.db)?, page_id, room_id)?;
                 }
-                Ok(ActionView { code, branched: false })
+                Ok(ActionView {
+                    code,
+                    branched: false,
+                })
             }
         }
     }
@@ -273,9 +336,16 @@ impl SharedWikiService {
                 continue;
             }
             let base = Some(mark.last_revision_id.as_str()).filter(|id| !id.is_empty());
-            match coded(port.publish(room_id, &mark.page_name, &text, base, mark.allow_llm_merge))? {
+            match coded(port.publish(room_id, &mark.page_name, &text, base, mark.allow_llm_merge))?
+            {
                 Ok(published) => {
-                    marks::record_push(&*lock_db(&self.db)?, mark.page_id, room_id, &hash, &published.revision_id)?;
+                    marks::record_push(
+                        &*lock_db(&self.db)?,
+                        mark.page_id,
+                        room_id,
+                        &hash,
+                        &published.revision_id,
+                    )?;
                     pushed += 1;
                 }
                 Err(_) => failed += 1,
@@ -290,16 +360,23 @@ impl SharedWikiService {
         let port = self.port()?;
         let (name, root) = {
             let conn = lock_db(&self.db)?;
-            let (_, name) = marks::page_by_id(&conn, page_id)?.ok_or_else(|| AppError::Invalid("unknown wiki page".into()))?;
+            let (_, name) = marks::page_by_id(&conn, page_id)?
+                .ok_or_else(|| AppError::Invalid("unknown wiki page".into()))?;
             (name, (self.wiki)(&conn)?.root().to_path_buf())
         };
         match coded(port.withdraw(room_id, &name))? {
             Ok(_) | Err("not_shared" | "not_found") => {
                 marks::remove_mark(&*lock_db(&self.db)?, page_id, room_id)?;
                 copy::remove_copy(&root, room_id, &name)?;
-                Ok(ActionView { code: SharedCode::Ok.as_str(), branched: false })
+                Ok(ActionView {
+                    code: SharedCode::Ok.as_str(),
+                    branched: false,
+                })
             }
-            Err(code) => Ok(ActionView { code, branched: false }),
+            Err(code) => Ok(ActionView {
+                code,
+                branched: false,
+            }),
         }
     }
 
@@ -317,7 +394,11 @@ impl SharedWikiService {
         let now = self.now()?;
         let (local_names, seen, root) = {
             let conn = lock_db(&self.db)?;
-            (marks::all_page_names(&conn)?, marks::seen_concepts(&conn, room_id)?, (self.wiki)(&conn)?.root().to_path_buf())
+            (
+                marks::all_page_names(&conn)?,
+                marks::seen_concepts(&conn, room_id)?,
+                (self.wiki)(&conn)?.root().to_path_buf(),
+            )
         };
         self.refresh_copies(&root, room_id, &pages)?;
         let news = concepts::new_concepts(&local_names, &pages, &seen);
@@ -329,12 +410,16 @@ impl SharedWikiService {
                 let plan = merge::plan(page);
                 RoomPageView {
                     title: page.title.clone(),
-                    contributors: page.revisions.iter().flat_map(|r| r.contributors.iter().cloned()).fold(Vec::new(), |mut acc, n| {
-                        if !acc.contains(&n) {
-                            acc.push(n);
-                        }
-                        acc
-                    }),
+                    contributors: page
+                        .revisions
+                        .iter()
+                        .flat_map(|r| r.contributors.iter().cloned())
+                        .fold(Vec::new(), |mut acc, n| {
+                            if !acc.contains(&n) {
+                                acc.push(n);
+                            }
+                            acc
+                        }),
                     has_merge: page.revisions.iter().any(|r| r.kind == RevisionKind::Merge),
                     branched: page.revisions.iter().any(|r| r.branched),
                     shared_by_me: live_edits(page).any(|r| r.is_mine),
@@ -345,17 +430,31 @@ impl SharedWikiService {
             .collect();
         Ok(SharedRoomView {
             pages: views,
-            new_concepts: news.into_iter().map(|NewConcept { title, authors }| NewConceptView { title, authors }).collect(),
+            new_concepts: news
+                .into_iter()
+                .map(|NewConcept { title, authors }| NewConceptView { title, authors })
+                .collect(),
             summary: recap.text,
             share_notice: SHARE_NOTICE,
         })
     }
 
-    fn refresh_copies(&self, root: &std::path::Path, room_id: &str, pages: &[WirePage]) -> AppResult<()> {
+    fn refresh_copies(
+        &self,
+        root: &std::path::Path,
+        room_id: &str,
+        pages: &[WirePage],
+    ) -> AppResult<()> {
         let mut wanted = Vec::new();
         for page in pages {
-            let merged = page.revisions.iter().filter(|r| r.kind == RevisionKind::Merge).max_by_key(|r| r.created_at_ms);
-            let theirs = live_edits(page).filter(|r| !r.is_mine).max_by_key(|r| r.created_at_ms);
+            let merged = page
+                .revisions
+                .iter()
+                .filter(|r| r.kind == RevisionKind::Merge)
+                .max_by_key(|r| r.created_at_ms);
+            let theirs = live_edits(page)
+                .filter(|r| !r.is_mine)
+                .max_by_key(|r| r.created_at_ms);
             if let Some(rev) = merged.or(theirs) {
                 if copy::write_copy(root, room_id, &page.title, &rev.body).is_ok() {
                     wanted.push(page.title.clone());
@@ -387,19 +486,45 @@ impl SharedWikiService {
     pub fn merge_page(&self, room_id: &str, page_name: &str) -> AppResult<MergeView> {
         let pages = self.pages(room_id)?;
         let Some(page) = pages.iter().find(|p| p.title == page_name) else {
-            return Ok(MergeView { code: SharedCode::NotFound.as_str(), used_llm: false, fallback_reason: None, contributors: Vec::new(), listed_only: Vec::new(), markdown: String::new() });
+            return Ok(MergeView {
+                code: SharedCode::NotFound.as_str(),
+                used_llm: false,
+                fallback_reason: None,
+                contributors: Vec::new(),
+                listed_only: Vec::new(),
+                markdown: String::new(),
+            });
         };
         let plan = merge::plan(page);
         let listed_only: Vec<String> = plan.listed_only.iter().map(|l| l.author.clone()).collect();
         let draft = match merge::merge(self.llm.as_ref(), &page.title, &plan) {
             Ok(draft) => draft,
             Err(err @ MergeError::NotEnough) => {
-                return Ok(MergeView { code: err.code(), used_llm: false, fallback_reason: None, contributors: Vec::new(), listed_only, markdown: String::new() });
+                return Ok(MergeView {
+                    code: err.code(),
+                    used_llm: false,
+                    fallback_reason: None,
+                    contributors: Vec::new(),
+                    listed_only,
+                    markdown: String::new(),
+                });
             }
         };
-        let saved = self.port()?.save_merged(room_id, &page.title, &draft.markdown, &draft.source_revisions);
+        let saved = self.port()?.save_merged(
+            room_id,
+            &page.title,
+            &draft.markdown,
+            &draft.source_revisions,
+        );
         if let Err(code) = coded(saved)? {
-            return Ok(MergeView { code, used_llm: draft.used_llm, fallback_reason: draft.fallback_reason, contributors: draft.contributors, listed_only, markdown: String::new() });
+            return Ok(MergeView {
+                code,
+                used_llm: draft.used_llm,
+                fallback_reason: draft.fallback_reason,
+                contributors: draft.contributors,
+                listed_only,
+                markdown: String::new(),
+            });
         }
         let root = (self.wiki)(&*lock_db(&self.db)?)?.root().to_path_buf();
         copy::write_copy(&root, room_id, &page.title, &draft.markdown)?;
@@ -423,7 +548,13 @@ impl SharedWikiService {
         let views = round
             .questions()
             .into_iter()
-            .map(|(q, page_name)| QuizQuestionView { item_id: q.item_id, kind: q.kind, prompt: q.prompt, choices: q.choices, page_name })
+            .map(|(q, page_name)| QuizQuestionView {
+                item_id: q.item_id,
+                kind: q.kind,
+                prompt: q.prompt,
+                choices: q.choices,
+                page_name,
+            })
             .collect();
         *guard(&self.round) = Some(round);
         Ok(views)
@@ -431,6 +562,8 @@ impl SharedWikiService {
 
     /// Whether the answer is right; `None` when there is no such question in the current round.
     pub fn quiz_answer(&self, item_id: i64, answer: &str) -> Option<bool> {
-        guard(&self.round).as_ref().and_then(|round| round.grade(item_id, answer))
+        guard(&self.round)
+            .as_ref()
+            .and_then(|round| round.grade(item_id, answer))
     }
 }

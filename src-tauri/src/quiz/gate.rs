@@ -17,8 +17,8 @@ use rusqlite::{Connection, TransactionBehavior};
 use serde::Serialize;
 
 use super::config::QuizConfig;
-use super::select::{self, pick, Candidate};
-use super::{grade, Context, QuizItem, QuizQuestion, SESSION_END_QUESTIONS};
+use super::select::{self, Candidate, pick};
+use super::{Context, QuizItem, QuizQuestion, SESSION_END_QUESTIONS, grade};
 use crate::error::{AppError, AppResult};
 use crate::llm::service::day_bounds_ms;
 use crate::points::rewards;
@@ -91,26 +91,50 @@ pub struct QuizGate {
 
 fn lock(gate: &QuizGate) -> std::sync::MutexGuard<'_, GateState> {
     // Plain data: a poisoned guard is still consistent.
-    gate.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    gate.state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// The locked study block, if one is running: pop-ups exist only inside it.
-fn study_block<Tz: TimeZone>(conn: &Connection, tz: &Tz, now_ms: i64) -> AppResult<Option<TimerState>> {
+fn study_block<Tz: TimeZone>(
+    conn: &Connection,
+    tz: &Tz,
+    now_ms: i64,
+) -> AppResult<Option<TimerState>> {
     let state = crate::timer::current_state(conn, tz, now_ms)?;
     Ok(crate::enforce::study_window(&state).map(|_| state))
 }
 
 /// The wiki subject of a run's plan, so its questions come first.
 fn run_subject(conn: &Connection, run_id: Option<i64>) -> AppResult<Option<i64>> {
-    let Some(run) = run_id.map(|id| store::get_run(conn, id)).transpose()?.flatten() else { return Ok(None) };
-    let Some(plan) = store::get_plan(conn, run.plan_id)? else { return Ok(None) };
+    let Some(run) = run_id
+        .map(|id| store::get_run(conn, id))
+        .transpose()?
+        .flatten()
+    else {
+        return Ok(None);
+    };
+    let Some(plan) = store::get_plan(conn, run.plan_id)? else {
+        return Ok(None);
+    };
     Ok(crate::wiki::service::subject_for_plan(conn, &plan.subject)?.map(|s| s.id))
 }
 
 /// Questions from the preferred subject first; if it has none to give, from any subject.
-fn draw(conn: &Connection, subject: Option<i64>, n: usize, now_ms: i64, seed: u64, want_cloze: bool) -> AppResult<Vec<QuizItem>> {
+fn draw(
+    conn: &Connection,
+    subject: Option<i64>,
+    n: usize,
+    now_ms: i64,
+    seed: u64,
+    want_cloze: bool,
+) -> AppResult<Vec<QuizItem>> {
     let from = |candidates: &[Candidate]| -> Vec<QuizItem> {
-        pick(candidates, n, now_ms, seed, true, want_cloze).into_iter().map(|i| candidates[i].item.clone()).collect()
+        pick(candidates, n, now_ms, seed, true, want_cloze)
+            .into_iter()
+            .map(|i| candidates[i].item.clone())
+            .collect()
     };
     if subject.is_some() {
         let own = from(&repo::candidates(conn, subject)?);
@@ -125,29 +149,56 @@ impl QuizGate {
     /// Whether this kind of pop-up is allowed right now (cooldown, daily limit), without counting it.
     fn allowed<Tz: TimeZone>(state: &GateState, tz: &Tz, kind: &'static str, now_ms: i64) -> bool {
         let times = state.offers.get(kind).map(Vec::as_slice).unwrap_or(&[]);
-        if times.iter().any(|&t| now_ms.saturating_sub(t) < COOLDOWN_MS && t <= now_ms) {
+        if times
+            .iter()
+            .any(|&t| now_ms.saturating_sub(t) < COOLDOWN_MS && t <= now_ms)
+        {
             return false;
         }
         let (from, to) = day_bounds_ms(tz, now_ms);
         times.iter().filter(|&&t| t >= from && t < to).count() < DAILY_LIMIT
     }
 
-    fn issue(&self, kind: &'static str, context: Context, items: Vec<QuizItem>, at: (Option<i64>, Option<i64>), now_ms: i64, skippable: bool) -> QuizCard {
+    fn issue(
+        &self,
+        kind: &'static str,
+        context: Context,
+        items: Vec<QuizItem>,
+        at: (Option<i64>, Option<i64>),
+        now_ms: i64,
+        skippable: bool,
+    ) -> QuizCard {
         let mut state = lock(self);
         state.next_id += 1;
         let id = state.next_id;
         let seed = select::mix(u64::try_from(now_ms).unwrap_or(0) ^ id);
         let questions = items.iter().map(|item| item.view(seed)).collect();
         let (run_id, segment_id) = at;
-        state.pending.push(PendingCard { id, context, items, run_id, segment_id, issued_at_ms: now_ms });
+        state.pending.push(PendingCard {
+            id,
+            context,
+            items,
+            run_id,
+            segment_id,
+            issued_at_ms: now_ms,
+        });
         if state.pending.len() > KEEP_PENDING {
             state.pending.remove(0);
         }
         let log = state.offers.entry(kind).or_default();
         log.retain(|&t| now_ms.saturating_sub(t) < 24 * 60 * 60 * 1000);
         log.push(now_ms);
-        tracing::info!(event = "quiz_gate", context = context.as_str(), result = "offered");
-        QuizCard { card_id: id, context, questions, skippable }
+        tracing::info!(
+            event = "quiz_gate",
+            context = context.as_str(),
+            result = "offered"
+        );
+        QuizCard {
+            card_id: id,
+            context,
+            questions,
+            skippable,
+        }
     }
 
     fn seed(&self, now_ms: i64) -> u64 {
@@ -156,7 +207,12 @@ impl QuizGate {
 
     /// One question because a blocked app or site was opened. `None` when pop-ups are off, there is
     /// no locked study block, it is too soon after the last one, or the bank has nothing to ask.
-    pub fn offer_distraction<Tz: TimeZone>(&self, conn: &Connection, tz: &Tz, now_ms: i64) -> AppResult<Option<QuizCard>> {
+    pub fn offer_distraction<Tz: TimeZone>(
+        &self,
+        conn: &Connection,
+        tz: &Tz,
+        now_ms: i64,
+    ) -> AppResult<Option<QuizCard>> {
         if !QuizConfig::load(conn)?.distraction_enabled {
             return Ok(None);
         }
@@ -164,70 +220,169 @@ impl QuizGate {
     }
 
     /// One question attached to a random focus check-in (`quiz.checkin_enabled`, off by default).
-    pub fn offer_checkin<Tz: TimeZone>(&self, conn: &Connection, tz: &Tz, now_ms: i64) -> AppResult<Option<QuizCard>> {
+    pub fn offer_checkin<Tz: TimeZone>(
+        &self,
+        conn: &Connection,
+        tz: &Tz,
+        now_ms: i64,
+    ) -> AppResult<Option<QuizCard>> {
         if !QuizConfig::load(conn)?.checkin_enabled {
             return Ok(None);
         }
         self.offer_in_block(conn, tz, now_ms, "checkin", Context::Checkin)
     }
 
-    fn offer_in_block<Tz: TimeZone>(&self, conn: &Connection, tz: &Tz, now_ms: i64, kind: &'static str, context: Context) -> AppResult<Option<QuizCard>> {
-        let Some(block) = study_block(conn, tz, now_ms)? else { return Ok(None) };
+    fn offer_in_block<Tz: TimeZone>(
+        &self,
+        conn: &Connection,
+        tz: &Tz,
+        now_ms: i64,
+        kind: &'static str,
+        context: Context,
+    ) -> AppResult<Option<QuizCard>> {
+        let Some(block) = study_block(conn, tz, now_ms)? else {
+            return Ok(None);
+        };
         if !Self::allowed(&lock(self), tz, kind, now_ms) {
             return Ok(None);
         }
-        let items = draw(conn, run_subject(conn, block.run_id)?, 1, now_ms, self.seed(now_ms), false)?;
+        let items = draw(
+            conn,
+            run_subject(conn, block.run_id)?,
+            1,
+            now_ms,
+            self.seed(now_ms),
+            false,
+        )?;
         if items.is_empty() {
             return Ok(None);
         }
-        Ok(Some(self.issue(kind, context, items, (block.run_id, block.segment_id), now_ms, false)))
+        Ok(Some(self.issue(
+            kind,
+            context,
+            items,
+            (block.run_id, block.segment_id),
+            now_ms,
+            false,
+        )))
     }
 
     /// The quiz of the newest run that finished by itself in the last half hour and has not been
     /// answered or skipped. Once per run.
-    pub fn offer_session_end<Tz: TimeZone>(&self, conn: &Connection, tz: &Tz, now_ms: i64) -> AppResult<Option<QuizCard>> {
-        if !QuizConfig::load(conn)?.session_end_enabled || study_block(conn, tz, now_ms)?.is_some() {
+    pub fn offer_session_end<Tz: TimeZone>(
+        &self,
+        conn: &Connection,
+        tz: &Tz,
+        now_ms: i64,
+    ) -> AppResult<Option<QuizCard>> {
+        if !QuizConfig::load(conn)?.session_end_enabled || study_block(conn, tz, now_ms)?.is_some()
+        {
             return Ok(None);
         }
         let since = date_of(tz, now_ms.saturating_sub(24 * 60 * 60 * 1000))?;
         let mut finished: Vec<_> = store::list_runs_since(conn, &since)?
             .into_iter()
-            .filter(|r| r.status == RunStatus::Completed && r.ended_at_ms.is_some_and(|e| e <= now_ms && now_ms - e <= SESSION_END_WINDOW_MS))
+            .filter(|r| {
+                r.status == RunStatus::Completed
+                    && r.ended_at_ms
+                        .is_some_and(|e| e <= now_ms && now_ms - e <= SESSION_END_WINDOW_MS)
+            })
             .collect();
         finished.sort_by_key(|r| r.ended_at_ms);
-        let Some(run) = finished.pop() else { return Ok(None) };
-        if repo::session_end_done(conn, run.id)? || lock(self).pending.iter().any(|p| p.context == Context::SessionEnd && p.run_id == Some(run.id)) {
+        let Some(run) = finished.pop() else {
+            return Ok(None);
+        };
+        if repo::session_end_done(conn, run.id)?
+            || lock(self)
+                .pending
+                .iter()
+                .any(|p| p.context == Context::SessionEnd && p.run_id == Some(run.id))
+        {
             return Ok(None);
         }
         let subject = run_subject(conn, Some(run.id))?;
-        let items = draw(conn, subject, SESSION_END_QUESTIONS, now_ms, self.seed(now_ms), true)?;
+        let items = draw(
+            conn,
+            subject,
+            SESSION_END_QUESTIONS,
+            now_ms,
+            self.seed(now_ms),
+            true,
+        )?;
         if items.is_empty() {
             return Ok(None);
         }
-        Ok(Some(self.issue("session_end", Context::SessionEnd, items, (Some(run.id), None), now_ms, true)))
+        Ok(Some(self.issue(
+            "session_end",
+            Context::SessionEnd,
+            items,
+            (Some(run.id), None),
+            now_ms,
+            true,
+        )))
     }
 
     /// Practice questions on request (the wiki screen). Not rationed, never in a gate.
-    pub fn offer_review(&self, conn: &Connection, now_ms: i64, subject_id: Option<i64>, n: usize) -> AppResult<Option<QuizCard>> {
-        let items = draw(conn, subject_id, n.clamp(1, SESSION_END_QUESTIONS), now_ms, self.seed(now_ms), true)?;
+    pub fn offer_review(
+        &self,
+        conn: &Connection,
+        now_ms: i64,
+        subject_id: Option<i64>,
+        n: usize,
+    ) -> AppResult<Option<QuizCard>> {
+        let items = draw(
+            conn,
+            subject_id,
+            n.clamp(1, SESSION_END_QUESTIONS),
+            now_ms,
+            self.seed(now_ms),
+            true,
+        )?;
         if items.is_empty() {
             return Ok(None);
         }
-        Ok(Some(self.issue("review", Context::Review, items, (None, None), now_ms, false)))
+        Ok(Some(self.issue(
+            "review",
+            Context::Review,
+            items,
+            (None, None),
+            now_ms,
+            false,
+        )))
     }
 
     /// Grades a card (one answer per question, in order; a missing one is wrong), records the
     /// attempts and pays the bonus. `skip` records a session-end quiz as skipped and drops any
     /// other card unrecorded. `None` when the card is unknown or already used.
-    pub fn answer<Tz: TimeZone>(&self, conn: &mut Connection, tz: &Tz, card_id: u64, answers: &[String], skip: bool, now_ms: i64) -> AppResult<Option<CardResult>> {
+    pub fn answer<Tz: TimeZone>(
+        &self,
+        conn: &mut Connection,
+        tz: &Tz,
+        card_id: u64,
+        answers: &[String],
+        skip: bool,
+        now_ms: i64,
+    ) -> AppResult<Option<CardResult>> {
         let card = {
             let mut state = lock(self);
-            let Some(pos) = state.pending.iter().position(|p| p.id == card_id) else { return Ok(None) };
+            let Some(pos) = state.pending.iter().position(|p| p.id == card_id) else {
+                return Ok(None);
+            };
             state.pending.remove(pos)
         };
         if skip && card.context != Context::SessionEnd {
-            tracing::info!(event = "quiz_gate", context = card.context.as_str(), result = "dismissed");
-            return Ok(Some(CardResult { card_id, context: card.context, results: Vec::new(), skipped: true, bonus_points: 0 }));
+            tracing::info!(
+                event = "quiz_gate",
+                context = card.context.as_str(),
+                result = "dismissed"
+            );
+            return Ok(Some(CardResult {
+                card_id,
+                context: card.context,
+                results: Vec::new(),
+                skipped: true,
+                bonus_points: 0,
+            }));
         }
         let response_ms = (now_ms - card.issued_at_ms).max(0);
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -235,7 +390,10 @@ impl QuizGate {
         let mut paid_today = repo::bonus_rows_between(&tx, rewards::REASON_QUIZ_BONUS, from, to)?;
         let (mut results, mut bonus_points) = (Vec::new(), 0);
         for (index, item) in card.items.iter().enumerate() {
-            let correct = !skip && answers.get(index).is_some_and(|a| grade::is_correct(item, a));
+            let correct = !skip
+                && answers
+                    .get(index)
+                    .is_some_and(|a| grade::is_correct(item, a));
             let attempt = repo::insert_attempt(
                 &tx,
                 &repo::NewAttempt {
@@ -252,16 +410,36 @@ impl QuizGate {
             )?;
             if correct && paid_today < rewards::QUIZ_BONUS_DAILY_CAP {
                 let key = format!("quiz:attempt:{attempt}");
-                if store::insert_ledger_entry(&tx, now_ms, rewards::QUIZ_BONUS_POINTS, rewards::REASON_QUIZ_BONUS, &key)? {
+                if store::insert_ledger_entry(
+                    &tx,
+                    now_ms,
+                    rewards::QUIZ_BONUS_POINTS,
+                    rewards::REASON_QUIZ_BONUS,
+                    &key,
+                )? {
                     paid_today += 1;
                     bonus_points += rewards::QUIZ_BONUS_POINTS;
                 }
             }
-            results.push(ItemResult { item_id: item.id, correct, answer: item.answer_key.clone() });
+            results.push(ItemResult {
+                item_id: item.id,
+                correct,
+                answer: item.answer_key.clone(),
+            });
         }
         tx.commit()?;
-        tracing::info!(event = "quiz_gate", context = card.context.as_str(), result = if skip { "skipped" } else { "answered" });
-        Ok(Some(CardResult { card_id, context: card.context, results: if skip { Vec::new() } else { results }, skipped: skip, bonus_points }))
+        tracing::info!(
+            event = "quiz_gate",
+            context = card.context.as_str(),
+            result = if skip { "skipped" } else { "answered" }
+        );
+        Ok(Some(CardResult {
+            card_id,
+            context: card.context,
+            results: if skip { Vec::new() } else { results },
+            skipped: skip,
+            bonus_points,
+        }))
     }
 }
 
@@ -270,7 +448,9 @@ impl QuizGate {
 /// early-release gate.
 pub fn flag_item(conn: &Connection, item_id: i64, reason: &str, now_ms: i64) -> AppResult<()> {
     if crate::study::lock_held(conn)? {
-        return Err(AppError::Invalid("questions cannot be reported while the lock is held".into()));
+        return Err(AppError::Invalid(
+            "questions cannot be reported while the lock is held".into(),
+        ));
     }
     repo::flag_item(conn, item_id, reason, now_ms)
 }

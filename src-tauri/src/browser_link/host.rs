@@ -9,8 +9,8 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use super::protocol::{encode, read_frame, write_frame, FrameError, Outgoing};
 use super::BUNDLE_IDENTIFIER;
+use super::protocol::{FrameError, Outgoing, encode, read_frame, write_frame};
 use crate::platform::{self, LinkStream};
 
 const ORIGIN_PREFIX: &str = "chrome-extension://";
@@ -28,10 +28,19 @@ pub fn caller_ext_id(args: &[String]) -> Option<String> {
 pub fn run(origin_ext_id: &str) -> i32 {
     let dir = platform::app_data_dir(BUNDLE_IDENTIFIER);
     let (dial, token) = match dir.as_deref() {
-        Some(dir) => (platform::connect_browser_link(dir), platform::read_token(dir)),
+        Some(dir) => (
+            platform::connect_browser_link(dir),
+            platform::read_token(dir),
+        ),
         None => (
-            Err(io::Error::new(io::ErrorKind::NotFound, "no app data directory")),
-            Err(io::Error::new(io::ErrorKind::NotFound, "no app data directory")),
+            Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "no app data directory",
+            )),
+            Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "no app data directory",
+            )),
         ),
     };
     relay(io::stdin(), io::stdout(), dial, token, origin_ext_id)
@@ -39,7 +48,9 @@ pub fn run(origin_ext_id: &str) -> i32 {
 
 fn encode_auth(token: &str, origin_ext_id: &str) -> Vec<u8> {
     // Built by hand into JSON so the host depends only on the protocol module's frame shape.
-    serde_json::json!({ "type": "auth", "token": token, "originExtId": origin_ext_id }).to_string().into_bytes()
+    serde_json::json!({ "type": "auth", "token": token, "originExtId": origin_ext_id })
+        .to_string()
+        .into_bytes()
 }
 
 fn send_error<O: Write>(output: &Mutex<O>, code: &'static str) {
@@ -62,11 +73,13 @@ where
     O: Write + Send + 'static,
 {
     let output = Arc::new(Mutex::new(output));
-    let connected = dial.and_then(|stream| token.map(|token| (stream, token))).and_then(|(mut stream, token)| {
-        write_frame(&mut *stream, &encode_auth(&token, origin_ext_id))?;
-        let reader = stream.try_clone_stream()?;
-        Ok((stream, reader))
-    });
+    let connected = dial
+        .and_then(|stream| token.map(|token| (stream, token)))
+        .and_then(|(mut stream, token)| {
+            write_frame(&mut *stream, &encode_auth(&token, origin_ext_id))?;
+            let reader = stream.try_clone_stream()?;
+            Ok((stream, reader))
+        });
     let (mut to_app, mut from_app) = match connected {
         Ok(pair) => pair,
         Err(_) => {
@@ -80,7 +93,9 @@ where
     let app_output = Arc::clone(&output);
     thread::spawn(move || {
         while let Ok(Some(frame)) = read_frame(&mut *from_app) {
-            let Ok(mut out) = app_output.lock() else { break };
+            let Ok(mut out) = app_output.lock() else {
+                break;
+            };
             if write_frame(&mut *out, &frame).is_err() {
                 break;
             }
@@ -117,7 +132,7 @@ pub fn run_if_invoked(args: &[String]) -> Option<i32> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc::{channel, Sender};
+    use std::sync::mpsc::{Sender, channel};
     use std::time::Duration;
 
     use super::*;
@@ -137,8 +152,14 @@ mod tests {
 
     #[test]
     fn caller_origin_selects_host_mode() {
-        let args = vec!["/app/study-manager".to_owned(), "chrome-extension://abcdefghijklmnopabcdefghijklmnop/".to_owned()];
-        assert_eq!(caller_ext_id(&args).as_deref(), Some("abcdefghijklmnopabcdefghijklmnop"));
+        let args = vec![
+            "/app/study-manager".to_owned(),
+            "chrome-extension://abcdefghijklmnopabcdefghijklmnop/".to_owned(),
+        ];
+        assert_eq!(
+            caller_ext_id(&args).as_deref(),
+            Some("abcdefghijklmnopabcdefghijklmnop")
+        );
         assert_eq!(caller_ext_id(&["/app/study-manager".to_owned()]), None);
         assert_eq!(caller_ext_id(&["chrome-extension:///".to_owned()]), None);
     }
@@ -154,9 +175,16 @@ mod tests {
             "abcdefghijklmnopabcdefghijklmnop",
         );
         assert_eq!(code, 1);
-        let frame = rx.recv_timeout(Duration::from_secs(1)).expect("error frame");
-        let message = read_frame(&mut io::Cursor::new(frame)).expect("frame").expect("some");
-        assert_eq!(String::from_utf8(message).expect("utf8"), r#"{"type":"error","code":"app_not_running"}"#);
+        let frame = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("error frame");
+        let message = read_frame(&mut io::Cursor::new(frame))
+            .expect("frame")
+            .expect("some");
+        assert_eq!(
+            String::from_utf8(message).expect("utf8"),
+            r#"{"type":"error","code":"app_not_running"}"#
+        );
     }
 
     #[cfg(unix)]
@@ -184,10 +212,18 @@ mod tests {
         let (stdin_host, mut stdin_chrome) = UnixStream::pair().expect("pair");
         let (tx, rx) = channel();
         let relay_thread = thread::spawn(move || {
-            relay(stdin_host, ChanWriter(tx), Ok(Box::new(host_side)), Ok("a".repeat(64)), "abcdefghijklmnopabcdefghijklmnop")
+            relay(
+                stdin_host,
+                ChanWriter(tx),
+                Ok(Box::new(host_side)),
+                Ok("a".repeat(64)),
+                "abcdefghijklmnopabcdefghijklmnop",
+            )
         });
 
-        let auth = read_frame(&mut app_side).expect("auth frame").expect("some");
+        let auth = read_frame(&mut app_side)
+            .expect("auth frame")
+            .expect("some");
         let auth: serde_json::Value = serde_json::from_slice(&auth).expect("json");
         assert_eq!(auth["type"], "auth");
         assert_eq!(auth["token"], "a".repeat(64));
@@ -198,8 +234,12 @@ mod tests {
         assert_eq!(relayed, br#"{"type":"hello"}"#);
 
         write_frame(&mut app_side, br#"{"type":"hello_ack"}"#).expect("to chrome");
-        let to_chrome = rx.recv_timeout(Duration::from_secs(2)).expect("stdout frame");
-        let body = read_frame(&mut io::Cursor::new(to_chrome)).expect("frame").expect("some");
+        let to_chrome = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("stdout frame");
+        let body = read_frame(&mut io::Cursor::new(to_chrome))
+            .expect("frame")
+            .expect("some");
         assert_eq!(body, br#"{"type":"hello_ack"}"#);
 
         // The app going away ends the host, so Chrome closes the port and the extension notices.
@@ -219,8 +259,15 @@ mod tests {
         let (host_side, mut app_side) = UnixStream::pair().expect("pair");
         let (stdin_host, mut stdin_chrome) = UnixStream::pair().expect("pair");
         let (tx, rx) = channel();
-        let relay_thread =
-            thread::spawn(move || relay(stdin_host, ChanWriter(tx), Ok(Box::new(host_side)), Ok("a".repeat(64)), "x"));
+        let relay_thread = thread::spawn(move || {
+            relay(
+                stdin_host,
+                ChanWriter(tx),
+                Ok(Box::new(host_side)),
+                Ok("a".repeat(64)),
+                "x",
+            )
+        });
         let echo = thread::spawn(move || {
             let _auth = read_frame(&mut app_side);
             while let Ok(Some(frame)) = read_frame(&mut app_side) {
@@ -229,7 +276,8 @@ mod tests {
                 }
             }
         });
-        let message = br#"{"type":"tab_event","url":"https://a.example/","tabId":1,"kind":"updated"}"#;
+        let message =
+            br#"{"type":"tab_event","url":"https://a.example/","tabId":1,"kind":"updated"}"#;
         let mut samples = Vec::new();
         for _ in 0..300 {
             let start = Instant::now();
@@ -238,7 +286,10 @@ mod tests {
             samples.push(start.elapsed());
         }
         samples.sort();
-        let (median, p99) = (samples[samples.len() / 2], samples[samples.len() * 99 / 100]);
+        let (median, p99) = (
+            samples[samples.len() / 2],
+            samples[samples.len() * 99 / 100],
+        );
         eprintln!("spike: relay round trip median={median:?} p99={p99:?}");
         assert!(median < Duration::from_millis(5), "median {median:?}");
         drop(stdin_chrome);

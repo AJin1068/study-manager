@@ -55,7 +55,8 @@ pub fn read_frame<R: Read + ?Sized>(reader: &mut R) -> Result<Option<Vec<u8>>, F
 }
 
 pub fn write_frame<W: Write + ?Sized>(writer: &mut W, body: &[u8]) -> io::Result<()> {
-    let len = u32::try_from(body.len()).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "frame too large"))?;
+    let len = u32::try_from(body.len())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "frame too large"))?;
     // One write so a concurrent writer cannot interleave header and body.
     let mut buf = Vec::with_capacity(4 + body.len());
     buf.extend_from_slice(&len.to_ne_bytes());
@@ -82,11 +83,18 @@ impl TabKind {
 
 /// Messages from the host or the extension to the app.
 #[derive(Deserialize, Clone, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum Incoming {
     /// Sent by the host only, as the first frame: install token and the extension ID Chrome
     /// reported as the caller (`chrome-extension://<id>/` argument).
-    Auth { token: String, origin_ext_id: String },
+    Auth {
+        token: String,
+        origin_ext_id: String,
+    },
     /// First frame the extension sends.
     Hello { ext_id: String, version: String },
     /// `title` is optional and lives in memory only: the LLM tab judge may read a shortened form of
@@ -106,7 +114,10 @@ impl fmt::Debug for Incoming {
             Incoming::Auth { .. } => f.write_str("Auth { <redacted> }"),
             Incoming::Hello { ext_id, .. } => write!(f, "Hello {{ ext_id: {ext_id} }}"),
             Incoming::TabEvent { tab_id, kind, .. } => {
-                write!(f, "TabEvent {{ tab_id: {tab_id}, kind: {kind:?}, url: <redacted> }}")
+                write!(
+                    f,
+                    "TabEvent {{ tab_id: {tab_id}, kind: {kind:?}, url: <redacted> }}"
+                )
             }
         }
     }
@@ -129,12 +140,24 @@ pub enum VerdictKind {
 
 /// Messages from the app to the extension.
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum Outgoing {
-    HelloAck { protocol: u32 },
-    Verdict { tab_id: i64, verdict: VerdictKind, reason_code: &'static str },
+    HelloAck {
+        protocol: u32,
+    },
+    Verdict {
+        tab_id: i64,
+        verdict: VerdictKind,
+        reason_code: &'static str,
+    },
     /// `code` is a fixed identifier, never free text.
-    Error { code: &'static str },
+    Error {
+        code: &'static str,
+    },
 }
 
 pub fn encode(message: &Outgoing) -> Vec<u8> {
@@ -148,7 +171,9 @@ pub fn is_valid_ext_id(id: &str) -> bool {
 }
 
 pub fn is_valid_version(version: &str) -> bool {
-    !version.is_empty() && version.chars().count() <= MAX_VERSION_CHARS && version.chars().all(|c| !c.is_control())
+    !version.is_empty()
+        && version.chars().count() <= MAX_VERSION_CHARS
+        && version.chars().all(|c| !c.is_control())
 }
 
 /// The host of an http(s) URL as the site-rule engine sees it (same `url::Url` parse, so the
@@ -165,7 +190,9 @@ pub fn domain_of(raw: &str) -> Option<String> {
         url::Host::Ipv4(ip) => ip.to_string(),
         url::Host::Ipv6(_) => return None,
     };
-    let well_formed = !host.is_empty() && host.chars().count() <= MAX_DOMAIN_CHARS && !host.chars().any(char::is_control);
+    let well_formed = !host.is_empty()
+        && host.chars().count() <= MAX_DOMAIN_CHARS
+        && !host.chars().any(char::is_control);
     well_formed.then_some(host)
 }
 
@@ -187,17 +214,29 @@ mod tests {
         write_frame(&mut buf, b"{\"a\":1}").expect("write");
         write_frame(&mut buf, b"{}").expect("write");
         let mut reader = Cursor::new(buf);
-        assert_eq!(read_frame(&mut reader).expect("first"), Some(b"{\"a\":1}".to_vec()));
-        assert_eq!(read_frame(&mut reader).expect("second"), Some(b"{}".to_vec()));
+        assert_eq!(
+            read_frame(&mut reader).expect("first"),
+            Some(b"{\"a\":1}".to_vec())
+        );
+        assert_eq!(
+            read_frame(&mut reader).expect("second"),
+            Some(b"{}".to_vec())
+        );
         assert_eq!(read_frame(&mut reader).expect("end"), None);
     }
 
     #[test]
     fn truncated_header_and_body_are_errors() {
-        assert!(matches!(read_frame(&mut Cursor::new(vec![1u8, 0])), Err(FrameError::Truncated)));
+        assert!(matches!(
+            read_frame(&mut Cursor::new(vec![1u8, 0])),
+            Err(FrameError::Truncated)
+        ));
         let mut cut = frame(b"hello");
         cut.truncate(6);
-        assert!(matches!(read_frame(&mut Cursor::new(cut)), Err(FrameError::Truncated)));
+        assert!(matches!(
+            read_frame(&mut Cursor::new(cut)),
+            Err(FrameError::Truncated)
+        ));
     }
 
     #[test]
@@ -207,23 +246,48 @@ mod tests {
         assert!(matches!(read_frame(&mut reader), Err(FrameError::TooLarge)));
         assert_eq!(reader.position(), 4, "only the header was consumed");
         let huge = u32::MAX.to_ne_bytes().to_vec();
-        assert!(matches!(read_frame(&mut Cursor::new(huge)), Err(FrameError::TooLarge)));
+        assert!(matches!(
+            read_frame(&mut Cursor::new(huge)),
+            Err(FrameError::TooLarge)
+        ));
         let max = frame(&vec![b' '; MAX_FRAME_BYTES]);
-        assert!(read_frame(&mut Cursor::new(max)).expect("exactly max is fine").is_some());
+        assert!(
+            read_frame(&mut Cursor::new(max))
+                .expect("exactly max is fine")
+                .is_some()
+        );
     }
 
     #[test]
     fn parses_each_message_type() {
-        let hello = parse_incoming(br#"{"type":"hello","extId":"abcdefghijklmnopabcdefghijklmnop","version":"0.1.0"}"#);
+        let hello = parse_incoming(
+            br#"{"type":"hello","extId":"abcdefghijklmnopabcdefghijklmnop","version":"0.1.0"}"#,
+        );
         assert!(matches!(hello, Ok(Incoming::Hello { .. })));
         let tab = parse_incoming(br#"{"type":"tab_event","url":"https://a.example/x?y=1","title":"Secret","tabId":7,"kind":"updated"}"#)
             .expect("tab event");
         assert_eq!(
             tab,
-            Incoming::TabEvent { url: "https://a.example/x?y=1".into(), tab_id: 7, kind: TabKind::Updated, title: Some("Secret".into()) }
+            Incoming::TabEvent {
+                url: "https://a.example/x?y=1".into(),
+                tab_id: 7,
+                kind: TabKind::Updated,
+                title: Some("Secret".into())
+            }
         );
-        let untitled = parse_incoming(br#"{"type":"tab_event","url":"https://a.example/","tabId":8,"kind":"activated"}"#).expect("no title");
-        assert_eq!(untitled, Incoming::TabEvent { url: "https://a.example/".into(), tab_id: 8, kind: TabKind::Activated, title: None });
+        let untitled = parse_incoming(
+            br#"{"type":"tab_event","url":"https://a.example/","tabId":8,"kind":"activated"}"#,
+        )
+        .expect("no title");
+        assert_eq!(
+            untitled,
+            Incoming::TabEvent {
+                url: "https://a.example/".into(),
+                tab_id: 8,
+                kind: TabKind::Activated,
+                title: None
+            }
+        );
         let auth = parse_incoming(br#"{"type":"auth","token":"t","originExtId":"abc"}"#);
         assert!(matches!(auth, Ok(Incoming::Auth { .. })));
     }
@@ -245,7 +309,11 @@ mod tests {
             br#"{"type":"verdict","tabId":1}"#,
         ];
         for case in cases {
-            assert!(parse_incoming(case).is_err(), "should reject {:?}", String::from_utf8_lossy(case));
+            assert!(
+                parse_incoming(case).is_err(),
+                "should reject {:?}",
+                String::from_utf8_lossy(case)
+            );
         }
     }
 
@@ -253,9 +321,12 @@ mod tests {
     /// produce a value or an error, never a panic or an oversized allocation.
     #[test]
     fn parser_survives_corrupted_input() {
-        let valid = frame(br#"{"type":"tab_event","url":"https://a.example/","tabId":1,"kind":"activated"}"#);
+        let valid = frame(
+            br#"{"type":"tab_event","url":"https://a.example/","tabId":1,"kind":"activated"}"#,
+        );
         for cut in 0..=valid.len() {
-            let _ = read_frame(&mut Cursor::new(valid[..cut].to_vec())).map(|f| f.map(|b| parse_incoming(&b)));
+            let _ = read_frame(&mut Cursor::new(valid[..cut].to_vec()))
+                .map(|f| f.map(|b| parse_incoming(&b)));
         }
         for i in 0..valid.len() {
             for flip in [0x00u8, 0xff, 0x7b, 0x22] {
@@ -274,29 +345,56 @@ mod tests {
             kind: TabKind::Updated,
             title: Some("SECRET-TITLE".into()),
         };
-        let auth = Incoming::Auth { token: "sekrettoken".into(), origin_ext_id: "x".into() };
+        let auth = Incoming::Auth {
+            token: "sekrettoken".into(),
+            origin_ext_id: "x".into(),
+        };
         let printed = format!("{tab:?} {auth:?}");
-        assert!(!printed.contains("bank.example") && !printed.contains("token=abc") && !printed.contains("sekret") && !printed.contains("SECRET-TITLE"), "{printed}");
+        assert!(
+            !printed.contains("bank.example")
+                && !printed.contains("token=abc")
+                && !printed.contains("sekret")
+                && !printed.contains("SECRET-TITLE"),
+            "{printed}"
+        );
     }
 
     #[test]
     fn outgoing_wire_shape() {
-        let v = encode(&Outgoing::Verdict { tab_id: 3, verdict: VerdictKind::Block, reason_code: "blocked_site" });
-        assert_eq!(String::from_utf8(v).expect("utf8"), r#"{"type":"verdict","tabId":3,"verdict":"block","reasonCode":"blocked_site"}"#);
-        let e = encode(&Outgoing::Error { code: "app_not_running" });
-        assert_eq!(String::from_utf8(e).expect("utf8"), r#"{"type":"error","code":"app_not_running"}"#);
+        let v = encode(&Outgoing::Verdict {
+            tab_id: 3,
+            verdict: VerdictKind::Block,
+            reason_code: "blocked_site",
+        });
+        assert_eq!(
+            String::from_utf8(v).expect("utf8"),
+            r#"{"type":"verdict","tabId":3,"verdict":"block","reasonCode":"blocked_site"}"#
+        );
+        let e = encode(&Outgoing::Error {
+            code: "app_not_running",
+        });
+        assert_eq!(
+            String::from_utf8(e).expect("utf8"),
+            r#"{"type":"error","code":"app_not_running"}"#
+        );
     }
 
     #[test]
     fn domain_extraction_table() {
         let cases: [(&str, Option<&str>); 30] = [
-            ("https://www.YouTube.com/watch?v=abc&list=PL1", Some("www.youtube.com")),
+            (
+                "https://www.YouTube.com/watch?v=abc&list=PL1",
+                Some("www.youtube.com"),
+            ),
             ("http://example.com", Some("example.com")),
             ("https://example.com:8443/path", Some("example.com")),
             ("https://example.com./", Some("example.com")),
             ("https://user:pw@example.com/", Some("example.com")),
             ("https://google.com@evil.example/", Some("evil.example")),
-            ("https://google.com:443@evil.example:80/x", Some("evil.example")),
+            (
+                "https://google.com:443@evil.example:80/x",
+                Some("evil.example"),
+            ),
             ("https://example.com?x=1", Some("example.com")),
             ("https://example.com#frag", Some("example.com")),
             ("https://example.com\\@evil.test/", Some("example.com")),

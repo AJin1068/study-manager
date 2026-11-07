@@ -65,7 +65,10 @@ pub struct Body {
 
 impl Body {
     pub fn from_payload<P: EgressPayload>(payload: &P) -> Result<Self, serde_json::Error> {
-        Ok(Self { bytes: serde_json::to_vec(payload)?, content_type: Some("application/json") })
+        Ok(Self {
+            bytes: serde_json::to_vec(payload)?,
+            content_type: Some("application/json"),
+        })
     }
 
     pub fn len(&self) -> usize {
@@ -79,7 +82,10 @@ impl Body {
     /// Plain-text body for a phone notification (ntfy takes the text as the message). Only the
     /// fixed-phrase `NoticeText` can become one, so no free text can ride along.
     pub fn from_notice(notice: &NoticeText) -> Self {
-        Self { bytes: notice.text.clone().into_bytes(), content_type: Some("text/plain; charset=utf-8") }
+        Self {
+            bytes: notice.text.clone().into_bytes(),
+            content_type: Some("text/plain; charset=utf-8"),
+        }
     }
 
     pub(crate) fn as_bytes(&self) -> &[u8] {
@@ -223,7 +229,9 @@ pub struct NoticeText {
 
 impl NoticeText {
     pub(crate) fn new(text: &str) -> Self {
-        Self { text: text.to_string() }
+        Self {
+            text: text.to_string(),
+        }
     }
 
     pub fn as_str(&self) -> &str {
@@ -413,7 +421,11 @@ pub(crate) const CANARY_URL: &str = "https://canary.example/secret-path";
 #[cfg(test)]
 pub(crate) fn forbidden_key(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
-    lower == "title" || lower == "window_title" || lower == "url" || lower.starts_with("typed") || lower.starts_with("sentence")
+    lower == "title"
+        || lower == "window_title"
+        || lower == "url"
+        || lower.starts_with("typed")
+        || lower.starts_with("sentence")
 }
 
 #[cfg(test)]
@@ -427,14 +439,43 @@ mod tests {
             serde_json::to_value(p).expect("serialize")
         }
         vec![
-            ("OtpRequest", json(&OtpRequest { email: "a@b.test".into(), create_user: true })),
-            ("OtpVerify", json(&OtpVerify { email: "a@b.test".into(), token: "000000".into(), kind: "email" })),
-            ("RefreshRequest", json(&RefreshRequest { refresh_token: "r".into() })),
+            (
+                "OtpRequest",
+                json(&OtpRequest {
+                    email: "a@b.test".into(),
+                    create_user: true,
+                }),
+            ),
+            (
+                "OtpVerify",
+                json(&OtpVerify {
+                    email: "a@b.test".into(),
+                    token: "000000".into(),
+                    kind: "email",
+                }),
+            ),
+            (
+                "RefreshRequest",
+                json(&RefreshRequest {
+                    refresh_token: "r".into(),
+                }),
+            ),
             (
                 "DeviceRegistration",
-                json(&DeviceRegistration { id: "d".into(), app_version: "0.1.0".into(), platform: "macos" }),
+                json(&DeviceRegistration {
+                    id: "d".into(),
+                    app_version: "0.1.0".into(),
+                    platform: "macos",
+                }),
             ),
-            ("PresenceBeat", json(&PresenceBeat { device_id: "d".into(), app_version: "0.1.0".into(), studying: true })),
+            (
+                "PresenceBeat",
+                json(&PresenceBeat {
+                    device_id: "d".into(),
+                    app_version: "0.1.0".into(),
+                    studying: true,
+                }),
+            ),
             (
                 "SnapshotArgs",
                 json(&SnapshotArgs {
@@ -480,19 +521,70 @@ mod tests {
                 }),
             ),
             ("NoticeText", json(&NoticeText::new("test"))),
-            ("NotifyTestRequest", json(&NotifyTestRequest { action: "test" })),
+            (
+                "NotifyTestRequest",
+                json(&NotifyTestRequest { action: "test" }),
+            ),
             ("NoArgs", json(&NoArgs {})),
-            ("CreateRoomArgs", json(&CreateRoomArgs { name: "room".into(), nickname: "nick".into() })),
-            ("CreateInviteArgs", json(&CreateInviteArgs { room_id: "r".into(), ttl_hours: 24, max_uses: 10 })),
-            ("RevokeInviteArgs", json(&RevokeInviteArgs { room_id: "r".into(), invite_id: "i".into() })),
-            ("JoinRoomArgs", json(&JoinRoomArgs { code: "0123456789".into(), nickname: "nick".into() })),
-            ("RoomIdArgs", json(&RoomIdArgs { room_id: "r".into() })),
-            ("KickMemberArgs", json(&KickMemberArgs { room_id: "r".into(), target_user: "u".into() })),
+            (
+                "CreateRoomArgs",
+                json(&CreateRoomArgs {
+                    name: "room".into(),
+                    nickname: "nick".into(),
+                }),
+            ),
+            (
+                "CreateInviteArgs",
+                json(&CreateInviteArgs {
+                    room_id: "r".into(),
+                    ttl_hours: 24,
+                    max_uses: 10,
+                }),
+            ),
+            (
+                "RevokeInviteArgs",
+                json(&RevokeInviteArgs {
+                    room_id: "r".into(),
+                    invite_id: "i".into(),
+                }),
+            ),
+            (
+                "JoinRoomArgs",
+                json(&JoinRoomArgs {
+                    code: "0123456789".into(),
+                    nickname: "nick".into(),
+                }),
+            ),
+            (
+                "RoomIdArgs",
+                json(&RoomIdArgs {
+                    room_id: "r".into(),
+                }),
+            ),
+            (
+                "KickMemberArgs",
+                json(&KickMemberArgs {
+                    room_id: "r".into(),
+                    target_user: "u".into(),
+                }),
+            ),
             (
                 "StatusReportArgs",
-                json(&StatusReportArgs { state: "studying", remaining_sec: 60, level: 3, attempts_today: Some(1) }),
+                json(&StatusReportArgs {
+                    state: "studying",
+                    remaining_sec: 60,
+                    level: 3,
+                    attempts_today: Some(1),
+                }),
             ),
-            ("DailyReportArgs", json(&DailyReportArgs { day: "2026-11-06".into(), study_min: 30, plan_min: 60 })),
+            (
+                "DailyReportArgs",
+                json(&DailyReportArgs {
+                    day: "2026-11-06".into(),
+                    study_min: 30,
+                    plan_min: 60,
+                }),
+            ),
             (
                 "FriendPrefsArgs",
                 json(&FriendPrefsArgs {
@@ -508,10 +600,18 @@ mod tests {
                 "ShareScheduleArgs",
                 json(&ShareScheduleArgs {
                     room_id: "r".into(),
-                    items: vec![ScheduleItemRow { start_at_utc_ms: 1, name: "Math".into(), subject: "math".into(), sets: 2 }],
+                    items: vec![ScheduleItemRow {
+                        start_at_utc_ms: 1,
+                        name: "Math".into(),
+                        subject: "math".into(),
+                        sets: 2,
+                    }],
                 }),
             ),
-            ("PollDistractionArgs", json(&PollDistractionArgs { since_ms: 0 })),
+            (
+                "PollDistractionArgs",
+                json(&PollDistractionArgs { since_ms: 0 }),
+            ),
             (
                 "InventoryPublicArgs",
                 json(&InventoryPublicArgs {
@@ -544,35 +644,62 @@ mod tests {
             let mut found = Vec::new();
             keys(&value, &mut found);
             // `NoArgs` is the empty object on purpose: it carries nothing at all.
-            assert!(name == "NoArgs" || !found.is_empty(), "{name} serialized no fields");
+            assert!(
+                name == "NoArgs" || !found.is_empty(),
+                "{name} serialized no fields"
+            );
             for key in found {
                 assert!(!forbidden_key(&key), "{name} has forbidden key {key}");
             }
             let text = value.to_string();
-            assert!(!text.contains(CANARY_TITLE) && !text.contains(CANARY_URL), "{name} leaked a canary");
+            assert!(
+                !text.contains(CANARY_TITLE) && !text.contains(CANARY_URL),
+                "{name} leaked a canary"
+            );
         }
     }
 
     #[test]
     fn payload_samples_are_complete() {
         let source = include_str!("payload.rs");
-        let implemented = source.lines().filter(|l| l.starts_with("egress_payload!(")).count();
-        assert_eq!(samples().len(), implemented, "add a sample for every egress_payload! type");
+        let implemented = source
+            .lines()
+            .filter(|l| l.starts_with("egress_payload!("))
+            .count();
+        assert_eq!(
+            samples().len(),
+            implemented,
+            "add a sample for every egress_payload! type"
+        );
     }
 
     #[test]
     fn debug_hides_field_values() {
-        let verify = OtpVerify { email: "person@example.test".into(), token: "123456".into(), kind: "email" };
+        let verify = OtpVerify {
+            email: "person@example.test".into(),
+            token: "123456".into(),
+            kind: "email",
+        };
         let shown = format!("{verify:?}");
-        assert!(!shown.contains("person") && !shown.contains("123456"), "{shown}");
+        assert!(
+            !shown.contains("person") && !shown.contains("123456"),
+            "{shown}"
+        );
         let body = Body::from_payload(&verify).expect("body");
         assert_eq!(format!("{body:?}"), format!("Body({} bytes)", body.len()));
     }
 
     #[test]
     fn heartbeat_args_use_rpc_parameter_names() {
-        let value = serde_json::to_value(PresenceBeat { device_id: "d".into(), app_version: "1".into(), studying: false })
-            .expect("json");
-        assert_eq!(value, serde_json::json!({"p_device_id":"d","p_app_version":"1","p_studying":false}));
+        let value = serde_json::to_value(PresenceBeat {
+            device_id: "d".into(),
+            app_version: "1".into(),
+            studying: false,
+        })
+        .expect("json");
+        assert_eq!(
+            value,
+            serde_json::json!({"p_device_id":"d","p_app_version":"1","p_studying":false})
+        );
     }
 }

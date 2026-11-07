@@ -4,7 +4,9 @@
 
 use link_protocol::{LockLease, PhoneBeat, PickupReport};
 
-use super::model::{ClaimedPair, LeaseFetch, NewPairCode, PhoneError, PickupRow, PublishAck, WireStatus};
+use super::model::{
+    ClaimedPair, LeaseFetch, NewPairCode, PhoneError, PickupRow, PublishAck, WireStatus,
+};
 
 /// The desktop (owner) side.
 pub trait PairingApi: Send + Sync {

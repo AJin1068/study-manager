@@ -15,20 +15,20 @@ mod focus;
 mod growth;
 pub mod llm;
 mod messages;
+pub mod phone;
 mod plan;
-mod plan_ics;
 mod plan_adjust;
+mod plan_ics;
 mod plan_import;
 mod plan_shift;
-pub mod phone;
 mod platform;
 mod points;
-mod profile;
-mod rooms;
 mod power;
 mod presets;
+mod profile;
 pub mod quiz;
 pub mod remote;
+mod rooms;
 mod settings;
 mod shared_wiki;
 mod shop;
@@ -43,7 +43,7 @@ mod timer;
 mod tray;
 pub mod wiki;
 
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 
 use tauri::{Manager, RunEvent, WindowEvent};
 
@@ -75,10 +75,16 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     let (sender, events) = mpsc::channel();
     let power = match platform::power_event_source().start(sender) {
-        Ok(()) => PowerSourceStatus { active: true, reason: None },
+        Ok(()) => PowerSourceStatus {
+            active: true,
+            reason: None,
+        },
         Err(err) => {
             tracing::warn!(error = %err, "power events unavailable; heartbeat fallback only");
-            PowerSourceStatus { active: false, reason: Some(err.to_string()) }
+            PowerSourceStatus {
+                active: false,
+                reason: Some(err.to_string()),
+            }
         }
     };
 
@@ -86,23 +92,40 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let browser_link = Arc::new(browser_link::LinkHub::for_app(handle.clone()));
     let process = platform::process_control();
     let focus_probe = platform::focus_probe();
-    let signals = Arc::new(focus::signals::SignalHub::new(Box::<focus::signals::SystemRandom>::default()));
+    let signals = Arc::new(focus::signals::SignalHub::new(Box::<
+        focus::signals::SystemRandom,
+    >::default()));
     // Keychain self-check runs once here; an unusable keychain degrades to session-only secrets
     // and is shown in the integrations screen.
-    let secrets = remote::secrets::select_secret_store(Arc::new(remote::secrets::KeyringSecretStore));
-    let remote = Arc::new(remote::runtime::RemoteRuntime::new(
-        secrets,
-        Arc::new(remote::SystemClock),
-        Arc::new(remote::audit::DbSink::new(Arc::clone(&db))),
-        remote::runtime::ureq_factory(),
-    )
-    .with_llm_transports(llm::anthropic::ureq_factory()));
+    let secrets =
+        remote::secrets::select_secret_store(Arc::new(remote::secrets::KeyringSecretStore));
+    let remote = Arc::new(
+        remote::runtime::RemoteRuntime::new(
+            secrets,
+            Arc::new(remote::SystemClock),
+            Arc::new(remote::audit::DbSink::new(Arc::clone(&db))),
+            remote::runtime::ureq_factory(),
+        )
+        .with_llm_transports(llm::anthropic::ureq_factory()),
+    );
     // Mirror and presence workers: idle (nothing sent) until a server is configured and the user
     // is signed in. Sleep/wake events reach the presence worker through power::spawn below.
-    let rooms = Arc::new(rooms::service::RoomsService::new(Arc::clone(&db), Arc::clone(&remote), Arc::new(remote::SystemClock)));
+    let rooms = Arc::new(rooms::service::RoomsService::new(
+        Arc::clone(&db),
+        Arc::clone(&remote),
+        Arc::new(remote::SystemClock),
+    ));
     app.manage(Arc::clone(&rooms));
-    app.manage(Arc::new(profile::service::ProfileService::new(Arc::clone(&db), Arc::clone(&remote), Arc::new(remote::SystemClock))));
-    app.manage(Arc::new(phone::pairing::PairingService::new(Arc::clone(&db), Arc::clone(&remote), Arc::new(remote::SystemClock))));
+    app.manage(Arc::new(profile::service::ProfileService::new(
+        Arc::clone(&db),
+        Arc::clone(&remote),
+        Arc::new(remote::SystemClock),
+    )));
+    app.manage(Arc::new(phone::pairing::PairingService::new(
+        Arc::clone(&db),
+        Arc::clone(&remote),
+        Arc::new(remote::SystemClock),
+    )));
     // Publishes the phone lock lease and watches the phone's heartbeat from its own thread; idle
     // until a phone is paired. The timer engine and the release commands only wake it.
     let phone_diag = Arc::new(phone::publisher::Diagnostics::default());
@@ -115,20 +138,48 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&phone_diag),
     ));
     app.manage(phone_diag);
-    let sync = sync::app::start(Arc::clone(&db), Arc::clone(&remote), Arc::new(remote::SystemClock));
-    let llm = Arc::new(llm::service::LlmService::new(Arc::clone(&db), Arc::clone(&remote), Arc::new(remote::SystemClock)));
+    let sync = sync::app::start(
+        Arc::clone(&db),
+        Arc::clone(&remote),
+        Arc::new(remote::SystemClock),
+    );
+    let llm = Arc::new(llm::service::LlmService::new(
+        Arc::clone(&db),
+        Arc::clone(&remote),
+        Arc::new(remote::SystemClock),
+    ));
     let wiki = Arc::new(wiki::service::WikiService::new(
         Arc::clone(&db),
         Arc::clone(&llm),
         Arc::new(remote::SystemClock),
         Arc::new(wiki::pdf::NoPdfExtractor),
     ));
-    let quiz = Arc::new(quiz::service::QuizService::new(Arc::clone(&db), Arc::clone(&wiki), Arc::clone(&llm), Arc::new(remote::SystemClock)));
-    let retro = Arc::new(wiki::retro_service::RetroService::new(Arc::clone(&db), Arc::clone(&llm), Arc::new(remote::SystemClock)));
+    let quiz = Arc::new(quiz::service::QuizService::new(
+        Arc::clone(&db),
+        Arc::clone(&wiki),
+        Arc::clone(&llm),
+        Arc::new(remote::SystemClock),
+    ));
+    let retro = Arc::new(wiki::retro_service::RetroService::new(
+        Arc::clone(&db),
+        Arc::clone(&llm),
+        Arc::new(remote::SystemClock),
+    ));
     app.manage(retro);
-    app.manage(Arc::new(chat::service::ChatService::new(Arc::clone(&db), Arc::clone(&llm), Arc::new(remote::SystemClock))));
-    app.manage(Arc::new(character::service::CharacterService::new(Arc::clone(&llm), Arc::new(remote::SystemClock))));
-    app.manage(Arc::new(growth::GrowthService::new(Arc::clone(&db), Arc::clone(&llm), Arc::new(remote::SystemClock))));
+    app.manage(Arc::new(chat::service::ChatService::new(
+        Arc::clone(&db),
+        Arc::clone(&llm),
+        Arc::new(remote::SystemClock),
+    )));
+    app.manage(Arc::new(character::service::CharacterService::new(
+        Arc::clone(&llm),
+        Arc::new(remote::SystemClock),
+    )));
+    app.manage(Arc::new(growth::GrowthService::new(
+        Arc::clone(&db),
+        Arc::clone(&llm),
+        Arc::new(remote::SystemClock),
+    )));
     app.manage(Arc::new(shared_wiki::service::SharedWikiService::new(
         Arc::clone(&db),
         Arc::clone(&remote),
@@ -161,7 +212,8 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     tray::install(&handle)?;
     character::refresh_tray(&handle, &db);
     install_quit_gate(&handle);
-    let notifier: Arc<dyn platform::Notifier> = Arc::new(platform::PluginNotifier::new(handle.clone()));
+    let notifier: Arc<dyn platform::Notifier> =
+        Arc::new(platform::PluginNotifier::new(handle.clone()));
     timer::engine::spawn(
         handle.clone(),
         Arc::clone(&db),
@@ -171,17 +223,43 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&notifier),
         phone_publisher,
     );
-    browser_link::spawn(Arc::clone(&db), Arc::clone(&high_water), browser_link, browser_llm, data_dir);
+    browser_link::spawn(
+        Arc::clone(&db),
+        Arc::clone(&high_water),
+        browser_link,
+        browser_llm,
+        data_dir,
+    );
     focus::spawn(Arc::clone(&db), Arc::clone(&high_water), focus_probe);
     // A shortcut that cannot be registered is reported in the status, not fatal: the in-app
     // button does the same job.
-    signals.set_status(focus::signals::install_shortcut(&handle, Arc::clone(&db), Arc::clone(&high_water)))?;
-    focus::signals::spawn(handle.clone(), Arc::clone(&db), Arc::clone(&high_water), signals, Arc::clone(&notifier));
+    signals.set_status(focus::signals::install_shortcut(
+        &handle,
+        Arc::clone(&db),
+        Arc::clone(&high_water),
+    ))?;
+    focus::signals::spawn(
+        handle.clone(),
+        Arc::clone(&db),
+        Arc::clone(&high_water),
+        signals,
+        Arc::clone(&notifier),
+    );
     messages::service::spawn(
         handle.clone(),
-        Arc::new(messages::service::MessageService::new(Arc::clone(&db), Arc::new(remote::SystemClock), Arc::clone(&notifier))),
+        Arc::new(messages::service::MessageService::new(
+            Arc::clone(&db),
+            Arc::new(remote::SystemClock),
+            Arc::clone(&notifier),
+        )),
     );
-    enforce::spawn(handle.clone(), Arc::clone(&db), high_water, process, notifier);
+    enforce::spawn(
+        handle.clone(),
+        Arc::clone(&db),
+        high_water,
+        process,
+        notifier,
+    );
     quiz::watch::spawn(handle.clone(), Arc::clone(&db), quiz);
     let notice_handle = handle.clone();
     rooms::service::spawn(rooms, move |notice| {
@@ -189,7 +267,14 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             tracing::error!(error = %err, "failed to emit a room notice");
         }
     });
-    power::spawn(handle, db, session_id, events, engine, sync.presence.clone());
+    power::spawn(
+        handle,
+        db,
+        session_id,
+        events,
+        engine,
+        sync.presence.clone(),
+    );
     Ok(())
 }
 
@@ -201,7 +286,11 @@ fn install_quit_gate(handle: &tauri::AppHandle) {
     let gate = Box::new(move |reason: platform::QuitReason| {
         let allowed = commands::allow_quit(&gate_handle.state::<AppState>(), reason);
         if !allowed {
-            tracing::info!(event = "exit_blocked", reason = "lock_held", source = reason.as_str());
+            tracing::info!(
+                event = "exit_blocked",
+                reason = "lock_held",
+                source = reason.as_str()
+            );
         }
         allowed
     });
@@ -249,7 +338,9 @@ pub fn run_native_host_if_invoked() -> Option<i32> {
 
 pub fn run() {
     // Logs carry only event kinds, timestamps, and counts: no window titles or URLs.
-    tracing_subscriber::fmt().with_writer(std::io::stderr).init();
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .init();
 
     // Single instance must be registered first: a second process exits here, before setup,
     // so it cannot run session recovery against the live first session.

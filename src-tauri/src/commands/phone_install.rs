@@ -2,7 +2,7 @@
 
 use tauri::State;
 
-use super::{lock_db, AppState};
+use super::{AppState, lock_db};
 use crate::clock::now_ms;
 use crate::error::AppResult;
 use crate::phone::apk::{self, PhoneInstallView};

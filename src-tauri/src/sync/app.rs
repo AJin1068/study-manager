@@ -7,7 +7,7 @@ use rusqlite::Connection;
 
 use super::ports::{DeviceIdentity, RestSync};
 use super::presence::{self, PresenceHandle, PresenceReport};
-use super::status::{SyncStatus, PRESENCE_UNREACHABLE};
+use super::status::{PRESENCE_UNREACHABLE, SyncStatus};
 use super::worker::{self, MirrorWorker, SyncSource, SyncTarget};
 use super::{RandomJitter, SystemMono};
 use crate::commands::lock_db;
@@ -28,7 +28,11 @@ pub struct SyncHub {
 /// The notification channel as the server needs it. `topic` is the ntfy topic from the secret
 /// store. A channel whose inputs are missing is mirrored as `none`, so the server never tries to
 /// send to half a configuration.
-pub fn channel_row(config: &RemoteConfig, topic: Option<String>, utc_offset_min: i64) -> NotifyChannelRow {
+pub fn channel_row(
+    config: &RemoteConfig,
+    topic: Option<String>,
+    utc_offset_min: i64,
+) -> NotifyChannelRow {
     let none = || NotifyChannelRow {
         channel: "none".into(),
         ntfy_topic: None,
@@ -94,7 +98,9 @@ impl SyncSource for AppSyncSource {
     }
 
     fn studying(&self) -> bool {
-        lock_db(&self.db).and_then(|conn| study::lock_held(&conn)).unwrap_or(false)
+        lock_db(&self.db)
+            .and_then(|conn| study::lock_held(&conn))
+            .unwrap_or(false)
     }
 
     fn notify_channel(&self) -> Option<NotifyChannelRow> {
@@ -103,7 +109,9 @@ impl SyncSource for AppSyncSource {
             RemoteConfig::load(&conn).ok()?
         };
         let topic = match self.runtime.secrets().get(SecretName::NtfyTopic) {
-            Ok(Some(value)) if matches!(config.notify_channel.as_str(), "ntfy" | "phone_app") => Some(value.expose().to_string()),
+            Ok(Some(value)) if matches!(config.notify_channel.as_str(), "ntfy" | "phone_app") => {
+                Some(value.expose().to_string())
+            }
             _ => None,
         };
         Some(channel_row(&config, topic, local_utc_offset_min()))
@@ -123,8 +131,15 @@ impl PresenceReport for HubReport {
 
     fn degraded(&self, degraded: bool) {
         self.status.set_presence_degraded(degraded);
-        let health = if degraded { Health::Degraded { code: PRESENCE_UNREACHABLE.to_string() } } else { Health::Ok };
-        self.runtime.record_health(IntegrationPort::Supabase, health);
+        let health = if degraded {
+            Health::Degraded {
+                code: PRESENCE_UNREACHABLE.to_string(),
+            }
+        } else {
+            Health::Ok
+        };
+        self.runtime
+            .record_health(IntegrationPort::Supabase, health);
     }
 
     fn inactive(&self) {
@@ -134,14 +149,36 @@ impl PresenceReport for HubReport {
 
 /// Starts the presence and mirror threads. Both stay idle (and send nothing) until the server is
 /// configured and the user is signed in.
-pub fn start(db: Arc<Mutex<Connection>>, runtime: Arc<RemoteRuntime>, clock: Arc<dyn Clock>) -> Arc<SyncHub> {
+pub fn start(
+    db: Arc<Mutex<Connection>>,
+    runtime: Arc<RemoteRuntime>,
+    clock: Arc<dyn Clock>,
+) -> Arc<SyncHub> {
     let status = Arc::new(SyncStatus::default());
-    let source: Arc<AppSyncSource> = Arc::new(AppSyncSource { db: Arc::clone(&db), runtime: Arc::clone(&runtime), clock: Arc::clone(&clock) });
+    let source: Arc<AppSyncSource> = Arc::new(AppSyncSource {
+        db: Arc::clone(&db),
+        runtime: Arc::clone(&runtime),
+        clock: Arc::clone(&clock),
+    });
     let mono = Arc::new(SystemMono::new());
     let jitter = Arc::new(RandomJitter);
-    let sink = Arc::new(HubReport { status: Arc::clone(&status), runtime, clock: Arc::clone(&clock) });
+    let sink = Arc::new(HubReport {
+        status: Arc::clone(&status),
+        runtime,
+        clock: Arc::clone(&clock),
+    });
     let presence = presence::spawn(source.clone(), mono.clone(), jitter.clone(), sink);
-    worker::spawn(MirrorWorker::new(db, clock, chrono::Local, source, Arc::clone(&status), jitter), mono);
+    worker::spawn(
+        MirrorWorker::new(
+            db,
+            clock,
+            chrono::Local,
+            source,
+            Arc::clone(&status),
+            jitter,
+        ),
+        mono,
+    );
     Arc::new(SyncHub { status, presence })
 }
 
@@ -159,28 +196,58 @@ mod tests {
     #[test]
     fn channel_row_mirrors_only_what_the_chosen_channel_needs() {
         let ntfy = channel_row(&config("ntfy"), Some("t".repeat(24)), 540);
-        assert_eq!((ntfy.channel.as_str(), ntfy.ntfy_topic.as_deref(), ntfy.ntfy_server.as_deref()), ("ntfy", Some("tttttttttttttttttttttttt"), Some("https://ntfy.sh")));
+        assert_eq!(
+            (
+                ntfy.channel.as_str(),
+                ntfy.ntfy_topic.as_deref(),
+                ntfy.ntfy_server.as_deref()
+            ),
+            (
+                "ntfy",
+                Some("tttttttttttttttttttttttt"),
+                Some("https://ntfy.sh")
+            )
+        );
         assert!(ntfy.telegram_chat_id.is_none());
 
         let mut tg = config("telegram");
         tg.notify_telegram_chat_id = "123".into();
         let row = channel_row(&tg, Some("leftover-topic".into()), -300);
-        assert_eq!((row.channel.as_str(), row.telegram_chat_id.as_deref(), row.utc_offset_min), ("telegram", Some("123"), -300));
-        assert!(row.ntfy_topic.is_none(), "a leftover topic is not sent for another channel");
+        assert_eq!(
+            (
+                row.channel.as_str(),
+                row.telegram_chat_id.as_deref(),
+                row.utc_offset_min
+            ),
+            ("telegram", Some("123"), -300)
+        );
+        assert!(
+            row.ntfy_topic.is_none(),
+            "a leftover topic is not sent for another channel"
+        );
     }
 
     #[test]
     fn an_incomplete_channel_is_mirrored_as_none() {
         assert_eq!(channel_row(&config("ntfy"), None, 540).channel, "none");
         assert_eq!(channel_row(&config("telegram"), None, 540).channel, "none");
-        assert_eq!(channel_row(&config("none"), Some("x".repeat(24)), 540).channel, "none");
+        assert_eq!(
+            channel_row(&config("none"), Some("x".repeat(24)), 540).channel,
+            "none"
+        );
         assert_eq!(channel_row(&config("none"), None, 540).ntfy_topic, None);
-        assert_eq!(channel_row(&config("phone_app"), None, 540).channel, "none", "a phone_app row needs the topic the phone subscribes to");
+        assert_eq!(
+            channel_row(&config("phone_app"), None, 540).channel,
+            "none",
+            "a phone_app row needs the topic the phone subscribes to"
+        );
     }
 
     #[test]
     fn the_phone_app_channel_row_matches_the_shared_contract() {
-        let contract: serde_json::Value = serde_json::from_str(include_str!("../../../fixtures/notify/contract.json")).expect("contract");
+        let contract: serde_json::Value =
+            serde_json::from_str(include_str!("../../../fixtures/notify/contract.json"))
+                .expect("contract");
         let expected = &contract["phoneApp"]["channelRow"];
         let topic = expected["ntfy_topic"].as_str().expect("topic").to_string();
         let row = channel_row(&config("phone_app"), Some(topic), 540);

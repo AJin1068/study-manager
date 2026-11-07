@@ -3,9 +3,9 @@
 use chrono::Local;
 use tauri::State;
 
-use super::{lock_db, AppState};
+use super::{AppState, lock_db};
 use crate::clock::now_ms;
-use crate::dashboard::{self, TodayDashboard, WeekDashboard, Weakness};
+use crate::dashboard::{self, TodayDashboard, Weakness, WeekDashboard};
 use crate::error::AppResult;
 
 #[tauri::command]
@@ -28,18 +28,22 @@ pub fn get_weakness(state: State<'_, AppState>) -> AppResult<Weakness> {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     use crate::dashboard::{
-        AppCount, AppOffStat, DayStat, NextPlan, PhoneStat, PostponedPlan, ReleaseUsage, SubjectTime, TodayDashboard,
-        Weakness, WeekDashboard,
+        AppCount, AppOffStat, DayStat, NextPlan, PhoneStat, PostponedPlan, ReleaseUsage,
+        SubjectTime, TodayDashboard, Weakness, WeekDashboard,
     };
     use crate::points;
 
     #[test]
     fn dashboard_wire_shapes_match_the_shared_fixture() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../src/api/fixtures/dashboard-contract.json");
-        let expected: Value = serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../src/api/fixtures/dashboard-contract.json"
+        );
+        let expected: Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
         let day = DayStat {
             date: "2026-11-05".into(),
             weekday: 3,

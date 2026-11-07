@@ -20,7 +20,11 @@ struct RawAnswer {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AnswerCheck {
-    Grounded { answer: String, citations: Vec<String>, dropped: usize },
+    Grounded {
+        answer: String,
+        citations: Vec<String>,
+        dropped: usize,
+    },
     /// The model said the pages do not answer it.
     NotInWiki,
     /// An answer with no citation inside the retrieved set.
@@ -31,8 +35,12 @@ pub enum AnswerCheck {
 
 /// `retrieved` are the names of the pages that were sent with the question.
 pub fn check_answer(text: &str, retrieved: &[String]) -> AnswerCheck {
-    let Some(json) = json_object(text) else { return AnswerCheck::Malformed };
-    let Ok(raw) = serde_json::from_str::<RawAnswer>(json) else { return AnswerCheck::Malformed };
+    let Some(json) = json_object(text) else {
+        return AnswerCheck::Malformed;
+    };
+    let Ok(raw) = serde_json::from_str::<RawAnswer>(json) else {
+        return AnswerCheck::Malformed;
+    };
     let answer = raw.answer.trim().to_string();
     if answer.is_empty() || answer.chars().count() > MAX_ANSWER_CHARS || answer.contains('\0') {
         return AnswerCheck::Malformed;
@@ -49,9 +57,17 @@ pub fn check_answer(text: &str, retrieved: &[String]) -> AnswerCheck {
         }
     }
     if citations.is_empty() {
-        return if answer.starts_with(NOT_IN_WIKI) { AnswerCheck::NotInWiki } else { AnswerCheck::Ungrounded };
+        return if answer.starts_with(NOT_IN_WIKI) {
+            AnswerCheck::NotInWiki
+        } else {
+            AnswerCheck::Ungrounded
+        };
     }
-    AnswerCheck::Grounded { answer, citations, dropped }
+    AnswerCheck::Grounded {
+        answer,
+        citations,
+        dropped,
+    }
 }
 
 #[cfg(test)]
@@ -68,20 +84,48 @@ mod tests {
 
     #[test]
     fn citations_inside_the_retrieved_set_are_kept_and_others_dropped() {
-        let check = check_answer(&reply("도함수는 변화율이다.", &["미분", "존재하지 않는 페이지", "미분", "../etc"]), &retrieved());
-        assert_eq!(check, AnswerCheck::Grounded { answer: "도함수는 변화율이다.".into(), citations: vec!["미분".into()], dropped: 2 });
+        let check = check_answer(
+            &reply(
+                "도함수는 변화율이다.",
+                &["미분", "존재하지 않는 페이지", "미분", "../etc"],
+            ),
+            &retrieved(),
+        );
+        assert_eq!(
+            check,
+            AnswerCheck::Grounded {
+                answer: "도함수는 변화율이다.".into(),
+                citations: vec!["미분".into()],
+                dropped: 2
+            }
+        );
     }
 
     #[test]
     fn an_answer_citing_only_unknown_pages_is_discarded() {
-        assert_eq!(check_answer(&reply("자신 있는 답", &["지어낸 페이지"]), &retrieved()), AnswerCheck::Ungrounded);
-        assert_eq!(check_answer(&reply("자신 있는 답", &[]), &retrieved()), AnswerCheck::Ungrounded);
+        assert_eq!(
+            check_answer(&reply("자신 있는 답", &["지어낸 페이지"]), &retrieved()),
+            AnswerCheck::Ungrounded
+        );
+        assert_eq!(
+            check_answer(&reply("자신 있는 답", &[]), &retrieved()),
+            AnswerCheck::Ungrounded
+        );
     }
 
     #[test]
     fn saying_the_wiki_lacks_it_is_its_own_outcome() {
-        assert_eq!(check_answer(&reply("위키에 없음", &[]), &retrieved()), AnswerCheck::NotInWiki);
-        assert_eq!(check_answer(&reply("위키에 없음. 다른 자료가 필요해요", &["없는 페이지"]), &retrieved()), AnswerCheck::NotInWiki);
+        assert_eq!(
+            check_answer(&reply("위키에 없음", &[]), &retrieved()),
+            AnswerCheck::NotInWiki
+        );
+        assert_eq!(
+            check_answer(
+                &reply("위키에 없음. 다른 자료가 필요해요", &["없는 페이지"]),
+                &retrieved()
+            ),
+            AnswerCheck::NotInWiki
+        );
     }
 
     #[test]
@@ -94,13 +138,20 @@ mod tests {
             reply("   ", &["미분"]),
             reply(&"가".repeat(MAX_ANSWER_CHARS + 1), &["미분"]),
         ] {
-            assert_eq!(check_answer(&text, &retrieved()), AnswerCheck::Malformed, "{text}");
+            assert_eq!(
+                check_answer(&text, &retrieved()),
+                AnswerCheck::Malformed,
+                "{text}"
+            );
         }
     }
 
     #[test]
     fn a_fenced_answer_is_read() {
         let fenced = format!("```json\n{}\n```", reply("답", &["적분"]));
-        assert!(matches!(check_answer(&fenced, &retrieved()), AnswerCheck::Grounded { .. }));
+        assert!(matches!(
+            check_answer(&fenced, &retrieved()),
+            AnswerCheck::Grounded { .. }
+        ));
     }
 }

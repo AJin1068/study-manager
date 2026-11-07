@@ -54,7 +54,10 @@ mod tests {
     use crate::phone::model::PhoneCode;
 
     fn fixture() -> serde_json::Value {
-        serde_json::from_str(include_str!("../../../src/api/fixtures/phone-contract.json")).expect("fixture")
+        serde_json::from_str(include_str!(
+            "../../../src/api/fixtures/phone-contract.json"
+        ))
+        .expect("fixture")
     }
 
     fn value<T: serde::Serialize>(v: &T) -> serde_json::Value {
@@ -71,12 +74,43 @@ mod tests {
             qr_svg: Some("<svg></svg>".into()),
         };
         assert_eq!(value(&start), f["start"]);
-        assert_eq!(value(&PairStart { code: PhoneCode::RateLimited, display_code: None, expires_at_ms: None, qr_svg: None }), f["refusedStart"]);
-        let status = PairStatusView { paired: true, paired_at_ms: Some(1_793_975_000_000), last_beat_ms: Some(1_793_975_100_000), service_enabled: Some(true), online: true };
+        assert_eq!(
+            value(&PairStart {
+                code: PhoneCode::RateLimited,
+                display_code: None,
+                expires_at_ms: None,
+                qr_svg: None
+            }),
+            f["refusedStart"]
+        );
+        let status = PairStatusView {
+            paired: true,
+            paired_at_ms: Some(1_793_975_000_000),
+            last_beat_ms: Some(1_793_975_100_000),
+            service_enabled: Some(true),
+            online: true,
+        };
         assert_eq!(value(&status), f["status"]);
-        assert_eq!(value(&PairStatusView { paired: false, paired_at_ms: None, last_beat_ms: None, service_enabled: None, online: false }), f["unpaired"]);
-        assert_eq!(value(&PhoneAck { code: PhoneCode::RunLocked }), f["ack"]);
-        assert_eq!(json!(PhoneCode::PhoneAlreadyPaired.as_str()), json!("phone_already_paired"));
+        assert_eq!(
+            value(&PairStatusView {
+                paired: false,
+                paired_at_ms: None,
+                last_beat_ms: None,
+                service_enabled: None,
+                online: false
+            }),
+            f["unpaired"]
+        );
+        assert_eq!(
+            value(&PhoneAck {
+                code: PhoneCode::RunLocked
+            }),
+            f["ack"]
+        );
+        assert_eq!(
+            json!(PhoneCode::PhoneAlreadyPaired.as_str()),
+            json!("phone_already_paired")
+        );
     }
 
     #[test]
@@ -86,10 +120,18 @@ mod tests {
         let link = PhoneLinkView {
             paired: true,
             want_locked: true,
-            published: Some(PublishedView { seq: 4, state: "locked", reason: None, at_ms: 1_793_975_400_000 }),
+            published: Some(PublishedView {
+                seq: 4,
+                state: "locked",
+                reason: None,
+                at_ms: 1_793_975_400_000,
+            }),
             publish_failing: false,
             last_error: None,
-            open_gaps: vec![OpenGapView { kind: "unreachable", since_ms: 1_793_975_100_000 }],
+            open_gaps: vec![OpenGapView {
+                kind: "unreachable",
+                since_ms: 1_793_975_100_000,
+            }],
             last_beat_ms: Some(1_793_975_100_000),
             service_enabled: Some(true),
         };

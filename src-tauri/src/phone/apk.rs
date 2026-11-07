@@ -14,7 +14,10 @@ pub const DEFAULT_APK_LINK: &str = "https://github.com/AJin1068/study-manager/re
 pub const APK_LINK: SettingSpec = SettingSpec {
     name: "phone.apk_link",
     category: "phone",
-    kind: ValueKind::Free { max_len: 300, shape: FreeShape::Endpoint },
+    kind: ValueKind::Free {
+        max_len: 300,
+        shape: FreeShape::Endpoint,
+    },
     default: DEFAULT_APK_LINK,
     tighten_to: None,
 };
@@ -41,22 +44,37 @@ fn effective_link(stored: &str) -> &str {
 pub fn view(conn: &Connection) -> AppResult<PhoneInstallView> {
     let stored = match settings::read_value(conn, &APK_LINK)? {
         SettingValue::Text(text) => text,
-        other => return Err(crate::error::AppError::Internal(format!("phone.apk_link is not text: {other:?}"))),
+        other => {
+            return Err(crate::error::AppError::Internal(format!(
+                "phone.apk_link is not text: {other:?}"
+            )));
+        }
     };
     let link = effective_link(&stored).to_string();
     let qr_svg = qr::render_svg(&link);
-    Ok(PhoneInstallView { link, default_link: DEFAULT_APK_LINK.to_string(), qr_svg, ios: ScreenTimeBlocker.status() })
+    Ok(PhoneInstallView {
+        link,
+        default_link: DEFAULT_APK_LINK.to_string(),
+        qr_svg,
+        ios: ScreenTimeBlocker.status(),
+    })
 }
 
 pub fn update_link(conn: &mut Connection, link: &str, at_ms: i64) -> AppResult<UpdateOutcome> {
-    settings::apply_setting(conn, &APK_LINK, &SettingValue::Text(link.trim().to_string()), at_ms, || Ok(()))
+    settings::apply_setting(
+        conn,
+        &APK_LINK,
+        &SettingValue::Text(link.trim().to_string()),
+        at_ms,
+        || Ok(()),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::open_in_memory;
-    
+
     #[test]
     fn the_default_view_encodes_the_releases_link_and_marks_ios_unsupported() {
         let conn = open_in_memory().expect("db");
@@ -73,7 +91,12 @@ mod tests {
         let mut conn = open_in_memory().expect("db");
         let custom = "https://example.org/app.apk";
         let outcome = update_link(&mut conn, custom, 1).expect("update");
-        assert_eq!(outcome, UpdateOutcome::Applied { key: "phone.apk_link".into() });
+        assert_eq!(
+            outcome,
+            UpdateOutcome::Applied {
+                key: "phone.apk_link".into()
+            }
+        );
         let changed = view(&conn).expect("view");
         assert_eq!(changed.link, custom);
         assert_eq!(changed.qr_svg, qr::render_svg(custom));
@@ -84,7 +107,13 @@ mod tests {
     #[test]
     fn unsafe_links_are_rejected_and_the_stored_link_is_unchanged() {
         let mut conn = open_in_memory().expect("db");
-        for bad in ["http://example.org/a.apk", "javascript:alert(1)", "https://user:pw@example.org/a", "https://example.org/a?x=1", "not a url"] {
+        for bad in [
+            "http://example.org/a.apk",
+            "javascript:alert(1)",
+            "https://user:pw@example.org/a",
+            "https://example.org/a?x=1",
+            "not a url",
+        ] {
             assert!(update_link(&mut conn, bad, 1).is_err(), "{bad}");
         }
         assert_eq!(view(&conn).expect("view").link, DEFAULT_APK_LINK);
@@ -98,11 +127,20 @@ mod wire_tests {
 
     #[test]
     fn the_view_wire_shape_matches_the_shared_fixture() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../src/api/fixtures/phone-install-contract.json");
-        let expected: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
-        let mut actual = serde_json::to_value(view(&open_in_memory().expect("db")).expect("view")).expect("json");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../src/api/fixtures/phone-install-contract.json"
+        );
+        let expected: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
+        let mut actual = serde_json::to_value(view(&open_in_memory().expect("db")).expect("view"))
+            .expect("json");
         // The QR picture itself is checked by the tests above; the contract pins the field set.
-        assert!(actual["qrSvg"].as_str().is_some_and(|svg| svg.contains("<svg")));
+        assert!(
+            actual["qrSvg"]
+                .as_str()
+                .is_some_and(|svg| svg.contains("<svg"))
+        );
         actual["qrSvg"] = serde_json::Value::String("<svg></svg>".into());
         assert_eq!(actual, expected);
     }

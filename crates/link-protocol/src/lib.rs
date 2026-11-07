@@ -12,7 +12,10 @@ mod lease;
 mod offer;
 mod report;
 
-pub use decision::{lock_decision, FreeReason, LeaseHolder, PhoneLock, MAX_REJECTED_KEPT};
-pub use lease::{accept_lease, LeaseError, LeaseReceipt, LeaseReject, LeaseState, LockLease, ReleaseCause, GRACE_MS, MAX_LEASE_MS, MAX_SEGMENT_MS};
-pub use offer::{normalize_code, OfferError, PairingOffer, CODE_LEN, OFFER_VERSION};
-pub use report::{PhoneBeat, PickupReport, ReportError, MAX_PICKUPS_PER_REPORT};
+pub use decision::{FreeReason, LeaseHolder, MAX_REJECTED_KEPT, PhoneLock, lock_decision};
+pub use lease::{
+    GRACE_MS, LeaseError, LeaseReceipt, LeaseReject, LeaseState, LockLease, MAX_LEASE_MS,
+    MAX_SEGMENT_MS, ReleaseCause, accept_lease,
+};
+pub use offer::{CODE_LEN, OFFER_VERSION, OfferError, PairingOffer, normalize_code};
+pub use report::{MAX_PICKUPS_PER_REPORT, PhoneBeat, PickupReport, ReportError};

@@ -10,7 +10,10 @@ use serde_json::Value;
 
 use super::snapshot::Snapshot;
 use crate::plan::PlanHistoryEntry;
-use crate::remote::payload::{DeviceRegistration, NotifyChannelRow, PlanHistoryBatch, PlanHistoryRow, PresenceBeat, SnapshotArgs};
+use crate::remote::payload::{
+    DeviceRegistration, NotifyChannelRow, PlanHistoryBatch, PlanHistoryRow, PresenceBeat,
+    SnapshotArgs,
+};
 use crate::remote::supabase::{RemoteError, SupabaseRest};
 
 /// Why a push or beat did not happen. `code()` is the only text that reaches the UI or a log.
@@ -57,7 +60,11 @@ pub enum SnapshotOutcome {
 pub trait PlanMirror: Send + Sync {
     /// Idempotent: registering a known device is a no-op.
     fn register_device(&self, device: &DeviceIdentity) -> Result<(), SyncError>;
-    fn push_snapshot(&self, device_id: &str, snapshot: &Snapshot) -> Result<SnapshotOutcome, SyncError>;
+    fn push_snapshot(
+        &self,
+        device_id: &str,
+        snapshot: &Snapshot,
+    ) -> Result<SnapshotOutcome, SyncError>;
     /// Idempotent per `(device, local id)`: a repeated batch adds nothing.
     fn push_history(&self, device_id: &str, rows: &[PlanHistoryEntry]) -> Result<(), SyncError>;
     fn push_notify_channel(&self, row: &NotifyChannelRow) -> Result<(), SyncError>;
@@ -88,11 +95,21 @@ fn rpc_code(value: &Value) -> Result<&str, SyncError> {
 
 impl PlanMirror for RestSync {
     fn register_device(&self, device: &DeviceIdentity) -> Result<(), SyncError> {
-        let registration = DeviceRegistration { id: device.id.clone(), app_version: device.app_version.clone(), platform: device.platform };
-        self.rest.insert("device_register", "devices", &registration, true).map_err(remote)
+        let registration = DeviceRegistration {
+            id: device.id.clone(),
+            app_version: device.app_version.clone(),
+            platform: device.platform,
+        };
+        self.rest
+            .insert("device_register", "devices", &registration, true)
+            .map_err(remote)
     }
 
-    fn push_snapshot(&self, device_id: &str, snapshot: &Snapshot) -> Result<SnapshotOutcome, SyncError> {
+    fn push_snapshot(
+        &self,
+        device_id: &str,
+        snapshot: &Snapshot,
+    ) -> Result<SnapshotOutcome, SyncError> {
         let args = SnapshotArgs {
             device_id: device_id.to_string(),
             snapshot_hash: snapshot.hash.clone(),
@@ -100,7 +117,10 @@ impl PlanMirror for RestSync {
             horizon_days: snapshot.horizon_days,
             occurrences: snapshot.occurrences.clone(),
         };
-        let answer = self.rest.rpc("rpc_replace_plan_snapshot", "replace_plan_snapshot", &args).map_err(remote)?;
+        let answer = self
+            .rest
+            .rpc("rpc_replace_plan_snapshot", "replace_plan_snapshot", &args)
+            .map_err(remote)?;
         match rpc_code(&answer)? {
             "ok" => Ok(SnapshotOutcome::Replaced),
             "unchanged" => Ok(SnapshotOutcome::Unchanged),
@@ -129,22 +149,29 @@ impl PlanMirror for RestSync {
                 .collect(),
         );
         // ignore-duplicates: a batch that was half-delivered before a crash is simply sent again.
-        self.rest.insert("insert_plan_history", "plan_history_mirror", &batch, true).map_err(|err| match err {
-            // The insert policy only admits rows for a device the caller owns, so a refusal means
-            // the server no longer knows this device.
-            RemoteError::Http { status: 403 } => SyncError::Rejected(DEVICE_NOT_OWNED),
-            other => remote(other),
-        })
+        self.rest
+            .insert("insert_plan_history", "plan_history_mirror", &batch, true)
+            .map_err(|err| match err {
+                // The insert policy only admits rows for a device the caller owns, so a refusal means
+                // the server no longer knows this device.
+                RemoteError::Http { status: 403 } => SyncError::Rejected(DEVICE_NOT_OWNED),
+                other => remote(other),
+            })
     }
 
     fn push_notify_channel(&self, row: &NotifyChannelRow) -> Result<(), SyncError> {
-        self.rest.upsert("upsert_notify_channel", "notify_channels", row).map_err(remote)
+        self.rest
+            .upsert("upsert_notify_channel", "notify_channels", row)
+            .map_err(remote)
     }
 }
 
 impl PresencePort for RestSync {
     fn beat(&self, beat: &PresenceBeat) -> Result<(), SyncError> {
-        let answer = self.rest.rpc("rpc_heartbeat", "heartbeat", beat).map_err(remote)?;
+        let answer = self
+            .rest
+            .rpc("rpc_heartbeat", "heartbeat", beat)
+            .map_err(remote)?;
         match rpc_code(&answer)? {
             "ok" => Ok(()),
             "device_not_owned" => Err(SyncError::Rejected(DEVICE_NOT_OWNED)),

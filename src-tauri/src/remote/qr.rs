@@ -2,8 +2,8 @@
 //! its QR code as an SVG string. Everything is computed locally; the topic never leaves the PC
 //! through this path.
 
-use qrcode::render::svg;
 use qrcode::QrCode;
+use qrcode::render::svg;
 use serde::Serialize;
 
 use super::http::host_of;
@@ -18,7 +18,11 @@ pub struct NtfySubscription {
 /// `ntfy://<host>/<topic>` — the link the ntfy mobile app opens to subscribe.
 pub fn deep_link(server: &str, topic: &str) -> Option<String> {
     let host = host_of(server)?;
-    if topic.is_empty() || !topic.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
+    if topic.is_empty()
+        || !topic
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    {
         return None;
     }
     Some(format!("ntfy://{host}/{topic}"))
@@ -26,7 +30,12 @@ pub fn deep_link(server: &str, topic: &str) -> Option<String> {
 
 pub fn render_svg(text: &str) -> Option<String> {
     let code = QrCode::new(text.as_bytes()).ok()?;
-    Some(code.render::<svg::Color>().min_dimensions(200, 200).quiet_zone(true).build())
+    Some(
+        code.render::<svg::Color>()
+            .min_dimensions(200, 200)
+            .quiet_zone(true)
+            .build(),
+    )
 }
 
 pub fn subscription(server: &str, topic: &str) -> Option<NtfySubscription> {
@@ -43,8 +52,14 @@ mod tests {
 
     #[test]
     fn the_link_names_the_server_host_and_topic() {
-        assert_eq!(deep_link("https://ntfy.sh", TOPIC).as_deref(), Some("ntfy://ntfy.sh/0123456789abcdef0123456789abcdef"));
-        assert_eq!(deep_link("https://ntfy.example.org/", TOPIC).as_deref(), Some("ntfy://ntfy.example.org/0123456789abcdef0123456789abcdef"));
+        assert_eq!(
+            deep_link("https://ntfy.sh", TOPIC).as_deref(),
+            Some("ntfy://ntfy.sh/0123456789abcdef0123456789abcdef")
+        );
+        assert_eq!(
+            deep_link("https://ntfy.example.org/", TOPIC).as_deref(),
+            Some("ntfy://ntfy.example.org/0123456789abcdef0123456789abcdef")
+        );
     }
 
     #[test]
