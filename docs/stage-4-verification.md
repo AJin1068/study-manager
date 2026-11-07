@@ -43,8 +43,9 @@
 | `cargo clippy --all-targets -- -D warnings` | `src-tauri` | 종료 0 |
 | `cargo test` | `src-tauri` | 951개 통과 (+통합·doc 별도) |
 | `pnpm build:web` | 루트 | 종료 0 |
-| Windows 타깃 `cargo check --target x86_64-pc-windows-msvc` | `src-tauri` | 종료 101: 번들 SQLite C 헤더 부재 (검증 안 됨) |
-| `cargo fmt --check` | `src-tauri` | 실행 불가: rustfmt 미설치 (검증 안 됨) |
+| Windows 네이티브(x86_64-pc-windows-msvc, Windows 11 x64, rustc 1.99.1) `cargo test` | `src-tauri` | 종료 0: lib 1047 + llm_wire 4 + remote_wire 7 + doc 3 통과, 실패 0 (2026-11-07). 이전 기록: 「Windows 타깃 `cargo check` 종료 101: 번들 SQLite C 헤더 부재 (검증 안 됨)」 — 네이티브 Windows 빌드에서는 재현되지 않았다. `cfg(unix)` 시험(심볼릭 링크·유닉스 소켓)은 컴파일되지 않아 실행되지 않았다 |
+| Windows 네이티브 `cargo clippy --all-targets -- -D warnings` | `src-tauri` | 종료 0 (2026-11-07, 수정 커밋 a22bb03: `browser_ipc.rs`의 `SOCKET_FILE`을 `cfg(unix)`로) |
+| `cargo fmt --check` | `src-tauri` | 종료 0 (2026-11-07, Windows, 커밋 cd88e14로 `cargo fmt` 적용 후). 이전 기록: 「실행 불가: rustfmt 미설치 (검증 안 됨)」 |
 
 `supabase test db`는 Docker·Supabase CLI가 없어 게이트에 넣지 못했다(V4-1).
 
@@ -65,17 +66,35 @@
 
 | ID | 스토리 | 항목 | 안 된 이유 | 사람이 하는 한 줄 절차 |
 |---|---|---|---|---|
-| V4-1 | S4.1, S4.7, S4.9 | 실제 Postgres에서 서버 SQL이 적용되는지와 RLS·RPC 권한(pgTAP `rls_s4.sql`, `rls_s4_shared_wiki.sql`, `rls_s4_profile.sql`): 비멤버·다른 방 멤버·익명이 아무 행도 못 읽는지, `REVOKE EXECUTE`, 입장 시도 카운터가 롤백되지 않는지, 익명 `get_public_profile`이 `public` 칸만 돌려주는지, 성능 | Docker·Supabase CLI·Postgres 없음. 지금까지 SQL은 문자열 정적 시험만 통과 | Docker가 있는 PC에서 `supabase start` 후 `supabase test db`를 돌려 세 pgTAP 파일이 모두 통과하는지 보고, 실패한 단언이 있으면 고친다 |
-| V4-2 | S4.4, S4.5, S4.6, S4.10 | 실제 Supabase 프로젝트에서 두 계정(A, B)이 방을 만들고 초대 코드로 입장해 상태·랭킹이 보이는 흐름, 초대 링크의 endpoint·anon key 자동 채움, 폴링 지연, 딴짓 알림 opt-in, 선물 전송·수락 | 실제 프로젝트·계정 둘·기기 둘 없음 | 세 마이그레이션을 적용한 프로젝트에 계정 둘로 로그인해 A가 방 생성→초대, B가 입장→공부 시작 후 A 화면에 「공부 중」이 5~10초 안에 뜨고, B에게 선물을 보내 수락까지 확인한다 |
-| V4-3 | S4.2, S4.8, S4.9 | 실제 그림 자산(현재는 자리표시 도형)의 시각 품질, 옷이 모든 종에 맞게 정렬되는지, 캐릭터 선택·상점·프로필 홈·방명록·공부 잔디·방 화면의 실제 렌더와 사용성 | 그림을 그릴 수 없고 GUI 실행 불가 | `docs/art-assets.md` 절차로 `parts.json`·`items.json`의 `svg`를 교체한 뒤 첫 실행 선택, 상점 착용, 프로필 홈을 라이트·다크에서 눈으로 확인 |
-| V4-4 | S4.7 | 실제 모델의 공유 페이지 합본 품질, 인젝션 페이지에 대한 실제 모델 반응, 서버에서의 실제 revision 동시성 | 실제 모델·서버 없음(합치기는 `MockLlm`, 서버는 인메모리) | 두 계정이 같은 개념의 페이지를 각자 공유(합치기 동의 포함)하고 한 쪽이 합치기를 실행해 기여자 표시와 내용이 납득되는지, 동시에 올렸을 때 revision이 분기로 남는지 확인 |
-| V4-5 | S4.11, S4.12 | (a) 웹 번들의 실제 호스팅 배포와 프로필 링크가 실제 도메인에서 열리는지, `config.json` 주입, OTP 로그인 메일, (b) Supabase Realtime에 실제 웹소켓으로 붙기(전송 계층 자체가 아직 없음) | 호스팅·도메인·메일 계정 없음. 웹소켓 크레이트와 소켓 전송 미구현 | (a) `pnpm build:web` 산출물을 정적 호스팅에 올리고 `config.json`을 채워 프로필 링크를 익명 창에서 열고 본인 로그인으로 대시보드를 본다. (b) 소켓 전송을 구현한 뒤에만 가능하며, 지금은 폴링이 기본이므로 건너뛴다 |
-| V4-6 | S4.4 | 폰 카메라로 QR을 읽어 `studymanager://join?...` 딥링크가 앱을 열고 입장 화면이 채워지는지(딥링크 OS 등록 포함) | 폰·카메라·OS 딥링크 등록 확인 불가 | 방의 초대 QR을 다른 기기 카메라로 스캔하거나 링크를 붙여넣어 앱이 열리고 코드·주소가 채워지는지, 확인 후 입장되는지 본다 |
-| V4-7 | S4.2 | 실제 모델이 짓는 캐릭터 이름·한 줄 소개의 품질과 금칙어 걸러내기 | 실제 키 없음(내장 사전 경로만 시험됨) | LLM 키를 넣고 캐릭터를 몇 번 다시 뽑아 이름이 어색하거나 기존 캐릭터와 겹치지 않는지 확인 |
-| V4-8 | S4.4, S4.5, S4.8, S4.9, S4.10 | 방·캐릭터·상점·프로필·선물·공유 위키 UI의 실제 동작, 트레이 캐릭터 한 줄 표시, 선물 상자 알림 | GUI 실행 불가(타입 체크·린트·순수 뷰 로직 시험만) | 앱을 띄워 방 만들기→초대→랭킹, 상점 구매→선물, 공유 위키 올리기→철회를 화면에서 한 번씩 해 보고 오류 문구가 이해되는지 확인 |
-| V4-9 | S4.1~S4.10 | 서버 마이그레이션 세 개가 빈 프로젝트에 순서대로 오류 없이 적용되는지, 기존 2단계 스키마와 충돌이 없는지 | 실제 Postgres 없음 | 빈 Supabase 프로젝트에 `supabase db push`로 5개 마이그레이션을 순서대로 적용해 오류가 없는지 확인 |
-| V4-10 | 전체 | Windows: 4단계 신규 Rust 코드의 Windows 타깃 `cargo check/test`, 딥링크 등록, 웹뷰 렌더 | Windows 기기·타깃 빌드 환경 없음(macOS에서만 시험) | Windows PC에서 `cargo test`와 `cargo clippy --all-targets -- -D warnings`를 돌리고 방 화면과 캐릭터 선택이 뜨는지 확인 |
-| V4-11 | S4.5 | 실제 네트워크 지연·시계 오차에서의 상태 신선도(90초 offline 판단), 랭킹의 날짜 경계(타임존) | 실제 서버·시계 오차 환경 없음(가짜 시계만) | 서로 다른 시간대 설정의 두 PC로 자정 전후에 공부해 오늘 랭킹이 각자 자기 날짜로 집계되는지 확인 |
+| V4-1 | S4.1, S4.7, S4.9 | 실제 Postgres에서 서버 SQL이 적용되는지와 RLS·RPC 권한(pgTAP `rls_s4.sql`, `rls_s4_shared_wiki.sql`, `rls_s4_profile.sql`): 비멤버·다른 방 멤버·익명이 아무 행도 못 읽는지, `REVOKE EXECUTE`, 입장 시도 카운터가 롤백되지 않는지, 익명 `get_public_profile`이 `public` 칸만 돌려주는지, 성능 | [판정 2026-11-07: 부분] Docker·Supabase CLI·Postgres 없음. 지금까지 SQL은 문자열 정적 시험만 통과 | Docker가 있는 PC에서 `supabase start` 후 `supabase test db`를 돌려 세 pgTAP 파일이 모두 통과하는지 보고, 실패한 단언이 있으면 고친다 |
+| V4-2 | S4.4, S4.5, S4.6, S4.10 | 실제 Supabase 프로젝트에서 두 계정(A, B)이 방을 만들고 초대 코드로 입장해 상태·랭킹이 보이는 흐름, 초대 링크의 endpoint·anon key 자동 채움, 폴링 지연, 딴짓 알림 opt-in, 선물 전송·수락 | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 실제 프로젝트·계정 둘·기기 둘 없음 | 세 마이그레이션을 적용한 프로젝트에 계정 둘로 로그인해 A가 방 생성→초대, B가 입장→공부 시작 후 A 화면에 「공부 중」이 5~10초 안에 뜨고, B에게 선물을 보내 수락까지 확인한다 |
+| V4-3 | S4.2, S4.8, S4.9 | 실제 그림 자산(현재는 자리표시 도형)의 시각 품질, 옷이 모든 종에 맞게 정렬되는지, 캐릭터 선택·상점·프로필 홈·방명록·공부 잔디·방 화면의 실제 렌더와 사용성 | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 그림을 그릴 수 없고 GUI 실행 불가 | `docs/art-assets.md` 절차로 `parts.json`·`items.json`의 `svg`를 교체한 뒤 첫 실행 선택, 상점 착용, 프로필 홈을 라이트·다크에서 눈으로 확인 |
+| V4-4 | S4.7 | 실제 모델의 공유 페이지 합본 품질, 인젝션 페이지에 대한 실제 모델 반응, 서버에서의 실제 revision 동시성 | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 실제 모델·서버 없음(합치기는 `MockLlm`, 서버는 인메모리) | 두 계정이 같은 개념의 페이지를 각자 공유(합치기 동의 포함)하고 한 쪽이 합치기를 실행해 기여자 표시와 내용이 납득되는지, 동시에 올렸을 때 revision이 분기로 남는지 확인 |
+| V4-5 | S4.11, S4.12 | (a) 웹 번들의 실제 호스팅 배포와 프로필 링크가 실제 도메인에서 열리는지, `config.json` 주입, OTP 로그인 메일, (b) Supabase Realtime에 실제 웹소켓으로 붙기(전송 계층 자체가 아직 없음) | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 호스팅·도메인·메일 계정 없음. 웹소켓 크레이트와 소켓 전송 미구현 | (a) `pnpm build:web` 산출물을 정적 호스팅에 올리고 `config.json`을 채워 프로필 링크를 익명 창에서 열고 본인 로그인으로 대시보드를 본다. (b) 소켓 전송을 구현한 뒤에만 가능하며, 지금은 폴링이 기본이므로 건너뛴다 |
+| V4-6 | S4.4 | 폰 카메라로 QR을 읽어 `studymanager://join?...` 딥링크가 앱을 열고 입장 화면이 채워지는지(딥링크 OS 등록 포함) | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 폰·카메라·OS 딥링크 등록 확인 불가 | 방의 초대 QR을 다른 기기 카메라로 스캔하거나 링크를 붙여넣어 앱이 열리고 코드·주소가 채워지는지, 확인 후 입장되는지 본다 |
+| V4-7 | S4.2 | 실제 모델이 짓는 캐릭터 이름·한 줄 소개의 품질과 금칙어 걸러내기 | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 실제 키 없음(내장 사전 경로만 시험됨) | LLM 키를 넣고 캐릭터를 몇 번 다시 뽑아 이름이 어색하거나 기존 캐릭터와 겹치지 않는지 확인 |
+| V4-8 | S4.4, S4.5, S4.8, S4.9, S4.10 | 방·캐릭터·상점·프로필·선물·공유 위키 UI의 실제 동작, 트레이 캐릭터 한 줄 표시, 선물 상자 알림 | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] GUI 실행 불가(타입 체크·린트·순수 뷰 로직 시험만) | 앱을 띄워 방 만들기→초대→랭킹, 상점 구매→선물, 공유 위키 올리기→철회를 화면에서 한 번씩 해 보고 오류 문구가 이해되는지 확인 |
+| V4-9 | S4.1~S4.10 | 서버 마이그레이션 세 개가 빈 프로젝트에 순서대로 오류 없이 적용되는지, 기존 2단계 스키마와 충돌이 없는지 | [판정 2026-11-07: 부분] 실제 Postgres 없음 | 빈 Supabase 프로젝트에 `supabase db push`로 5개 마이그레이션을 순서대로 적용해 오류가 없는지 확인 |
+| V4-10 | 전체 | Windows: 4단계 신규 Rust 코드의 Windows 타깃 `cargo check/test`, 딥링크 등록, 웹뷰 렌더 | [판정 2026-11-07: 부분] Windows 기기·타깃 빌드 환경 없음(macOS에서만 시험) | Windows PC에서 `cargo test`와 `cargo clippy --all-targets -- -D warnings`를 돌리고 방 화면과 캐릭터 선택이 뜨는지 확인 |
+| V4-11 | S4.5 | 실제 네트워크 지연·시계 오차에서의 상태 신선도(90초 offline 판단), 랭킹의 날짜 경계(타임존) | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 실제 서버·시계 오차 환경 없음(가짜 시계만) | 서로 다른 시간대 설정의 두 PC로 자정 전후에 공부해 오늘 랭킹이 각자 자기 날짜로 집계되는지 확인 |
+
+### Windows PC 검증 결과 (2026-11-07)
+
+환경: Windows 11 x64, rustc 1.99.1. 스텁 PostgreSQL 16.4(실제 Supabase 아님: GoTrue·PostgREST·Realtime·Vault·`pg_cron` 없음, pgTAP 대신 `pgtap-lite`). 위 체크리스트는 바꾸지 않았다.
+
+| ID | 판정 | 명령 | 결과(종료코드·개수) | 비고 |
+|---|---|---|---|---|
+| V4-1 | 부분 | `supabase/tests/stub/run.ps1` (스텁 PG 16.4에 마이그레이션 8개 적용 후 `rls_s*.sql` 실행) | 종료 0: 마이그레이션 오류 없음, rls_s4 26/26, rls_s4_profile 27/27, rls_s4_shared_wiki 22/22 통과(전체 7파일 172단언). 음성 대조군은 요구대로 실패(1건) | 스텁이라 부분. 실제 `supabase start`/`supabase test db`·성능은 미실행(Docker/WSL2 없음) |
+| V4-2 | 사람 확인(MANUAL-CHECKLIST) | 실행 안 함 | — | 실제 프로젝트·계정 둘·기기 둘 필요 |
+| V4-3 | 사람 확인(MANUAL-CHECKLIST) | 실행 안 함 | — | 그림 자산 없음, GUI 시각 판단 |
+| V4-4 | 사람 확인(MANUAL-CHECKLIST) | 실행 안 함 | — | 실제 모델·서버 필요 |
+| V4-5 | 사람 확인(MANUAL-CHECKLIST) | `pnpm build:web` | 종료 0 (산출물 생성만) | (a) 호스팅·도메인·메일은 사람. (b) Realtime 소켓 전송은 미구현이라 건너뜀 |
+| V4-6 | 사람 확인(MANUAL-CHECKLIST) | 실행 안 함 | — | 폰 카메라·OS 딥링크 등록 필요 |
+| V4-7 | 사람 확인(MANUAL-CHECKLIST) | 실행 안 함 | — | 실제 LLM 키·모델 품질 판단 |
+| V4-8 | 사람 확인(MANUAL-CHECKLIST) | `pnpm tsc --noEmit`, `pnpm lint`, `pnpm test` | 종료 0, 0, 72개 파일 511개 통과 | 정적·순수 로직 시험만. GUI 클릭 확인은 하지 않음 |
+| V4-9 | 부분 | `supabase/tests/stub/run.ps1` | 종료 0: 서버 마이그레이션 8개가 빈 스텁 PG 16.4에 오류 없이 순서대로 적용됨 | 스텁 PG라 부분. 빈 Supabase 프로젝트에 `supabase db push`는 미실행 |
+| V4-10 | 부분 | `cargo test` / `cargo clippy --all-targets -- -D warnings` / `cargo fmt --check` (`src-tauri`, 네이티브 x86_64-pc-windows-msvc) | 종료 0 / 0 / 0: lib 1047 + llm_wire 4 + remote_wire 7 + doc 3 통과, 실패 0 | 수정 커밋 a22bb03(`SOCKET_FILE` `cfg(unix)`), cd88e14(`cargo fmt`·`llm::config` 시험의 OS별 절대경로). `cfg(unix)` 시험은 컴파일되지 않음. 딥링크 등록·방 화면·캐릭터 선택 렌더는 미확인(사람) |
+| V4-11 | 사람 확인(MANUAL-CHECKLIST) | 실행 안 함 | — | 서로 다른 시간대 두 PC·실제 서버 필요 |
 
 ## 단계 완료 기준 체크리스트 (PLAN 문구 그대로)
 
