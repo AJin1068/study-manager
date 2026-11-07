@@ -19,14 +19,14 @@
 
 | 명령 | 위치 | 결과 |
 |---|---|---|
-| `cargo fmt --check` | `src-tauri` | 실행 불가: rustfmt 미설치 (검증 안 됨) |
-| `cargo clippy --all-targets -- -D warnings` | `src-tauri` | 종료 0 |
-| `cargo test` | `src-tauri` | 515 + 통합 7 + doc 3 통과 |
+| `cargo fmt --check` | `src-tauri` | 종료 0 (Windows 11 x64, rustc 1.99.1). 이전 결과: 실행 불가, rustfmt 미설치. cd88e14로 `cargo fmt` 일괄 적용 후 통과 |
+| `cargo clippy --all-targets -- -D warnings` | `src-tauri` | 종료 0 (Windows 네이티브 재실행. a22bb03으로 `browser_ipc.rs` dead_code 수정 후) |
+| `cargo test` | `src-tauri` | Windows 네이티브: lib 1047 + `llm_wire` 4 + `remote_wire` 7 + doc 3 통과, 실패 0. 이전 결과: 515 + 통합 7 + doc 3. `cfg(unix)` 시험은 Windows에서 컴파일되지 않음 |
 | `pnpm tsc --noEmit` | 루트 | 종료 0 |
 | `pnpm lint` | 루트 | 종료 0 |
-| `pnpm test` (supabase 시험 포함) | 루트 | 244개 통과 |
-| `supabase test db` (Docker 필요) | 루트 | 실행 안 함: Supabase CLI 없음 (Docker 데몬은 떠 있음). pgTAP 검증 안 됨 |
-| Windows 타깃 `cargo check --target x86_64-pc-windows-msvc` | `src-tauri` | 종료 101: 번들 SQLite C 헤더 부재 (검증 안 됨) |
+| `pnpm test` (supabase 시험 포함) | 루트 | 72파일 511개 통과, 종료 0. 이전 결과: 244개. 74cab52(`.gitattributes` eol=lf) 후 통과 |
+| `supabase test db` (Docker 필요) | 루트 | 실제 CLI는 여전히 실행 안 함(이 PC에 Docker·WSL2·Supabase CLI 없음). 대체: 스텁 PostgreSQL 16.4에서 `supabase/tests/stub/run.ps1`로 마이그레이션 8개 적용(오류 없음) 후 `rls_s2` 18/18 등 통과(아래 V2-8). 스텁이라 부분 검증. 이전 결과: pgTAP 검증 안 됨 |
+| Windows 타깃 `cargo check --target x86_64-pc-windows-msvc` | `src-tauri` | 이 PC가 Windows(x86_64-pc-windows-msvc) 네이티브라 위 `cargo clippy`·`cargo test`·`pnpm tauri build --bundles nsis`(종료 0)가 대체한다. 이전 결과: 종료 101, 번들 SQLite C 헤더 부재 |
 
 ## 에이전트가 자동으로 증명한 것
 
@@ -45,18 +45,37 @@
 
 | ID | 스토리 | 항목 | 안 된 이유 | 사람이 하는 한 줄 절차 |
 |---|---|---|---|---|
-| V2-1 | S2.6, S2.5 | 실제 ntfy·Telegram 도착과 「5분 안」 실측, 켜짐 신호 p95 도착 지연 | 실계정·실제 PC 종료·실제 폰 필요 | `supabase/README.md` 배포 절차를 마친 뒤 계획 시작 시각에 PC를 끄고 폰 알림 도착 시각을 재서 시작+5분 안인지 3회 확인 |
-| V2-2 | S2.1 | 실제 키체인 동작(macOS 팝업, Windows Credential Manager) | OS 키체인·GUI 필요, 서명 없는 개발 빌드는 팝업이 뜸 | 앱에서 키를 저장하고 재시작해 「저장됨」으로 남는지, 키체인 접근에 `study-manager` 항목이 생겼는지 확인 |
-| V2-3 | S2.1, S2.7 | 연동 화면과 폰 알림 패널의 실제 렌더·레이아웃 | GUI 확인 필요 | 설정 → 연동에서 채널 선택·QR·유예·상태 표시가 라이트·다크에서 겹치지 않는지 눈으로 확인 |
-| V2-4 | S2.2, S2.4 | 실제 Supabase RPC 왕복(`replace_plan_snapshot`, `heartbeat`, 히스토리 insert) | 실제 프로젝트 필요 | 로그인한 앱에서 계획을 만들고 Supabase 표 편집기에서 `plan_occurrences`·`presence`·`plan_history_mirror` 행이 생기는지 확인 |
-| V2-5 | S2.3 | 실제 OTP 메일 수신과 로그인 | 실제 메일·프로젝트 필요 | 앱에서 코드 받기 → 메일의 6자리 코드로 로그인되고 「로그인됨」이 뜨는지 확인 |
-| V2-6 | S2.5 | 실제 수면/깨어남에서 신호가 멈추고 다시 시작함 | 실기기 필요 | 맥북 덮개를 1분 닫았다 열고, 열린 뒤 약 2초 안에 서버 `presence.last_seen_at`이 갱신되는지 확인 |
-| V2-7 | S2.6 | Edge Function 배포와 `pg_cron` 1분 실행, Vault·`pg_net` 가용성 | 계정 필요, 무료 플랜 기능 가정 | `supabase/README.md`의 배포 절차를 실행한 뒤 함수 로그에 1분마다 호출이 찍히고 「테스트 알림 보내기」가 도착하는지 확인 |
-| V2-8 | S2.2 | 실제 Postgres에서 마이그레이션 적용과 RLS 동작 | Docker·계정 필요 | `supabase test db`를 실행해 `tests/rls_s2.sql`이 모두 통과하고 `supabase db push`가 오류 없이 끝나는지 확인 |
-| V2-9 | S2.8 | 실제 Google/Apple 캘린더가 내보낸 .ics 호환 | 실제 내보내기 파일 필요 | 구글·애플 캘린더에서 내보낸 .ics를 가져오기 미리보기로 열어 일정·반복·「건너뜀 N건」이 맞는지 확인 |
-| V2-10 | S2.7 | QR을 폰 카메라로 스캔해 ntfy 앱이 구독을 여는지 | 실제 폰·ntfy 앱 필요 | 토픽 만들기 후 QR을 ntfy 앱으로 스캔해 같은 토픽이 구독되고 테스트 알림이 도착하는지 확인 |
-| V2-11 | S2.6 | 서버가 PC의 켜짐을 오판하는 경우(네트워크만 끊김) 문구 체감 | 실사용 필요 | 계획 시각에 와이파이만 끄고 알림 문구 「신호가 없어요」가 납득되는지 확인 |
-| V2-12 | S2.4 | 실제 시간대·서머타임 경계에서 발생 시각과 알림 시각표기 | 실기기 시간대 변경 필요 | 맥의 시간대를 바꾼 뒤 서버 `plan_occurrences.start_at_utc_ms`와 알림의 시각이 계획 시각과 같은지 확인 |
+| V2-1 | S2.6, S2.5 | 실제 ntfy·Telegram 도착과 「5분 안」 실측, 켜짐 신호 p95 도착 지연 | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 실계정·실제 PC 종료·실제 폰 필요 | `supabase/README.md` 배포 절차를 마친 뒤 계획 시작 시각에 PC를 끄고 폰 알림 도착 시각을 재서 시작+5분 안인지 3회 확인 |
+| V2-2 | S2.1 | 실제 키체인 동작(macOS 팝업, Windows Credential Manager) | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] OS 키체인·GUI 필요, 서명 없는 개발 빌드는 팝업이 뜸 | 앱에서 키를 저장하고 재시작해 「저장됨」으로 남는지, 키체인 접근에 `study-manager` 항목이 생겼는지 확인 |
+| V2-3 | S2.1, S2.7 | 연동 화면과 폰 알림 패널의 실제 렌더·레이아웃 | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] GUI 확인 필요 | 설정 → 연동에서 채널 선택·QR·유예·상태 표시가 라이트·다크에서 겹치지 않는지 눈으로 확인 |
+| V2-4 | S2.2, S2.4 | 실제 Supabase RPC 왕복(`replace_plan_snapshot`, `heartbeat`, 히스토리 insert) | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 실제 프로젝트 필요 | 로그인한 앱에서 계획을 만들고 Supabase 표 편집기에서 `plan_occurrences`·`presence`·`plan_history_mirror` 행이 생기는지 확인 |
+| V2-5 | S2.3 | 실제 OTP 메일 수신과 로그인 | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 실제 메일·프로젝트 필요 | 앱에서 코드 받기 → 메일의 6자리 코드로 로그인되고 「로그인됨」이 뜨는지 확인 |
+| V2-6 | S2.5 | 실제 수면/깨어남에서 신호가 멈추고 다시 시작함 | [판정 2026-11-07: 맥에서 확인 필요] 실기기 필요 | 맥북 덮개를 1분 닫았다 열고, 열린 뒤 약 2초 안에 서버 `presence.last_seen_at`이 갱신되는지 확인 |
+| V2-7 | S2.6 | Edge Function 배포와 `pg_cron` 1분 실행, Vault·`pg_net` 가용성 | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 계정 필요, 무료 플랜 기능 가정 | `supabase/README.md`의 배포 절차를 실행한 뒤 함수 로그에 1분마다 호출이 찍히고 「테스트 알림 보내기」가 도착하는지 확인 |
+| V2-8 | S2.2 | 실제 Postgres에서 마이그레이션 적용과 RLS 동작 | [판정 2026-11-07: 부분] Docker·계정 필요 | `supabase test db`를 실행해 `tests/rls_s2.sql`이 모두 통과하고 `supabase db push`가 오류 없이 끝나는지 확인 |
+| V2-9 | S2.8 | 실제 Google/Apple 캘린더가 내보낸 .ics 호환 | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 실제 내보내기 파일 필요 | 구글·애플 캘린더에서 내보낸 .ics를 가져오기 미리보기로 열어 일정·반복·「건너뜀 N건」이 맞는지 확인 |
+| V2-10 | S2.7 | QR을 폰 카메라로 스캔해 ntfy 앱이 구독을 여는지 | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 실제 폰·ntfy 앱 필요 | 토픽 만들기 후 QR을 ntfy 앱으로 스캔해 같은 토픽이 구독되고 테스트 알림이 도착하는지 확인 |
+| V2-11 | S2.6 | 서버가 PC의 켜짐을 오판하는 경우(네트워크만 끊김) 문구 체감 | [판정 2026-11-07: 사람 확인(MANUAL-CHECKLIST)] 실사용 필요 | 계획 시각에 와이파이만 끄고 알림 문구 「신호가 없어요」가 납득되는지 확인 |
+| V2-12 | S2.4 | 실제 시간대·서머타임 경계에서 발생 시각과 알림 시각표기 | [판정 2026-11-07: 맥에서 확인 필요] 실기기 시간대 변경 필요 | 맥의 시간대를 바꾼 뒤 서버 `plan_occurrences.start_at_utc_ms`와 알림의 시각이 계획 시각과 같은지 확인 |
+
+### Windows PC 검증 결과 (2026-11-07)
+
+환경: Windows 11 x64, rustc 1.99.1. 스텁 PostgreSQL 16.4는 실제 Supabase가 아니다(GoTrue·PostgREST·Realtime·Vault·pg_cron 없음, pgTAP 대신 pgtap-lite).
+
+| ID | 판정 | 명령 | 결과(종료코드·개수) | 비고 |
+|---|---|---|---|---|
+| V2-1 | 사람 확인(MANUAL-CHECKLIST) | 없음 | 실행 안 함 | 실계정·실제 PC 종료·실제 폰 필요 |
+| V2-2 | 사람 확인(MANUAL-CHECKLIST) | 없음 | 실행 안 함 | Windows Credential Manager와 macOS 팝업 모두 GUI 필요. 맥 쪽은 맥에서도 확인 |
+| V2-3 | 사람 확인(MANUAL-CHECKLIST) | `pnpm build:web`, `pnpm test` | 종료 0, 72파일 511개 통과 | 정적·단위 시험만. 실제 렌더·레이아웃은 GUI를 보지 않았다 |
+| V2-4 | 사람 확인(MANUAL-CHECKLIST) | 없음 | 실행 안 함 | 실제 Supabase 프로젝트 필요 |
+| V2-5 | 사람 확인(MANUAL-CHECKLIST) | 없음 | 실행 안 함 | 실제 메일·프로젝트 필요 |
+| V2-6 | 맥에서 확인 필요 | 없음 | 실행 안 함 | 맥북 덮개 수면·깨어남 필요 |
+| V2-7 | 사람 확인(MANUAL-CHECKLIST) | 없음 | 실행 안 함 | 실제 계정·Edge Function 배포·pg_cron 필요 |
+| V2-8 | 부분 | `supabase/tests/stub/run.ps1` (스텁 PG 16.4, 마이그레이션 8개 적용 후 `rls_*.sql` 7개 실행) | 마이그레이션 오류 없음. `rls_s2` 18/18, `rls_s4` 26/26, `rls_s4_profile` 27/27, `rls_s4_shared_wiki` 22/22, `rls_s5_anonymous_guard` 23/23, `rls_s5_notify_phone_app` 4/4, `rls_s5_phone` 52/52 (합계 172). 음성 대조(anon에 devices select 부여)는 의도대로 1개 단언 실패 | 스텁이라 부분. 실제 `supabase test db`·`supabase db push`는 Docker·WSL2·CLI 없어 미실행 |
+| V2-9 | 사람 확인(MANUAL-CHECKLIST) | 없음 | 실행 안 함 | 실제 Google/Apple 내보내기 파일 필요 |
+| V2-10 | 사람 확인(MANUAL-CHECKLIST) | 없음 | 실행 안 함 | 실제 폰·ntfy 앱 필요 |
+| V2-11 | 사람 확인(MANUAL-CHECKLIST) | 없음 | 실행 안 함 | 실사용 체감 판단 필요 |
+| V2-12 | 맥에서 확인 필요 | 없음 | 실행 안 함 | 맥의 시간대 변경 필요 |
 
 ## 알려진 잔여 위험 (수용·추적)
 
