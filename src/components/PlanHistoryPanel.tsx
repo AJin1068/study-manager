@@ -1,7 +1,7 @@
 import { useCallback, useEffect } from 'react';
 import { commands, onPlansChanged, type PlanHistoryEntry } from '../api';
 import { useAsync } from '../hooks/useAsync';
-import { describeHistoryEntry, formatAt, reasonLabel } from '../pages/calendarLogic';
+import { formatAt, historyParts, reasonLabel } from '../pages/calendarLogic';
 
 const HISTORY_LIMIT = 100;
 
@@ -11,19 +11,43 @@ interface Props {
   month: string;
   /** Bumped by the parent after its own changes so both lists refetch together. */
   refreshKey: number;
+  /** The history screen shows the stats in its own heading. */
+  hideStats?: boolean;
+}
+
+/** Moves and deletions are the "밀림 / 취소" the mockup highlights. */
+function tag(entry: PlanHistoryEntry): { text: string; className: string } | null {
+  if (entry.outcome === 'rejected_locked') return { text: '거절', className: 'p-bad' };
+  if (entry.action === 'delete') return { text: '취소', className: 'p-bad' };
+  if (entry.action === 'move' && entry.reasonCode !== 'created') return { text: '밀림', className: 'p-break' };
+  return null;
 }
 
 function HistoryRow({ entry }: { entry: PlanHistoryEntry }) {
+  const parts = historyParts(entry);
+  const pill = tag(entry);
   return (
-    <li className={entry.outcome === 'rejected_locked' ? 'locked' : undefined}>
+    <li className={pill !== null ? 'tl-warn' : undefined}>
       <div className="when">{formatAt(entry.atMs)}</div>
-      {describeHistoryEntry(entry)} · {reasonLabel(entry.reasonCode)}
-      {entry.reasonText ? ` (${entry.reasonText})` : ''}
+      <b>{parts.head}</b> {pill !== null && <span className={`pill ${pill.className}`}>{pill.text}</span>}
+      {(parts.before !== '' || parts.after !== '') && (
+        <div className="diff">
+          {parts.before !== '' && <s>{parts.before}</s>}
+          {parts.before !== '' && parts.after !== '' && <span aria-hidden="true">→</span>}
+          {parts.after !== '' && <span>{parts.after}</span>}
+        </div>
+      )}
+      {(reasonLabel(entry.reasonCode) !== '' || entry.reasonText) && (
+        <div className="hint">
+          이유: {reasonLabel(entry.reasonCode)}
+          {entry.reasonText ? ` (${entry.reasonText})` : ''}
+        </div>
+      )}
     </li>
   );
 }
 
-export function PlanHistoryPanel({ planId, month, refreshKey }: Props) {
+export function PlanHistoryPanel({ planId, month, refreshKey, hideStats = false }: Props) {
   const loadHistory = useCallback(
     () => commands.getPlanHistory(planId ?? undefined, HISTORY_LIMIT),
     [planId],
@@ -56,24 +80,21 @@ export function PlanHistoryPanel({ planId, month, refreshKey }: Props) {
   }, [reloadHistory, reloadStats]);
 
   return (
-    <section className="card" aria-labelledby="history-title">
-      <h2 id="history-title">수정 히스토리</h2>
-      {stats.error !== null && <p className="error">통계를 읽지 못했습니다: {stats.error}</p>}
-      {stats.data && (
-        <p>
-          {stats.data.month} 밀린 횟수: <strong>{stats.data.postponedCount}회</strong>
-          {stats.data.bySubject.length > 0 && (
-            <>
-              {' '}· 자주 밀리는 과목:{' '}
-              {stats.data.bySubject.map((s) => `${s.subject} ${s.count}회`).join(', ')}
-            </>
-          )}
+    <section className={hideStats ? 'timeline' : 'card'} aria-labelledby="history-title">
+      <h2 id="history-title" className={hideStats ? 'visually-hidden' : undefined}>
+        {planId === null ? '수정 히스토리' : '선택한 계획의 수정 히스토리'}
+      </h2>
+      {!hideStats && stats.error !== null && <p className="error">통계를 읽지 못했습니다: {stats.error}</p>}
+      {!hideStats && stats.data && (
+        <p className="hint">
+          {stats.data.month} 밀린 횟수 {stats.data.postponedCount}회
+          {stats.data.bySubject.length > 0 &&
+            ` · 자주 밀리는 과목: ${stats.data.bySubject.map((s) => `${s.subject} ${s.count}회`).join(', ')}`}
         </p>
       )}
-      <p className="hint">{planId === null ? '전체 기록' : '선택한 계획의 기록'}</p>
       {history.error !== null && <p className="error">히스토리를 읽지 못했습니다: {history.error}</p>}
-      {history.data === null && history.error === null && <p>불러오는 중</p>}
-      {history.data && history.data.length === 0 && <p>기록이 없습니다.</p>}
+      {history.data === null && history.error === null && <p className="hint">불러오는 중</p>}
+      {history.data && history.data.length === 0 && <p className="hint">아직 계획을 바꾼 기록이 없어요.</p>}
       {history.data && history.data.length > 0 && (
         <ul className="tl">
           {history.data.map((entry) => (

@@ -384,3 +384,15 @@ export function formatAt(atMs: number): string {
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
+
+/** The pieces of a history row for the timeline: what happened, the old and new slot. */
+export function historyParts(entry: PlanHistoryEntry): { head: string; before: string; after: string } {
+  const head = entry.outcome === 'rejected_locked' ? `${actionLabel(entry.action)} (거절됨: 잠금 중)` : actionLabel(entry.action);
+  const before = parseSnapshot(entry.beforeJson);
+  const after = parseSnapshot(entry.afterJson);
+  return {
+    head,
+    before: before === null ? '' : describeSnapshot(before),
+    after: after === null ? '' : describeSnapshot(after),
+  };
+}

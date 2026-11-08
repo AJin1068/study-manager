@@ -112,3 +112,19 @@ export function groupItems(items: ShopItemView[]): ShopGroup[] {
   groups.push({ key: 'character', label: '캐릭터 친구', items: items.filter((i) => i.kind === 'character') });
   return groups.filter((g) => g.items.length > 0);
 }
+
+const POINT_REASON: Record<string, string> = {
+  focus_window: '30분 집중 달성',
+  start_bonus: '계획 시간에 바로 시작',
+  emergency_pass: '긴급 패스 사용',
+  run_aborted: '계획 중간에 그만둠',
+  quiz_bonus: '위키 퀴즈 정답',
+  shop_purchase: '상점 구매',
+  gift_sent: '선물 보냄',
+  gift_refund: '선물 환불',
+};
+
+/** Korean label for a point-ledger reason code; unknown codes show as stored. */
+export function pointReasonLabel(code: string): string {
+  return POINT_REASON[code] ?? code;
+}

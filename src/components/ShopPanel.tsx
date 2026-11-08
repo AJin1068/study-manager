@@ -49,27 +49,25 @@ export function ShopPanel(props: { onCharacter: (view: CharacterView) => void })
         shop.error === null && <p>불러오는 중</p>
       ) : (
         <>
-          <p>보유 포인트 {shop.data.balance}P</p>
-          {groupItems(shop.data.items).map((group) => (
-            <div key={group.key}>
-              <h3>{group.label}</h3>
-              <ul className="shop-list">
-                {group.items.map((item) => {
-                  const action = itemAction(item);
-                  const disabled = busy || action === 'locked' || action === 'owned' || (action === 'buy' && !item.affordable);
-                  return (
-                    <li key={item.id} className="row">
-                      <span>{item.label}</span>
-                      <span className="hint">{itemPriceText(item)}</span>
-                      <button type="button" disabled={disabled} onClick={() => act(item)}>
-                        {label[action]}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ))}
+          <p className="hint">보유 포인트 <b className="mono">{shop.data.balance.toLocaleString()}P</b></p>
+          <ul className="shop">
+            {groupItems(shop.data.items).flatMap((group) =>
+              group.items.map((item) => {
+                const action = itemAction(item);
+                const disabled = busy || action === 'locked' || action === 'owned' || (action === 'buy' && !item.affordable);
+                return (
+                  <li key={item.id} className={`item${action === 'unequip' ? ' on' : ''}${action === 'locked' ? ' dim' : ''}`}>
+                    <span className="pill p-plain">{group.label}</span>
+                    <b>{item.label}</b>
+                    <div className="cost">{itemPriceText(item)}</div>
+                    <button type="button" disabled={disabled} onClick={() => act(item)}>
+                      {label[action]}
+                    </button>
+                  </li>
+                );
+              }),
+            )}
+          </ul>
         </>
       )}
       {note !== null && <p role="status" className="message">{note}</p>}
