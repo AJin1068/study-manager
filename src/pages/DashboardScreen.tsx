@@ -46,12 +46,14 @@ function TodayView() {
       {(t) => (
         <section className="card" aria-labelledby="today-title">
           <h2 id="today-title">오늘 ({t.date})</h2>
-          <p>
-            다음 계획: <strong>{nextPlanText(t)}</strong>
-          </p>
-          <p>
-            계획 대비 실제: {durationText(t.actualMs)} / {durationText(t.plannedMs)} ({pctText(t.achievementPct)})
-          </p>
+          <div className="kv">
+            <span>다음 계획</span>
+            <b>{nextPlanText(t)}</b>
+            <span>계획 대비 실제</span>
+            <b>
+              {durationText(t.actualMs)} / {durationText(t.plannedMs)} ({pctText(t.achievementPct)})
+            </b>
+          </div>
           <div className="bar" role="img" aria-label={`오늘 달성 ${pctText(t.achievementPct)}`}>
             <div className="bar-fill" style={{ width: `${barPercent(t.actualMs, t.plannedMs)}%` }} />
           </div>

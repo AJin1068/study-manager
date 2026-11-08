@@ -16,7 +16,8 @@ interface Props {
 function HistoryRow({ entry }: { entry: PlanHistoryEntry }) {
   return (
     <li className={entry.outcome === 'rejected_locked' ? 'locked' : undefined}>
-      {formatAt(entry.atMs)} · {describeHistoryEntry(entry)} · {reasonLabel(entry.reasonCode)}
+      <div className="when">{formatAt(entry.atMs)}</div>
+      {describeHistoryEntry(entry)} · {reasonLabel(entry.reasonCode)}
       {entry.reasonText ? ` (${entry.reasonText})` : ''}
     </li>
   );
@@ -74,7 +75,7 @@ export function PlanHistoryPanel({ planId, month, refreshKey }: Props) {
       {history.data === null && history.error === null && <p>불러오는 중</p>}
       {history.data && history.data.length === 0 && <p>기록이 없습니다.</p>}
       {history.data && history.data.length > 0 && (
-        <ul className="list">
+        <ul className="tl">
           {history.data.map((entry) => (
             <HistoryRow key={entry.id} entry={entry} />
           ))}

@@ -30,10 +30,14 @@ export function TimerPanel({ timer }: { timer: TimerView }) {
 
   return (
     <div className="timer-panel">
-      <p>
-        <strong>{phaseText(state)}</strong>
-        {left !== null && <span className="countdown"> {formatRemaining(left)} 남음</span>}
-      </p>
+      <div className="timer-now">
+        <span className="pill p-study">{phaseText(state)}</span>
+        {left !== null && (
+          <p className="countdown">
+            <span className="big">{formatRemaining(left)}</span> 남음
+          </p>
+        )}
+      </div>
       {state.next !== null && <p className="hint">다음 계획: {nextPlanText(state.next)}</p>}
       {timer.breakEndingSoon && <p className="hint">곧 공부가 시작됩니다. (1분 전)</p>}
       {timer.lastSet !== null && <p className="hint">{setSummaryText(timer.lastSet)}</p>}
