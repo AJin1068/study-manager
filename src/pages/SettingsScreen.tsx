@@ -155,7 +155,7 @@ export function SettingsScreen() {
                 checked={current.relaunchOnKill}
                 onChange={(e) => void change('relaunchOnKill', e.target.checked)}
               />
-              강제 종료되면 다시 실행 (macOS)
+              강제 종료되면 다시 실행
             </label>
             <p className="hint">
               앱이 강제 종료(kill)되거나 비정상 종료되면 자동으로 다시 실행합니다. 정상 종료는 다시 실행하지 않으며, 로그인 시 자동 실행이 켜져 있어야 합니다. 꺼져 있던 시간은 통계에 표시됩니다.
